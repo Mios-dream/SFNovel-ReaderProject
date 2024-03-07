@@ -1,8 +1,9 @@
-import { SfacgClient } from "./client/sfacg/client";
-import fs from 'fs';
-import path from "path"
+import { SfacgClient } from "./client/sfacg/client"
 
-const client = new SfacgClient();
-client.login("715494637", "dddd1111").then(userSession => {
-    fs.writeFileSync("sfacg.json",userSession)
-});
+
+(async ()=> {
+    const sfacg = new SfacgClient()
+    let a = await sfacg.login("13696458853", "dddd1111")
+    let b = await sfacg.userInfo()
+    console.log(a)
+})()

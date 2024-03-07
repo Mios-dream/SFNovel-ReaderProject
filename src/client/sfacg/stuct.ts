@@ -1,12 +1,7 @@
-import { URL } from 'url';
+interface ResUserInfo{
 
-
-// You would need actual implementation for an Image class, this is just a placeholder
-
-export interface AccountInfo {
-    username: string
-    password: string
 }
+
 
 export class UserInfo {
     nickname: string;
@@ -152,11 +147,8 @@ export interface Client {
     // Add cookie
     addAconut(userName: string, passWord: string, outPutPATH: URL): void;
 
-    // Quary account
-    queryAcconut(userName: string, passWord: string): Promise<boolean>
-
-    // Login
-    login(username: string, password: string): Promise<void>;
+    // Login and CheckAccout usable
+    login(username: string, password: string): Promise<Boolean>;
 
     // Get the information of the logged-in user
     userInfo(): Promise<UserInfo | null>;

@@ -1,6 +1,5 @@
-import { Category, ChapterInfo, NovelInfo, Options, Tag, UserInfo, VolumeInfos, AccountInfo, Client } from '../common/client';
-import { URL } from 'url';
-import { SFACG } from './utils';
+import { Category, ChapterInfo, NovelInfo, Options, Tag, UserInfo, VolumeInfos, Client } from './stuct';
+import { SFACG } from './http';
 import fs from 'fs';
 import path from 'path';
 
@@ -8,42 +7,45 @@ import path from 'path';
 export class SfacgClient extends SFACG implements Client {
   
     addAconut(userName: string, passWord: string): void {
-        const accountInfo: AccountInfo = {
+        const accountToAdd = {
             username: userName,
             password: passWord
         }
-        
         const outputFloder = path.join( SFACG.APP_NAME, 'Config')
         const outputFile = path.join(outputFloder, 'Acoount.json')
         if (!fs.existsSync(outputFloder)) {
             fs.mkdirSync(outputFloder)
         }
         if (!fs.existsSync(outputFile)) {
-            fs.writeFileSync(outputFile, JSON.stringify(accountInfo))
+            fs.writeFileSync(outputFile, JSON.stringify(accountToAdd))
+        } else {
+            let accountInfo = {}
         }
-        fs.realpathSync
     }
 
-    async queryAcconut(serName: string, passWord: string): Promise<boolean> {
-        return true
+    async login(username: string, password: string): Promise<Boolean> {
+        try {
+            let res: any = await this.post("/sessions", {
+            userName: username,
+            passWord: password
+            });
+            return (res.status == 200)?true:false
+        } catch (err: any) {
+            console.error(`${username} LOGIN failed : ${JSON.stringify(err.response.data.status.msg)}`)
+            return false;
+        }
     }
 
-    async login(username: string, password: string): Promise<any> {
-        
-        const userSession = await this.post("/sessions", {
-            user_name: username,
-            pass_word: password
-        });
-        return userSession;
-    }
-    
-    async userInfo(): Promise<UserInfo | null> {
-     
-        return null
+    async userInfo(): Promise<any> {
+        try {
+            let res: any = await this.get("/user")
+            return res.data.data
+        } catch (err: any) {
+            console.error(`An error occured GET UserInfo : ${JSON.stringify(err.response.data.status.msg)}`)
+        }
     }
 
     async novelInfo(id: number): Promise<NovelInfo | null> {
-        
         return null
     }
 
