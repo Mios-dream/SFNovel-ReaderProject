@@ -1,25 +1,14 @@
-import { Category, ChapterInfo, NovelInfo, Options, Tag, UserInfo, VolumeInfos, Client } from './stuct';
+
 import { SFACG } from './http';
 import fs from 'fs';
 import path from 'path';
 
-
-export class SfacgClient extends SFACG implements Client {
+export class SfacgClient extends SFACG  {
   
     addAconut(userName: string, passWord: string): void {
         const accountToAdd = {
             username: userName,
             password: passWord
-        }
-        const outputFloder = path.join( SFACG.APP_NAME, 'Config')
-        const outputFile = path.join(outputFloder, 'Acoount.json')
-        if (!fs.existsSync(outputFloder)) {
-            fs.mkdirSync(outputFloder)
-        }
-        if (!fs.existsSync(outputFile)) {
-            fs.writeFileSync(outputFile, JSON.stringify(accountToAdd))
-        } else {
-            let accountInfo = {}
         }
     }
 
@@ -29,7 +18,7 @@ export class SfacgClient extends SFACG implements Client {
             userName: username,
             passWord: password
             });
-            return (res.status == 200)?true:false
+            return (res.status == 200)? true : false
         } catch (err: any) {
             console.error(`${username} LOGIN failed : ${JSON.stringify(err.response.data.status.msg)}`)
             return false;
@@ -39,24 +28,39 @@ export class SfacgClient extends SFACG implements Client {
     async userInfo(): Promise<any> {
         try {
             let res: any = await this.get("/user")
-            return res.data.data
+            return res.data?.data ?? false
         } catch (err: any) {
-            console.error(`An error occured GET UserInfo : ${JSON.stringify(err.response.data.status.msg)}`)
+            console.error(`GET userInfo failed : ${JSON.stringify(err.response.data.status.msg)}`)
         }
     }
 
-    async novelInfo(id: number): Promise<NovelInfo | null> {
-        return null
+    async novelInfo(id: number): Promise<any> {
+        try {
+            let res: any = await this.get(`/novels/${id}`, { expand: "intro,typeName,sysTags"})
+            return res.data?.data ?? false
+        } catch (err: any) {
+            console.error(`GET novelInfo failed: ${JSON.stringify(err.response.data.status.msg)}`)
+        }
     }
 
-    async volumeInfos(id: number): Promise<VolumeInfos> {
-        
-        return []
+    async volumeInfos(id: number): Promise<any> {
+        try {
+            let res: any = await this.get(`/novels/${id}/dirs`)
+            return res.data?.data ?? false
+        } catch (err: any) {
+            console.error(`GET volumeInfos failed: ${JSON.stringify(err.response.data.status.msg)}`)
+        }
     }
 
-    async contentInfos(info: ChapterInfo): Promise<any> {
-        
+    async contentInfos(id: any): Promise<any> {
+        try {   
+            let res: any = await this.get(`/Chaps/${id}`,{ expand: "content" })
+            return res.data?.data ?? false
+        } catch (err: any) {
+            console.error(`GET contentInfos failed: ${JSON.stringify(err.response.data.status.msg)}`)
+        }
     }
+    
 
     async image(url: URL): Promise<any> {
       
@@ -73,17 +77,17 @@ export class SfacgClient extends SFACG implements Client {
         return []
     }
 
-    async categories(): Promise<Category[]> {
+    async categories(): Promise<any[]> {
         
         return []
     }
 
-    async tags(): Promise<Tag[]> {
+    async tags(): Promise<any> {
        
         return []
     }
 
-    async novels(option: Options, page: number, size: number): Promise<number[]> {
+    async novels(option: any, page: number, size: number): Promise<number[]> {
         
         return []
     }

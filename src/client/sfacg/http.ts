@@ -35,7 +35,7 @@ export class SFACG {
                 "Accept": "application/vnd.sfacg.api+json;version=1",
                 "Accept-Language": "zh-Hans-CN;q=1",
                 'User-Agent': SFACG.USER_AGENT_PREFIX + SFACG.DEVICE_TOKEN,
-                'sfsecurity': this.sfSecurity(),
+                'SFSecurity': this.sfSecurity(),
             },
         }));
         // 初始化rss client实例
@@ -63,7 +63,7 @@ export class SFACG {
                 jar: this.cookieJar, params: query
             })
             return response
-        }
+        }   
         catch (err: any) {
             throw err
         }
