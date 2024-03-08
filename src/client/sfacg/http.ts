@@ -18,35 +18,13 @@ export class SFACG {
     static DEVICE_TOKEN = uuidv4().toUpperCase()
 
     client: AxiosInstance
-    clientRss: AxiosInstance
+    clientRss?: AxiosInstance 
     cookieJar: CookieJar
 
     constructor() {
         this.cookieJar = new CookieJar();
-        // 初始化axios实例
-        this.client = wrapper(axios.create({
-            withCredentials: true,
-            baseURL: SFACG.HOST,
-            auth: {
-                username: SFACG.USERNAME,
-                password: SFACG.PASSWORD
-            },
-            headers: {
-                "Accept": "application/vnd.sfacg.api+json;version=1",
-                "Accept-Language": "zh-Hans-CN;q=1",
-                'User-Agent': SFACG.USER_AGENT_PREFIX + SFACG.DEVICE_TOKEN,
-                'SFSecurity': this.sfSecurity(),
-            },
-        }));
-        // 初始化rss client实例
-        this.clientRss = wrapper(axios.create({
-            baseURL: SFACG.HOST,
-            headers: {
-                'User-Agent': SFACG.USER_AGENT_RSS,
-                'Accept': 'image/webp,image/*,*/*;q=0.8',
-                'Accept-Language': 'zh-CN,zh-Hans;q=0.9'
-            }
-        }))
+        this.client = this._client()
+        this.clientRss = this._clientRss()
     }
 
     setProxy(proxyUrl: string): void {
@@ -59,6 +37,7 @@ export class SFACG {
     async get<T, E = any>(url: string, query?: E): Promise<T> {
         let response: any
         try {
+            (url.startsWith("/Chaps")?this.client = this._client():"")
             response = await this.client.get<T>(url, {
                 jar: this.cookieJar, params: query
             })
@@ -70,7 +49,6 @@ export class SFACG {
     }
 
     async get_rss<E>(url: string): Promise<E> {
-
         let response: any
         try {
             response = await this.client.get(url, {
@@ -103,6 +81,36 @@ export class SFACG {
         const data = `${uuid}${timestamp}${SFACG.DEVICE_TOKEN}${SFACG.SALT}`;
         const hash = crypto.createHash('md5').update(data).digest('hex').toUpperCase();
         return `nonce=${uuid}&timestamp=${timestamp}&devicetoken=${SFACG.DEVICE_TOKEN}&sign=${hash}`;
+    }
+
+    private _client() {
+       // 初始化axios实例
+        return wrapper(axios.create({
+            withCredentials: true,
+            baseURL: SFACG.HOST,
+            auth: {
+                username: SFACG.USERNAME,
+                password: SFACG.PASSWORD
+            },
+            headers: {
+                "Accept": "application/vnd.sfacg.api+json;version=1",
+                "Accept-Language": "zh-Hans-CN;q=1",
+                'User-Agent': SFACG.USER_AGENT_PREFIX + SFACG.DEVICE_TOKEN,
+                'SFSecurity': this.sfSecurity(),
+            },
+        }));
+    }
+
+    private _clientRss() {
+           // 初始化rss client实例
+        return this.clientRss = wrapper(axios.create({
+            baseURL: SFACG.HOST,
+            headers: {
+                'User-Agent': SFACG.USER_AGENT_RSS,
+                'Accept': 'image/webp,image/*,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh-Hans;q=0.9'
+            }
+        }))
     }
 
 }

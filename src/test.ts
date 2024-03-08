@@ -28,8 +28,6 @@ import fs from "fs"
     console.log(contentInfos)
     fs.writeFileSync("./TESTDATA/contentInfos.json", JSON.stringify(contentInfos))
 
-    console.log(sfacg.sfSecurity())
-
 
 })()
 
