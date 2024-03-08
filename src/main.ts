@@ -1,4 +1,4 @@
-import { SfacgClient } from "./client/sfacg/client"
+import { SfacgClient } from "./client/Sfacg/client"
 import fs from "fs"
 (async () => {
     const sfacg = new SfacgClient()
@@ -24,12 +24,9 @@ import fs from "fs"
     fs.writeFileSync("./TESTDATA/volumeInfos.json", JSON.stringify(volumeInfos))
     
     // 书本内容
-    const contentInfos = await sfacg.contentInfos("2824824")
+    const contentInfos = await sfacg.contentInfos(2824824)
     console.log(contentInfos)
     fs.writeFileSync("./TESTDATA/contentInfos.json", JSON.stringify(contentInfos))
-
-    
-
 
 })()
 
