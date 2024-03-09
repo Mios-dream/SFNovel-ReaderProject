@@ -1,12 +1,7 @@
 import CONFIG from "../config";
 import path from "path";
 import fs from "fs";
-interface acconutInfo{
-    userName: string,
-    passWord: string,
-    nickName: string,
-    updateAt: string
-}
+
 
 export default class SFTOOL {
   private accountFile?: any;
@@ -15,7 +10,7 @@ export default class SFTOOL {
     this.accountFile = path.join(CONFIG.ACCOUNT_SAVE, `${APP_NAME}.json`);
   }
 
-  addAccount(acconutInfo: acconutInfo) {
+  addAccount(acconutInfo: any) {
     let oldAccountList = this.getAccountList();
       oldAccountList.unshift(acconutInfo);
       

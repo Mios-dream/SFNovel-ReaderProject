@@ -4,6 +4,7 @@ import {
   categories,
   contentInfos,
   novelInfo,
+  tags,
   userInfo,
   volumeInfos,
 } from "./types/Types";
@@ -38,9 +39,7 @@ export class SfacgClient extends SFACG {
 
   async novelInfo(id: number): Promise<any> {
     try {
-      let res: any = await this.get<novelInfo>(`/novels/${id}`, {
-        expand: "intro,typeName,sysTags",
-      });
+      let res = await this.get<novelInfo>(`/novels/${id}`);
       return res ?? false;
     } catch (err: any) {
       console.error(
@@ -64,9 +63,7 @@ export class SfacgClient extends SFACG {
 
   async contentInfos(id: number): Promise<any> {
     try {
-      let res = await this.get<contentInfos>(`/Chaps/${id}`, {
-        expand: "content",
-      });
+      let res = await this.get<contentInfos>(`/Chaps/${id}`);
       return res ?? false;
     } catch (err: any) {
       console.error(
@@ -77,28 +74,27 @@ export class SfacgClient extends SFACG {
     }
   }
 
+  // 咕咕咕。。。
   async image(url: string): Promise<any> {
     const response: Buffer = await this.get_rss(url);
     return response;
   }
 
-  async searchInfos<T>(text: T, page: number, size: number): Promise<any> {
+  async searchInfos(text: string, page: number, size: number): Promise<any> {
     const res = await this.get<any>("/search/novels/result/new", {
-      params: {
-        page,
-        q: text,
-        size,
-        sort: "hot",
-      },
+      "page": page,
+      "q": text,
+      "size": size,
+      "sort": "hot",
     });
-    return res ?? false;
+    return res;
   }
 
   async bookshelfInfos(): Promise<any> {
     const res = await this.get<bookshelfInfos>("/user/Pockets", {
-      expand: "novels,albums,comics",
+      "expand": "novels,albums,comics",
     });
-    return res  ?? false;
+    return res ?? false;
   }
 
   async categories(): Promise<any> {
@@ -107,11 +103,19 @@ export class SfacgClient extends SFACG {
   }
 
   async tags(): Promise<any> {
-    const res = await this.get<categories>("/novels/0/sysTags");
+    const res = await this.get<tags>("/novels/0/sysTags");
+    /**
+     * // // tags to add // //
+     * {
+     *     id: 74
+     *     name: "百合"
+     * }
+     */
     return res ?? false;
   }
 
-  async novels(option: any, page: number, size: number): Promise<number[]> {
-    return [];
+  async novels(categoryid: string): Promise<any> {
+    const res = await this.get(`/novels/${categoryid}/sysTags/novels`);
+    return res ?? false;
   }
 }

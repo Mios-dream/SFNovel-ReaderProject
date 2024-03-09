@@ -31,8 +31,8 @@ import fs from "fs";
     JSON.stringify(contentInfos)
   );
 
-  //
-  const searchInfos = await sfacg.searchInfos("屠龙", 1, 1);
+  // 搜索小说信息
+  const searchInfos = await sfacg.searchInfos("屠龙", 0, 10);
   console.log(searchInfos);
   fs.writeFileSync("./TESTDATA/searchInfos.json", JSON.stringify(searchInfos));
 
@@ -52,4 +52,8 @@ import fs from "fs";
   const tags = await sfacg.tags();
   console.log(tags);
   fs.writeFileSync("./TESTDATA/tags.json", JSON.stringify(tags));
+
+  const novels = await sfacg.novels("0");
+  console.log(novels);
+  fs.writeFileSync("./TESTDATA/novels.json", JSON.stringify(novels));
 })();

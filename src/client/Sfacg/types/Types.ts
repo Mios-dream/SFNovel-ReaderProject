@@ -192,19 +192,47 @@ export interface _novel {
   stickyDateTime: any; // 置顶时间
   markDateTime: string; // 标记时间
 }
+// 描述标签信息的接口
+export interface tags {
+  sysTagId: number; // 系统标签ID
+  refferTimes: number; // 引用次数
+  tagName: string; // 标签名称
+  imageUrl: string; // 标签图片URL
+  novelCount: number; // 小说数量
+  isDefault: boolean; // 是否是默认标签
+  linkUrl: object; // 关联的URL（应更详细地定义对象类型）
+  introUrl: object; // 介绍页面的URL（应更详细地定义对象类型）
+}
+[];
 
+// 描述搜索信息的接口
+export interface searchInfos {
+  novels: searchInfos_novel[]; // 小说搜索结果数组
+  comics: any; // 漫画搜索结果
+  albums: any; // 专辑搜索结果
+  booklist: any; // 书单搜索结果
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// 描述搜索到的小说信息的接口
+export interface searchInfos_novel {
+  authorId: number; // 作者ID
+  lastUpdateTime: string; // 最后更新时间
+  markCount: number; // 标记次数
+  novelCover: string; // 小说封面URL
+  bgBanner: string; // 背景横幅URL
+  novelId: number; // 小说ID
+  novelName: string; // 小说名称
+  point: number; // 小说得分
+  isFinish: boolean; // 是否已完结
+  authorName: string; // 作者名称
+  charCount: number; // 字数
+  viewTimes: number; // 查看次数
+  typeId: number; // 类型ID
+  allowDown: boolean; // 是否允许下载
+  addTime: string; // 添加时间
+  isSensitive: boolean; // 是否敏感内容
+  signStatus: string; // 签名状态
+  categoryId: number; // 分类ID
+  weight: number; // 权重
+  Highlight: string[]; // 高亮显示的字段数组
+}

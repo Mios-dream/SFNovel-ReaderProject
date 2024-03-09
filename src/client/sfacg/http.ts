@@ -1,5 +1,4 @@
-import CONFIG from "../config";
-import axios, { AxiosInstance } from "axios";
+import axios, { AxiosDefaults, AxiosInstance, AxiosResponse } from "axios";
 import { v4 as uuidv4 } from "uuid";
 import { wrapper } from "axios-cookiejar-support";
 import { CookieJar } from "tough-cookie";
@@ -7,7 +6,6 @@ import { CookieJar } from "tough-cookie";
 const crypto = require("crypto");
 
 export class SFACG {
-
   static readonly HOST = "https://api.sfacg.com";
   static readonly USER_AGENT_PREFIX = "boluobao/4.9.76(iOS;16.6)/appStore/";
   static readonly USER_AGENT_RSS =
@@ -35,31 +33,36 @@ export class SFACG {
   }
 
   async get<T, E = any>(url: string, query?: E): Promise<T> {
-    let response: any;
+    let response: AxiosResponse
     try {
-      url.startsWith("/Chaps") ? (this.client = this._client()) : "";
+      url.startsWith("/Chaps")
+        ? (this.client = this._client())
+        : "";
       response = await this.client.get<T>(url, {
         jar: this.cookieJar,
+        // 这里好像没起作用，但是不影响啦~
         params: query,
       });
-      return url.startsWith("/sessions") ? response.data.status: response.data.data;
+      return url.startsWith("/sessions")
+        ? response.data.status
+        : response.data.data;
     } catch (err: any) {
       throw err;
     }
   }
 
   async get_rss<E>(url: string): Promise<E> {
-    let response: any;
+    let response: AxiosResponse;
     try {
       response = await this.clientRss.get(url, {
         jar: this.cookieJar,
       });
-      return response;
+      return response.data;
     } catch (err: any) {
       console.error(`An error occurred GETt_RSS: ${err.data}`);
       throw err;
     }
-    }
+  }
 
   async post<T, E>(url: string, data: E): Promise<T> {
     let response: any;
@@ -67,7 +70,7 @@ export class SFACG {
       response = await this.client.post<T>(url, data, {
         jar: this.cookieJar,
       });
-      return response;
+      return response.status;
     } catch (err) {
       console.error(`An error ocured POST ${(err as Error).message}`);
       throw err;
