@@ -42,7 +42,7 @@ export class SFACG {
         jar: this.cookieJar,
         params: query,
       });
-      return response;
+      return url.startsWith("/sessions") ? response.data.status: response.data.data;
     } catch (err: any) {
       throw err;
     }
