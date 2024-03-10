@@ -104,7 +104,7 @@ export class SfacgClient extends SfacgHttp {
     const res = await this.get<bookshelfInfos>("/user/Pockets", {
       expand: "novels,albums,comics",
     });
-    
+
     return res ?? false;
   }
 
@@ -137,8 +137,14 @@ export class SfacgClient extends SfacgHttp {
     return res ?? false;
   }
 
-  async orderChap(chapId: string) {
-    const res = await this.get(`/novels/${chapId}/orderedchaps`);
+  async orderChap(novelId: string, chapId: number[]) {
+    const res = await this.get(`/novels/${chapId}/orderedchaps`, {
+      orderType: "readOrder",
+      orderAll: false,
+      novelId: novelId,
+      autoOrder: false,
+      chapIds: [chapId],
+    });
     return res ?? false;
   }
 }
