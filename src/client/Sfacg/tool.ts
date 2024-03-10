@@ -3,11 +3,11 @@ import path from "path";
 import fs from "fs";
 
 
-export default class SfacgTool {
+export class SfacgTool {
   private accountFile?: any;
 
   constructor(APP_NAME: any) {
-    this.accountFile = path.join(CONFIG.ACCOUNT_SAVE, `${APP_NAME}.json`);
+    this.accountFile = path.join(CONFIG.ACCOUNT_SAVEFILE, `${APP_NAME}.json`);
   }
 
   addAccount(acconutInfo: any) {

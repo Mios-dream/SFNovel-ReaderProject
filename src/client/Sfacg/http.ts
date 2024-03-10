@@ -34,44 +34,38 @@ export class SfacgHttp {
 
   async get<T, E = any>(url: string, query?: E): Promise<T> {
     let response: AxiosResponse;
-    try {
-      url.startsWith("/Chaps") ? (this.client = this._client()) : "";
-      response = await this.client.get<T>(url, {
-        jar: this.cookieJar,
-        params: query,
-      });
-      return url.startsWith("/sessions")
-        ? response.data.status
-        : response.data.data;
-    } catch (err: any) {
-      throw err;
-    }
+    url.startsWith("/Chaps") ? (this.client = this._client()) : "";
+    response = await this.client.get<T>(url, {
+      jar: this.cookieJar,
+      params: query,
+    });
+    return url.startsWith("/sessions")
+      ? response.data.status
+      : response.data.data;
   }
 
   async get_rss<E>(url: string): Promise<E> {
     let response: AxiosResponse;
-    try {
-      response = await this.clientRss.get(url, {
-        jar: this.cookieJar,
-      });
-      return response.data;
-    } catch (err: any) {
-      console.error(`An error occurred GETt_RSS: ${err.data}`);
-      throw err;
-    }
+    response = await this.clientRss.get(url, {
+      jar: this.cookieJar,
+    });
+    return response.data;
   }
 
   async post<T, E>(url: string, data: E): Promise<T> {
     let response: any;
-    try {
-      response = await this.client.post<T>(url, data, {
-        jar: this.cookieJar,
-      });
-      return response.status;
-    } catch (err) {
-      console.error(`An error ocured POST ${(err as Error).message}`);
-      throw err;
-    }
+    response = await this.client.post<T>(url, data, {
+      jar: this.cookieJar,
+    });
+    return response.status;
+  }
+
+  async put<T, E>(url: string, data: E): Promise<T> {
+    let response: any;
+    response = await this.client.put<T>(url, data, {
+      jar: this.cookieJar,
+    });
+    return response.data;
   }
 
   sfSecurity(): string {

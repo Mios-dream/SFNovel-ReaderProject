@@ -5,27 +5,24 @@ import fs from "fs";
 
   // 小说信息
   const novelInfo = await sfacg.novelInfo(216187);
-  console.log(novelInfo);
   fs.writeFileSync("./TESTDATA/novelInfo.json", JSON.stringify(novelInfo));
 
   // 登录状态
   const loginStatus = await sfacg.login("13696458853", "dddd1111");
-  console.log(loginStatus);
   fs.writeFileSync("./TESTDATA/loginStatus.json", JSON.stringify(loginStatus));
 
   // 用户信息
   const userInfo = await sfacg.userInfo();
-  console.log(userInfo);
   fs.writeFileSync("./TESTDATA/userInfo.json", JSON.stringify(userInfo));
 
+  const userMoney = await sfacg.userMoney()
+fs.writeFileSync("./TESTDATA/userMoney.json", JSON.stringify(userMoney));
   // 章节列表
-  const volumeInfos = await sfacg.volumeInfos(216187);
-  console.log(volumeInfos);
+  const volumeInfos = await sfacg.volumeInfos(567122);
   fs.writeFileSync("./TESTDATA/volumeInfos.json", JSON.stringify(volumeInfos));
 
   // 书本内容
-  const contentInfos = await sfacg.contentInfos(2824824);
-  console.log(contentInfos);
+  const contentInfos = await sfacg.contentInfos(7431226);
   fs.writeFileSync(
     "./TESTDATA/contentInfos.json",
     JSON.stringify(contentInfos)
@@ -33,12 +30,10 @@ import fs from "fs";
 
   // 搜索小说信息
   const searchInfos = await sfacg.searchInfos("屠龙", 0, 10);
-  console.log(searchInfos);
   fs.writeFileSync("./TESTDATA/searchInfos.json", JSON.stringify(searchInfos));
 
   // 我的书架信息
   const bookshelfInfos = await sfacg.bookshelfInfos();
-  console.log(bookshelfInfos);
   fs.writeFileSync(
     "./TESTDATA/bookshelfInfos.json",
     JSON.stringify(bookshelfInfos)
@@ -46,16 +41,13 @@ import fs from "fs";
 
   // 作品分类信息
   const typeInfo = await sfacg.typeInfo();
-  console.log(typeInfo);
   fs.writeFileSync("./TESTDATA/typeInfo.json", JSON.stringify(typeInfo));
 
   // 所有标签信息
   const tags = await sfacg.tags();
-  console.log(tags);
   fs.writeFileSync("./TESTDATA/tags.json", JSON.stringify(tags));
 
   // 谷谷谷
   const novels = await sfacg.novels("0");
-  console.log(novels);
   fs.writeFileSync("./TESTDATA/novels.json", JSON.stringify(novels));
 })();

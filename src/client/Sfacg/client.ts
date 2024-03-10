@@ -10,15 +10,28 @@ import {
   volumeInfos,
 } from "./types/Types";
 
-import { Itag } from "./types/ITypes";
+import { Itag, IaccountInfo, IcontentInfos, Option } from "./types/ITypes";
 
 export class SfacgClient extends SfacgHttp {
-  async login(username: string, password: string): Promise<Boolean> {
+  /**
+   *
+   * @param username  用户名
+   * @param password  密码
+   * @returns  登录状态
+   */
+  async login(
+    username: string,
+    password: string,
+    option?: Option
+  ): Promise<Boolean> {
     try {
-      let res = await this.post<number, any>("/sessions", {
+      let res = await this.post<number, IaccountInfo>("/sessions", {
         userName: username,
         passWord: password,
       });
+      if (option?.saveAccount) {
+        let acconutInfo = await this.userInfo();
+      }
       return res == 200 ? true : false;
     } catch (err: any) {
       console.error(
@@ -29,20 +42,41 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
-  async userInfo(): Promise<any> {
+  /**
+   *
+   * @returns 用户信息
+   */
+  async userInfo(): Promise<IaccountInfo | boolean> {
     try {
       let res = await this.get<userInfo>("/user");
-      return res ?? false;
+      let acconutInfo = {
+        userName: res.userName,
+        nickName: res.nickName,
+        avatar: res.avatar,
+      };
+      return acconutInfo ?? false;
     } catch (err: any) {
       console.error(
-        `GET userInfo failed : ${JSON.stringify(err.response.data.status.msg)}`
+        `GET userInfo failed: ${JSON.stringify(err.response.data.status.msg)}`
       );
+      return false;
     }
   }
 
-  async novelInfo(id: number): Promise<any> {
+  async userMoney(): Promise<any> {
     try {
-      let res = await this.get<novelInfo>(`/novels/${id}`);
+      let res: any = await this.get("/user/money");
+      return res ?? false;
+    } catch (e) {
+      
+    }
+  }
+
+  async novelInfo(novelId: number): Promise<any> {
+    try {
+      let res = await this.get<novelInfo>(`/novels/${novelId}`, {
+        expand: "intro,typeName,sysTags",
+      });
       return res ?? false;
     } catch (err: any) {
       console.error(
@@ -50,10 +84,10 @@ export class SfacgClient extends SfacgHttp {
       );
     }
   }
-
-  async volumeInfos(chapId: number): Promise<any> {
+  // 目录内容
+  async volumeInfos(novelId: number): Promise<any> {
     try {
-      let res = await this.get<volumeInfos>(`/novels/${chapId}/dirs`);
+      let res = await this.get<volumeInfos>(`/novels/${novelId}/dirs`);
       return res ?? false;
     } catch (err: any) {
       console.error(
@@ -63,19 +97,24 @@ export class SfacgClient extends SfacgHttp {
       );
     }
   }
-
-  async contentInfos(chapId: number): Promise<any> {
+  // 获取小说内容
+  async contentInfos(chapId: number): Promise<IcontentInfos> {
     try {
       let res = await this.get<contentInfos>(`/Chaps/${chapId}`, {
         expand: "content",
       });
-      return res ?? false;
+      let content = {
+        title: res.ntitle,
+        content: res.expand.content,
+      };
+      return content ?? false;
     } catch (err: any) {
       console.error(
         `GET contentInfos failed: ${JSON.stringify(
           err.response.data.status.msg
         )}`
       );
+      throw err;
     }
   }
 
@@ -85,6 +124,7 @@ export class SfacgClient extends SfacgHttp {
     return response;
   }
 
+  // 搜索小说
   async searchInfos(
     novelName: string,
     page: number,
@@ -110,33 +150,48 @@ export class SfacgClient extends SfacgHttp {
 
   // 筛选分类信息
   async typeInfo(): Promise<typeInfo[]> {
-    const res = await this.get<typeInfo[]>("/noveltypes");
-    return res ?? false;
+    try {
+      const res = await this.get<typeInfo[]>("/noveltypes");
+      return res ?? false;
+    } catch (err: any) {
+      console.error(
+        `GET typeInfo failed: ${JSON.stringify(err.response.data.status.msg)}`
+      );
+      throw err;
+    }
   }
 
+  // 获取所有标签
   async tags(): Promise<Itag[]> {
-    const res = await this.get<tags[]>("/novels/0/sysTags");
-    const tags: Itag[] = [
-      {
-        id: 74,
-        name: "百合",
-      },
-    ];
-    res.map((tag) => {
-      tags.push({
-        id: tag.sysTagId,
-        name: tag.tagName,
+    try {
+      const res = await this.get<tags[]>("/novels/0/sysTags");
+      const tags: Itag[] = [
+        {
+          id: 74,
+          name: "百合",
+        },
+      ];
+      res.map((tag) => {
+        tags.push({
+          id: tag.sysTagId,
+          name: tag.tagName,
+        });
       });
-    });
-
-    return tags ?? false;
+      return tags ?? false;
+    } catch (err: any) {
+      console.error(
+        `GET tags failed: ${JSON.stringify(err.response.data.status.msg)}`
+      );
+      throw err;
+    }
   }
 
+  // 获取分类主页
   async novels(option: any): Promise<any> {
     const res = await this.get(`/novels/${option}/sysTags/novels`);
     return res ?? false;
   }
-
+  // 购买章节
   async orderChap(novelId: string, chapId: number[]) {
     const res = await this.get(`/novels/${chapId}/orderedchaps`, {
       orderType: "readOrder",
@@ -147,4 +202,6 @@ export class SfacgClient extends SfacgHttp {
     });
     return res ?? false;
   }
+
+  async checkIn() { }
 }

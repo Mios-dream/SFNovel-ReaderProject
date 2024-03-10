@@ -82,7 +82,15 @@ export interface userInfo {
   registerDate: string; // 注册日期
 }
 
-// 卷信息
+export interface userMoney {
+  rmbCost: number; // 真实花费
+  fireMoneyUsed: number; // 已使用火币
+  fireMoneyRemain: number; // 未使用的火币
+  vipLevel: number; // vip等级
+  couponsRemain: number; // 未使用的代币
+}
+
+// 小说目录详情
 export interface volumeInfos {
   novelId: number; // 小说ID
   lastUpdateTime: string; // 最后更新时间
