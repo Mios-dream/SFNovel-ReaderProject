@@ -1,15 +1,18 @@
-import { SFACG } from "./http";
+import { SfacgHttp } from "./http";
 import {
   bookshelfInfos,
-  categories,
   contentInfos,
   novelInfo,
+  searchInfos,
   tags,
+  typeInfo,
   userInfo,
   volumeInfos,
 } from "./types/Types";
 
-export class SfacgClient extends SFACG {
+import { Itag } from "./types/ITypes";
+
+export class SfacgClient extends SfacgHttp {
   async login(username: string, password: string): Promise<Boolean> {
     try {
       let res = await this.post<number, any>("/sessions", {
@@ -48,9 +51,9 @@ export class SfacgClient extends SFACG {
     }
   }
 
-  async volumeInfos(id: number): Promise<any> {
+  async volumeInfos(chapId: number): Promise<any> {
     try {
-      let res = await this.get<volumeInfos>(`/novels/${id}/dirs`);
+      let res = await this.get<volumeInfos>(`/novels/${chapId}/dirs`);
       return res ?? false;
     } catch (err: any) {
       console.error(
@@ -61,9 +64,11 @@ export class SfacgClient extends SFACG {
     }
   }
 
-  async contentInfos(id: number): Promise<any> {
+  async contentInfos(chapId: number): Promise<any> {
     try {
-      let res = await this.get<contentInfos>(`/Chaps/${id}`);
+      let res = await this.get<contentInfos>(`/Chaps/${chapId}`, {
+        expand: "content",
+      });
       return res ?? false;
     } catch (err: any) {
       console.error(
@@ -80,42 +85,60 @@ export class SfacgClient extends SFACG {
     return response;
   }
 
-  async searchInfos(text: string, page: number, size: number): Promise<any> {
-    const res = await this.get<any>("/search/novels/result/new", {
+  async searchInfos(
+    novelName: string,
+    page: number,
+    size: number
+  ): Promise<any> {
+    const res = await this.get<searchInfos>("/search/novels/result/new", {
       page: page,
-      q: text,
+      q: novelName,
       size: size,
       sort: "hot",
     });
     return res;
   }
 
+  // 书架默认信息
   async bookshelfInfos(): Promise<any> {
     const res = await this.get<bookshelfInfos>("/user/Pockets", {
       expand: "novels,albums,comics",
     });
+    
     return res ?? false;
   }
 
-  async categories(): Promise<any> {
-    const res = await this.get<categories>("/noveltypes");
+  // 筛选分类信息
+  async typeInfo(): Promise<typeInfo[]> {
+    const res = await this.get<typeInfo[]>("/noveltypes");
     return res ?? false;
   }
 
-  async tags(): Promise<any> {
-    const res = await this.get<tags>("/novels/0/sysTags");
-    /**
-     * // // tags to add // //
-     * {
-     *     id: 74
-     *     name: "百合"
-     * }
-     */
+  async tags(): Promise<Itag[]> {
+    const res = await this.get<tags[]>("/novels/0/sysTags");
+    const tags: Itag[] = [
+      {
+        id: 74,
+        name: "百合",
+      },
+    ];
+    res.map((tag) => {
+      tags.push({
+        id: tag.sysTagId,
+        name: tag.tagName,
+      });
+    });
+
+    return tags ?? false;
+  }
+
+  async novels(option: any): Promise<any> {
+    const res = await this.get(`/novels/${option}/sysTags/novels`);
     return res ?? false;
   }
 
-  async novels(categoryid: string): Promise<any> {
-    const res = await this.get(`/novels/${categoryid}/sysTags/novels`);
+  async orderChap(chapId: string) {
+    const res = await this.get(`/novels/${chapId}/orderedchaps`);
     return res ?? false;
   }
 }

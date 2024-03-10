@@ -128,44 +128,13 @@ export interface bookshelfInfos {
   createTime: string; // 创建时间
   isFull: boolean; // 是否已满
   canModify: boolean; // 是否可以修改
-  expand: _Expand; // 扩展信息
-}
-
-// 分类信息
-export interface categories {
-  accountId: number; // 账号ID
-  pocketId: number; // 口袋ID
-  name: string; // 分类名称
-  typeId: number; // 类型ID
-  createTime: string; // 创建时间
-  isFull: boolean; // 是否已满
-  canModify: boolean; // 是否可以修改
-  expand: _Expand; // 扩展信息
+  expand: bookshelfInfos_Expand; // 扩展信息
 }
 
 // _开头表示被categories和bookshelfInfos共享的扩展信息，
-export interface _Expand {
-  albums: _album[]; // 专辑数组
+export interface bookshelfInfos_Expand {
   novels: _novel[]; // 小说数组
-}
-
-// 专辑信息
-interface _album {
-  albumId: number; // 专辑ID
-  novelId: number; // 小说ID
-  authorId: number; // 作者ID
-  latestChapterId: number; // 最新章节ID
-  visitTimes: number; // 访问次数
-  name: string; // 专辑名称
-  lastUpdateTime: string; // 最后更新时间
-  coverBig: string; // 大封面
-  coverSmall: string; // 小封面
-  coverMedium: string; // 中封面
-  isFinished: boolean; // 是否完结
-  expand: any; // 更多扩展信息
-  isSticky: boolean; // 是否置顶
-  stickyDateTime: any; // 置顶时间
-  markDateTime: string; // 标记时间
+  albums: _album[]; // 专辑数组
 }
 
 // 小说信息
@@ -192,6 +161,34 @@ export interface _novel {
   stickyDateTime: any; // 置顶时间
   markDateTime: string; // 标记时间
 }
+
+// 专辑信息
+interface _album {
+  albumId: number; // 专辑ID
+  novelId: number; // 小说ID
+  authorId: number; // 作者ID
+  latestChapterId: number; // 最新章节ID
+  visitTimes: number; // 访问次数
+  name: string; // 专辑名称
+  lastUpdateTime: string; // 最后更新时间
+  coverBig: string; // 大封面
+  coverSmall: string; // 小封面
+  coverMedium: string; // 中封面
+  isFinished: boolean; // 是否完结
+  expand: any; // 更多扩展信息
+  isSticky: boolean; // 是否置顶
+  stickyDateTime: any; // 置顶时间
+  markDateTime: string; // 标记时间
+}
+
+// 小说分类信息
+export interface typeInfo {
+  typeId: number;
+  typeName: string;
+  expand: any; // 扩展信息
+}
+[];
+
 // 描述标签信息的接口
 export interface tags {
   sysTagId: number; // 系统标签ID
@@ -232,7 +229,7 @@ export interface searchInfos_novel {
   addTime: string; // 添加时间
   isSensitive: boolean; // 是否敏感内容
   signStatus: string; // 签名状态
-  categoryId: number; // 分类ID
+  categoryid: number; // 分类ID
   weight: number; // 权重
   Highlight: string[]; // 高亮显示的字段数组
 }

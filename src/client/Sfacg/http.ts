@@ -1,11 +1,11 @@
-import axios, { AxiosDefaults, AxiosInstance, AxiosResponse } from "axios";
+import axios, { AxiosInstance, AxiosResponse } from "axios";
 import { v4 as uuidv4 } from "uuid";
 import { wrapper } from "axios-cookiejar-support";
 import { CookieJar } from "tough-cookie";
 
 const crypto = require("crypto");
 
-export class SFACG {
+export class SfacgHttp {
   static readonly HOST = "https://api.sfacg.com";
   static readonly USER_AGENT_PREFIX = "boluobao/4.9.76(iOS;16.6)/appStore/";
   static readonly USER_AGENT_RSS =
@@ -38,7 +38,6 @@ export class SFACG {
       url.startsWith("/Chaps") ? (this.client = this._client()) : "";
       response = await this.client.get<T>(url, {
         jar: this.cookieJar,
-        // 这里好像没起作用，但是不影响啦~
         params: query,
       });
       return url.startsWith("/sessions")
@@ -78,13 +77,13 @@ export class SFACG {
   sfSecurity(): string {
     const uuid = uuidv4().toUpperCase();
     const timestamp = Math.floor(Date.now() / 1000);
-    const data = `${uuid}${timestamp}${SFACG.DEVICE_TOKEN}${SFACG.SALT}`;
+    const data = `${uuid}${timestamp}${SfacgHttp.DEVICE_TOKEN}${SfacgHttp.SALT}`;
     const hash = crypto
       .createHash("md5")
       .update(data)
       .digest("hex")
       .toUpperCase();
-    return `nonce=${uuid}&timestamp=${timestamp}&devicetoken=${SFACG.DEVICE_TOKEN}&sign=${hash}`;
+    return `nonce=${uuid}&timestamp=${timestamp}&devicetoken=${SfacgHttp.DEVICE_TOKEN}&sign=${hash}`;
   }
 
   private _client() {
@@ -92,15 +91,15 @@ export class SFACG {
     return wrapper(
       axios.create({
         withCredentials: true,
-        baseURL: SFACG.HOST,
+        baseURL: SfacgHttp.HOST,
         auth: {
-          username: SFACG.USERNAME,
-          password: SFACG.PASSWORD,
+          username: SfacgHttp.USERNAME,
+          password: SfacgHttp.PASSWORD,
         },
         headers: {
           Accept: "application/vnd.sfacg.api+json;version=1",
           "Accept-Language": "zh-Hans-CN;q=1",
-          "User-Agent": SFACG.USER_AGENT_PREFIX + SFACG.DEVICE_TOKEN,
+          "User-Agent": SfacgHttp.USER_AGENT_PREFIX + SfacgHttp.DEVICE_TOKEN,
           SFSecurity: this.sfSecurity(),
         },
       })
@@ -111,9 +110,9 @@ export class SFACG {
     // 初始化rss client实例
     return (this.clientRss = wrapper(
       axios.create({
-        baseURL: SFACG.HOST,
+        baseURL: SfacgHttp.HOST,
         headers: {
-          "User-Agent": SFACG.USER_AGENT_RSS,
+          "User-Agent": SfacgHttp.USER_AGENT_RSS,
           Accept: "image/webp,image/*,*/*;q=0.8",
           "Accept-Language": "zh-CN,zh-Hans;q=0.9",
         },

@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs";
 
 
-export default class SFTOOL {
+export default class SfacgTool {
   private accountFile?: any;
 
   constructor(APP_NAME: any) {
@@ -15,7 +15,9 @@ export default class SFTOOL {
       oldAccountList.unshift(acconutInfo);
       
   }
-  removeAccount(userName: string) {}
+  removeAccount(userName: string) {
+    
+  }
 
   queryAccount(account: string) {}
 

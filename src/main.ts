@@ -44,15 +44,17 @@ import fs from "fs";
     JSON.stringify(bookshelfInfos)
   );
 
-  // 我的书架信息
-  const categories = await sfacg.bookshelfInfos();
-  console.log(categories);
-  fs.writeFileSync("./TESTDATA/categories.json", JSON.stringify(categories));
+  // 作品分类信息
+  const typeInfo = await sfacg.typeInfo();
+  console.log(typeInfo);
+  fs.writeFileSync("./TESTDATA/typeInfo.json", JSON.stringify(typeInfo));
 
+  // 所有标签信息
   const tags = await sfacg.tags();
   console.log(tags);
   fs.writeFileSync("./TESTDATA/tags.json", JSON.stringify(tags));
 
+  // 谷谷谷
   const novels = await sfacg.novels("0");
   console.log(novels);
   fs.writeFileSync("./TESTDATA/novels.json", JSON.stringify(novels));
