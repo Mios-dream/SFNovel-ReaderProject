@@ -1,4 +1,28 @@
 {
+  "chapId": 7431226,
+  "novelId": 567122,
+  "volumeId": 823444,
+  "charCount": 13,
+  "rowNum": 0,
+  "chapOrder": 1,
   "title": "背投",
-  "content": "\r\r\n[img=700,494]https://rss.sfacg.com/web/novel/images/UploadPic/2023/02/3c1d9d6a-339a-43e5-a3bb-d1174bd3ea0e.jpg[/img]\r\r\n夏鲁鲁与夏依\r\n感谢sf画师绘制"
+  "addTime": "2023-02-22T16:24:55",
+  "updateTime": "2023-02-22T16:24:55",
+  "sno": 1,
+  "isVip": false,
+  "expand": {
+    "needFireMoney": 0,
+    "originNeedFireMoney": 0,
+    "content": "\r\r\n[img=700,494]https://rss.sfacg.com/web/novel/images/UploadPic/2023/02/3c1d9d6a-339a-43e5-a3bb-d1174bd3ea0e.jpg[/img]\r\r\n夏鲁鲁与夏依\r\n感谢sf画师绘制",
+    "tsukkomi": null,
+    "chatLines": null,
+    "paragraphs": null,
+    "volume": null,
+    "authorTalk": null,
+    "isContentEncrypted": false,
+    "isBranch": false
+  },
+  "ntitle": "背投",
+  "isRubbish": false,
+  "auditStatus": -1
 }

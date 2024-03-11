@@ -1,8 +1,9 @@
-export interface Option {
-  proxy?: string; // 代理吖
-  saveAccount?: boolean; // 是否保存账号
-  orderedChaps?: boolean; // 是否购买未购章节
-  epubMake?: boolean; // 是否打包成EPUB
+import { Base } from "../../config";
+
+export interface SfacgOption extends Base {
+  sfacgAppName?: string;
+  epubMake?: boolean;
+  saveAccount?: boolean;
 }
 
 export interface IaccountInfo {

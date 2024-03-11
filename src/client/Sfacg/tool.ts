@@ -1,4 +1,4 @@
-import CONFIG from "../config";
+
 import path from "path";
 import fs from "fs";
 
@@ -7,7 +7,7 @@ export class SfacgTool {
   private accountFile?: any;
 
   constructor(APP_NAME: any) {
-    this.accountFile = path.join(CONFIG.ACCOUNT_SAVEFILE, `${APP_NAME}.json`);
+    this.accountFile = path.join("咕咕咕", `${APP_NAME}.json`);
   }
 
   addAccount(acconutInfo: any) {

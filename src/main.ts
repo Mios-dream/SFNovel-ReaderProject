@@ -1,23 +1,20 @@
 import { SfacgClient } from "./client/Sfacg/client";
 import fs from "fs";
-import CONFIG from "./client/config";
-import { Option } from "./client/Sfacg/types/ITypes";
-
+import * as dotenv from "dotenv";
+import { Config } from "./client/config";
+import { SfacgOption } from "./client/Sfacg/types/ITypes";
 (async () => {
+  dotenv.config();
+  const SfacgOption: SfacgOption = Config.sfacg;
+  // const CiweimaoOption: CiweimaoOption = Config.ciweimao
   const sfacg = new SfacgClient();
-  let option: Option = {
-    proxy: CONFIG.PROXY,
-    saveAccount: CONFIG.SAVE_ACCOUNT,
-    orderedChaps: CONFIG.ORDERD_CHAPS,
-    epubMake: CONFIG.EPUB_MAKE,
-  };
-  
+
   // 小说信息
   const novelInfo = await sfacg.novelInfo(216187);
   fs.writeFileSync("./TESTDATA/novelInfo.json", JSON.stringify(novelInfo));
 
   // 登录状态
-  const loginInfo = await sfacg.login("13696458853", "dddd1111", option);
+  const loginInfo = await sfacg.login("13696458853", "dddd1111", SfacgOption);
   fs.writeFileSync("./TESTDATA/loginInfo.json", JSON.stringify(loginInfo));
 
   // 章节列表

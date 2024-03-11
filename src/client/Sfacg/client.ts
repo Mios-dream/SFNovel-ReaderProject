@@ -14,12 +14,11 @@ import {
 import {
   Itag,
   IaccountInfo,
-  IcontentInfos,
-  Option,
   InovelInfo,
   IvolumeInfos,
   Ichapter,
 } from "./types/ITypes";
+import { SfacgOption } from "./types/ITypes";
 
 export class SfacgClient extends SfacgHttp {
   /**
@@ -31,7 +30,7 @@ export class SfacgClient extends SfacgHttp {
   async login(
     username: string,
     password: string,
-    option?: Option
+    option?: SfacgOption
   ): Promise<IaccountInfo | boolean> {
     try {
       let res = await this.post<number, IaccountInfo>("/sessions", {
@@ -141,7 +140,7 @@ export class SfacgClient extends SfacgHttp {
               chapOrder: chapter.chapOrder,
               isVip: chapter.isVip,
               ntitle: chapter.ntitle,
-              updateTime: chapter.updateTime
+              updateTime: chapter.updateTime,
             };
           }),
         };
@@ -158,15 +157,12 @@ export class SfacgClient extends SfacgHttp {
   }
 
   // 获取小说内容
-  async contentInfos(chapId: number): Promise<IcontentInfos | boolean> {
+  async contentInfos(chapId: number): Promise<any | boolean> {
     try {
       let res = await this.get<contentInfos>(`/Chaps/${chapId}`, {
         expand: "content",
       });
-      let content = {
-        title: res.ntitle,
-        content: res.expand.content,
-      };
+      let content = res.expand.content;
       return content ?? false;
     } catch (err: any) {
       console.error(
