@@ -82,6 +82,7 @@ export interface userInfo {
   registerDate: string; // 注册日期
 }
 
+// 用户余额
 export interface userMoney {
   rmbCost: number; // 真实花费
   fireMoneyUsed: number; // 已使用火币

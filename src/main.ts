@@ -1,22 +1,25 @@
 import { SfacgClient } from "./client/Sfacg/client";
 import fs from "fs";
+import CONFIG from "./client/config";
+import { Option } from "./client/Sfacg/types/ITypes";
+
 (async () => {
   const sfacg = new SfacgClient();
-
+  let option: Option = {
+    proxy: CONFIG.PROXY,
+    saveAccount: CONFIG.SAVE_ACCOUNT,
+    orderedChaps: CONFIG.ORDERD_CHAPS,
+    epubMake: CONFIG.EPUB_MAKE,
+  };
+  
   // 小说信息
   const novelInfo = await sfacg.novelInfo(216187);
   fs.writeFileSync("./TESTDATA/novelInfo.json", JSON.stringify(novelInfo));
 
   // 登录状态
-  const loginStatus = await sfacg.login("13696458853", "dddd1111");
+  const loginStatus = await sfacg.login("13696458853", "dddd1111", option);
   fs.writeFileSync("./TESTDATA/loginStatus.json", JSON.stringify(loginStatus));
 
-  // 用户信息
-  const userInfo = await sfacg.userInfo();
-  fs.writeFileSync("./TESTDATA/userInfo.json", JSON.stringify(userInfo));
-
-  const userMoney = await sfacg.userMoney()
-fs.writeFileSync("./TESTDATA/userMoney.json", JSON.stringify(userMoney));
   // 章节列表
   const volumeInfos = await sfacg.volumeInfos(567122);
   fs.writeFileSync("./TESTDATA/volumeInfos.json", JSON.stringify(volumeInfos));

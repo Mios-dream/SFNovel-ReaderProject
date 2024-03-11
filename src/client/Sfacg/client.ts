@@ -7,6 +7,7 @@ import {
   tags,
   typeInfo,
   userInfo,
+  userMoney,
   volumeInfos,
 } from "./types/Types";
 
@@ -23,14 +24,22 @@ export class SfacgClient extends SfacgHttp {
     username: string,
     password: string,
     option?: Option
-  ): Promise<Boolean> {
+  ): Promise<IaccountInfo | boolean> {
     try {
       let res = await this.post<number, IaccountInfo>("/sessions", {
         userName: username,
         passWord: password,
       });
       if (option?.saveAccount) {
-        let acconutInfo = await this.userInfo();
+        let baseinfo: IaccountInfo = await this.userInfo();
+        let money: IaccountInfo = await this.userMoney();
+        let acconutInfo = {
+          userName: username,
+          passWord: password,
+          ...baseinfo,
+          ...money,
+        };
+        return acconutInfo;
       }
       return res == 200 ? true : false;
     } catch (err: any) {
@@ -43,18 +52,18 @@ export class SfacgClient extends SfacgHttp {
     }
   }
   /**
-   *
+   * 仅当login的保存选项被打开时执行
    * @returns 用户信息
    */
-  async userInfo(): Promise<IaccountInfo | boolean> {
+  async userInfo(): Promise<any> {
     try {
       let res = await this.get<userInfo>("/user");
-      let acconutInfo = {
-        userName: res.userName,
+      // 补充用户基础信息
+      let baseinfo = {
         nickName: res.nickName,
         avatar: res.avatar,
       };
-      return acconutInfo ?? false;
+      return baseinfo ?? false;
     } catch (err: any) {
       console.error(
         `GET userInfo failed: ${JSON.stringify(err.response.data.status.msg)}`
@@ -62,13 +71,24 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
-
+  /**
+   * 仅当login的保存选项被打开时执行
+   * @returns
+   */
   async userMoney(): Promise<any> {
     try {
-      let res: any = await this.get("/user/money");
-      return res ?? false;
-    } catch (e) {
-      
+      let res = await this.get<userMoney>("/user/money");
+      // 补充用户余额信息
+      let money = {
+        fireMoneyRemain: res.fireMoneyRemain,
+        couponsRemain: res.couponsRemain,
+      };
+      return money ?? false;
+    } catch (err: any) {
+      console.error(
+        `GET userMoney failed: ${JSON.stringify(err.response.data.status.msg)}`
+      );
+      return false;
     }
   }
 
@@ -97,6 +117,7 @@ export class SfacgClient extends SfacgHttp {
       );
     }
   }
+  
   // 获取小说内容
   async contentInfos(chapId: number): Promise<IcontentInfos> {
     try {
@@ -191,6 +212,7 @@ export class SfacgClient extends SfacgHttp {
     const res = await this.get(`/novels/${option}/sysTags/novels`);
     return res ?? false;
   }
+
   // 购买章节
   async orderChap(novelId: string, chapId: number[]) {
     const res = await this.get(`/novels/${chapId}/orderedchaps`, {
@@ -203,5 +225,11 @@ export class SfacgClient extends SfacgHttp {
     return res ?? false;
   }
 
-  async checkIn() { }
+  async checkIn() {
+
+  }
+
+  async adBonus() {
+    
+  }
 }

@@ -1,17 +1,18 @@
 export interface Option {
+  proxy?: string; // 代理吖
   saveAccount?: boolean; // 是否保存账号
   orderedChaps?: boolean; // 是否购买未购章节
   epubMake?: boolean; // 是否打包成EPUB
 }
 
 export interface IaccountInfo {
-  userName: string; // 用户名
+  userName?: string; // 用户名
   passWord?: string; // 密码
   nickName?: string; // 昵称
-  lastCheckIn?: string; //上次签到时间
   avatar?: string; // 头像网址
-  fireMoneyRemain?: number; // 未使用的火币
+  lastCheckIn?: string; //上次签到时间\
   vipLevel?: number; // vip等级
+  fireMoneyRemain?: number; // 未使用的火币
   couponsRemain?: number; // 未使用的代币
 }
 
