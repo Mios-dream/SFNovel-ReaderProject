@@ -17,8 +17,8 @@ import { Option } from "./client/Sfacg/types/ITypes";
   fs.writeFileSync("./TESTDATA/novelInfo.json", JSON.stringify(novelInfo));
 
   // 登录状态
-  const loginStatus = await sfacg.login("13696458853", "dddd1111", option);
-  fs.writeFileSync("./TESTDATA/loginStatus.json", JSON.stringify(loginStatus));
+  const loginInfo = await sfacg.login("13696458853", "dddd1111", option);
+  fs.writeFileSync("./TESTDATA/loginInfo.json", JSON.stringify(loginInfo));
 
   // 章节列表
   const volumeInfos = await sfacg.volumeInfos(567122);

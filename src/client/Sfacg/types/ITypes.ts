@@ -28,7 +28,6 @@ export interface IcontentInfos {
 }
 
 export interface InovelInfo {
-  authorId: number; // 作者ID
   lastUpdateTime: string; // 最后更新时间
   novelCover: string; // 小说封面
   bgBanner: string; // 背景横幅
@@ -40,40 +39,21 @@ export interface InovelInfo {
   tags: string[]; //标签
 }
 
-// 小说目录详情
-export interface volumeInfos {
-  novelId: number; // 小说ID
-  lastUpdateTime: string; // 最后更新时间
-  volumeList: VolumeList[]; // 卷列表
-}
-
 // 卷列表
-export interface VolumeList {
+export interface IvolumeInfos {
   volumeId: number; // 卷ID
   title: string; // 标题
-  sno: number; // 序列号
-  chapterList: chapter[]; // 章节列表
+  chapterList: Ichapter[]; // 章节列表
 }
+[];
 
 // 章节信息
-export interface chapter {
+export interface Ichapter {
   chapId: number; // 章节ID
-  novelId: number; // 小说ID
-  volumeId: number; // 卷ID
   needFireMoney: number; // 所需火币
-  originNeedFireMoney: number; // 原始所需火币
-  chapterOriginFireMoney: number; // 章节原始火币
   charCount: number; // 字符数
-  rowNum: number; // 行数
   chapOrder: number; // 章节顺序
-  title: string; // 标题
-  content: any; // 内容
-  sno: number; // 序列号
   isVip: boolean; // 是否为VIP章节
-  AddTime: string; // 添加时间
-  updateTime: any; // 更新时间
-  canUnlockWithAd: boolean; // 是否可以通过广告解锁
   ntitle: string; // 新标题
-  isRubbish: boolean; // 是否为废弃章节
-  auditStatus: number; // 审核状态
+  updateTime: any; // 更新时间
 }

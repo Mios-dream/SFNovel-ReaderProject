@@ -11,7 +11,15 @@ import {
   volumeInfos,
 } from "./types/Types";
 
-import { Itag, IaccountInfo, IcontentInfos, Option } from "./types/ITypes";
+import {
+  Itag,
+  IaccountInfo,
+  IcontentInfos,
+  Option,
+  InovelInfo,
+  IvolumeInfos,
+  Ichapter,
+} from "./types/ITypes";
 
 export class SfacgClient extends SfacgHttp {
   /**
@@ -92,34 +100,65 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
-  async novelInfo(novelId: number): Promise<any> {
+  async novelInfo(novelId: number): Promise<InovelInfo | boolean> {
     try {
       let res = await this.get<novelInfo>(`/novels/${novelId}`, {
         expand: "intro,typeName,sysTags",
       });
-      return res ?? false;
+      let novelInfo = {
+        lastUpdateTime: res.lastUpdateTime,
+        novelCover: res.novelCover,
+        bgBanner: res.bgBanner,
+        novelName: res.novelName,
+        isFinish: res.isFinish,
+        authorName: res.authorName,
+        charCount: res.charCount,
+        intro: res.expand.intro,
+        tags: res.expand.sysTags.map((tag) => tag.tagName),
+      };
+      return novelInfo ?? false;
     } catch (err: any) {
       console.error(
         `GET novelInfo failed: ${JSON.stringify(err.response.data.status.msg)}`
       );
+      return false;
     }
   }
+
   // 目录内容
-  async volumeInfos(novelId: number): Promise<any> {
+  async volumeInfos(novelId: number): Promise<IvolumeInfos[] | boolean> {
     try {
       let res = await this.get<volumeInfos>(`/novels/${novelId}/dirs`);
-      return res ?? false;
+      let volumeInfos = res.volumeList.map((volume): IvolumeInfos => {
+        return {
+          volumeId: volume.volumeId,
+          title: volume.title,
+          chapterList: volume.chapterList.map((chapter): Ichapter => {
+            return {
+              chapId: chapter.chapId,
+              needFireMoney: chapter.needFireMoney,
+              charCount: chapter.charCount,
+              chapOrder: chapter.chapOrder,
+              isVip: chapter.isVip,
+              ntitle: chapter.ntitle,
+              updateTime: chapter.updateTime
+            };
+          }),
+        };
+      });
+      return volumeInfos ?? false;
     } catch (err: any) {
       console.error(
         `GET volumeInfos failed: ${JSON.stringify(
           err.response.data.status.msg
         )}`
       );
+      return false;
     }
   }
-  
+
   // 获取小说内容
-  async contentInfos(chapId: number): Promise<IcontentInfos> {
+  async contentInfos(chapId: number): Promise<IcontentInfos | boolean> {
     try {
       let res = await this.get<contentInfos>(`/Chaps/${chapId}`, {
         expand: "content",
@@ -135,7 +174,7 @@ export class SfacgClient extends SfacgHttp {
           err.response.data.status.msg
         )}`
       );
-      throw err;
+      return false;
     }
   }
 
@@ -225,11 +264,7 @@ export class SfacgClient extends SfacgHttp {
     return res ?? false;
   }
 
-  async checkIn() {
+  async checkIn() {}
 
-  }
-
-  async adBonus() {
-    
-  }
+  async adBonus() {}
 }
