@@ -242,3 +242,26 @@ export interface searchInfos_novel {
   weight: number; // 权重
   Highlight: string[]; // 高亮显示的字段数组
 }
+
+export interface adBonusNum {
+  recordId: number; // 记录ID
+  taskId: number; // 任务ID
+  requireNum: number; // 需要完成的数量
+  completeNum: number; // 已完成的数量
+  status: number; // 状态码
+  name: string; // 任务名称
+  desc: string; // 任务描述
+  link: string; // 关联的链接
+  type: string; // 任务类型
+  addDate: string; // 添加日期
+  tips1: string; // 提示信息1
+  tips2: string; // 提示信息2
+  bonusInfo: { bonusType: number; bonus: number }[]; // 奖励信息，包含奖励类型和奖励数量
+  taskType: number; // 任务类型编号
+  category: number; // 分类编号
+  comic: object; // 漫画对象（具体结构未说明）
+  comicList: object; // 漫画列表对象（具体结构未说明）
+  exp: number; // 经验值
+  extendId: object; // 扩展ID对象（具体结构未说明）
+}
+[];

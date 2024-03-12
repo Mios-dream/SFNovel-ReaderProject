@@ -50,4 +50,18 @@ import { SfacgOption } from "./client/Sfacg/types/ITypes";
   // 谷谷谷
   const novels = await sfacg.novels("0");
   fs.writeFileSync("./TESTDATA/novels.json", JSON.stringify(novels));
+
+  // 图片测试
+  const image = await sfacg.image(
+    "https://rss.sfacg.com/web/novel/images/UploadPic/2023/02/3c1d9d6a-339a-43e5-a3bb-d1174bd3ea0e.jpg"
+  );
+  fs.writeFileSync("./TESTDATA/image.webp", image);
+
+  // 看广告领代币次数
+  const adBonusNum = await sfacg.adBonusNum();
+  fs.writeFileSync("./TESTDATA/adBonusNum.json", JSON.stringify(adBonusNum));
+
+  // 看广告领代币
+  const adBonus = await sfacg.adBonus(adBonusNum);
+  fs.writeFileSync("./TESTDATA/adBonus.json", JSON.stringify(adBonus));
 })();

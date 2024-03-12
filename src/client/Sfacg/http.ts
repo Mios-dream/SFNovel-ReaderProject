@@ -60,12 +60,12 @@ export class SfacgHttp {
     return response.status;
   }
 
-  async put<T, E>(url: string, data: E): Promise<T> {
+  async put<T, E = any>(url: string, data: E): Promise<T> {
     let response: any;
     response = await this.client.put<T>(url, data, {
       jar: this.cookieJar,
     });
-    return response.data;
+    return response.data.data;
   }
 
   sfSecurity(): string {
@@ -104,6 +104,7 @@ export class SfacgHttp {
     // 初始化rss client实例
     return (this.clientRss = wrapper(
       axios.create({
+        responseType: "arraybuffer",
         baseURL: SfacgHttp.HOST,
         headers: {
           "User-Agent": SfacgHttp.USER_AGENT_RSS,

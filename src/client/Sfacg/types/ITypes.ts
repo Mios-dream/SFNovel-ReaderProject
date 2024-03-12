@@ -56,5 +56,10 @@ export interface Ichapter {
   chapOrder: number; // 章节顺序
   isVip: boolean; // 是否为VIP章节
   ntitle: string; // 新标题
-  updateTime: any; // 更新时间
+}
+
+export interface IadBonusNum {
+  taskId: number; // 任务ID
+  requireNum: number; // 未完成看广告领奖次数
+  completeNum: number; // 已完成看广告领奖次数
 }

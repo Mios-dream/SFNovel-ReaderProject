@@ -1,5 +1,6 @@
 import { SfacgHttp } from "./http";
 import {
+  adBonusNum,
   bookshelfInfos,
   contentInfos,
   novelInfo,
@@ -17,6 +18,7 @@ import {
   InovelInfo,
   IvolumeInfos,
   Ichapter,
+  IadBonusNum,
 } from "./types/ITypes";
 import { SfacgOption } from "./types/ITypes";
 
@@ -140,7 +142,6 @@ export class SfacgClient extends SfacgHttp {
               chapOrder: chapter.chapOrder,
               isVip: chapter.isVip,
               ntitle: chapter.ntitle,
-              updateTime: chapter.updateTime,
             };
           }),
         };
@@ -157,13 +158,14 @@ export class SfacgClient extends SfacgHttp {
   }
 
   // 获取小说内容
-  async contentInfos(chapId: number): Promise<any | boolean> {
+  async contentInfos(chapId: number): Promise<string | boolean> {
     try {
       let res = await this.get<contentInfos>(`/Chaps/${chapId}`, {
         expand: "content",
       });
       let content = res.expand.content;
-      return content ?? false;
+      return content;
+      // 待添加
     } catch (err: any) {
       console.error(
         `GET contentInfos failed: ${JSON.stringify(
@@ -174,10 +176,9 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
-  // 咕咕咕。。。
   async image(url: string): Promise<any> {
     const response: Buffer = await this.get_rss(url);
-    return response;
+    return Buffer.from(response);
   }
 
   // 搜索小说
@@ -260,7 +261,29 @@ export class SfacgClient extends SfacgHttp {
     return res ?? false;
   }
 
-  async checkIn() {}
+  async adBonusNum(): Promise<IadBonusNum> {
+    const res = await this.get<adBonusNum[]>(`user/tasks`, {
+      taskCategory: 5,
+      package: "com.sfacg",
+      deviceToken: SfacgHttp.DEVICE_TOKEN,
+      page: 0,
+      size: 20,
+    });
+    const adBonusNum = {
+      requireNum: res[0].requireNum,
+      completeNum: res[0].completeNum,
+      taskId: res[0].taskId,
+    };
+    return adBonusNum ?? false;
+  }
 
-  async adBonus() {}
+  async adBonus(adBonusNum?: IadBonusNum): Promise<any | boolean> {
+    const res = await this.put<any>(
+      `/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
+      {
+        num: 1,
+      }
+    );
+    return res ?? false;
+  }
 }
