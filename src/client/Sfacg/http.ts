@@ -54,6 +54,7 @@ export class SfacgHttp {
 
   async post<T, E>(url: string, data: E): Promise<T> {
     let response: any;
+    this.client = this._client();
     response = await this.client.post<T>(url, data, {
       jar: this.cookieJar,
     });
@@ -62,22 +63,19 @@ export class SfacgHttp {
 
   async put<T, E = any>(url: string, data: E): Promise<T> {
     let response: any;
+    this.client = this._client();
     response = await this.client.put<T>(url, data, {
       jar: this.cookieJar,
     });
     return response.data.data;
   }
 
-  sfSecurity(): string {
-    const uuid = uuidv4().toUpperCase();
-    const timestamp = Math.floor(Date.now() / 1000);
-    const data = `${uuid}${timestamp}${SfacgHttp.DEVICE_TOKEN}${SfacgHttp.SALT}`;
-    const hash = crypto
-      .createHash("md5")
-      .update(data)
-      .digest("hex")
-      .toUpperCase();
-    return `nonce=${uuid}&timestamp=${timestamp}&devicetoken=${SfacgHttp.DEVICE_TOKEN}&sign=${hash}`;
+  getNowFormatDate(): string {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, "0");
+    const day = date.getDate().toString().padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }
 
   private _client() {
@@ -113,5 +111,16 @@ export class SfacgHttp {
         },
       })
     ));
+  }
+  private sfSecurity(): string {
+    const uuid = uuidv4().toUpperCase();
+    const timestamp = Math.floor(Date.now() / 1000);
+    const data = `${uuid}${timestamp}${SfacgHttp.DEVICE_TOKEN}${SfacgHttp.SALT}`;
+    const hash = crypto
+      .createHash("md5")
+      .update(data)
+      .digest("hex")
+      .toUpperCase();
+    return `nonce=${uuid}&timestamp=${timestamp}&devicetoken=${SfacgHttp.DEVICE_TOKEN}&sign=${hash}`;
   }
 }

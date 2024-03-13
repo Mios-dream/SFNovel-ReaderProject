@@ -19,8 +19,10 @@ import {
   IvolumeInfos,
   Ichapter,
   IadBonusNum,
+  SfacgOption,
+  IbookshelfInfos,
+  IsearchInfos,
 } from "./types/ITypes";
-import { SfacgOption } from "./types/ITypes";
 
 export class SfacgClient extends SfacgHttp {
   /**
@@ -35,14 +37,14 @@ export class SfacgClient extends SfacgHttp {
     option?: SfacgOption
   ): Promise<IaccountInfo | boolean> {
     try {
-      let res = await this.post<number, IaccountInfo>("/sessions", {
+      const res = await this.post<number, IaccountInfo>("/sessions", {
         userName: username,
         passWord: password,
       });
       if (option?.saveAccount) {
-        let baseinfo: IaccountInfo = await this.userInfo();
-        let money: IaccountInfo = await this.userMoney();
-        let acconutInfo = {
+        const baseinfo: IaccountInfo = await this.userInfo();
+        const money: IaccountInfo = await this.userMoney();
+        const acconutInfo = {
           userName: username,
           passWord: password,
           ...baseinfo,
@@ -66,13 +68,13 @@ export class SfacgClient extends SfacgHttp {
    */
   async userInfo(): Promise<any> {
     try {
-      let res = await this.get<userInfo>("/user");
+      const res = await this.get<userInfo>("/user");
       // 补充用户基础信息
-      let baseinfo = {
+      const baseinfo = {
         nickName: res.nickName,
         avatar: res.avatar,
       };
-      return baseinfo ?? false;
+      return baseinfo;
     } catch (err: any) {
       console.error(
         `GET userInfo failed: ${JSON.stringify(err.response.data.status.msg)}`
@@ -86,13 +88,13 @@ export class SfacgClient extends SfacgHttp {
    */
   async userMoney(): Promise<any> {
     try {
-      let res = await this.get<userMoney>("/user/money");
+      const res = await this.get<userMoney>("/user/money");
       // 补充用户余额信息
-      let money = {
+      const money = {
         fireMoneyRemain: res.fireMoneyRemain,
         couponsRemain: res.couponsRemain,
       };
-      return money ?? false;
+      return money;
     } catch (err: any) {
       console.error(
         `GET userMoney failed: ${JSON.stringify(err.response.data.status.msg)}`
@@ -103,10 +105,10 @@ export class SfacgClient extends SfacgHttp {
 
   async novelInfo(novelId: number): Promise<InovelInfo | boolean> {
     try {
-      let res = await this.get<novelInfo>(`/novels/${novelId}`, {
+      const res = await this.get<novelInfo>(`/novels/${novelId}`, {
         expand: "intro,typeName,sysTags",
       });
-      let novelInfo = {
+      const novelInfo = {
         lastUpdateTime: res.lastUpdateTime,
         novelCover: res.novelCover,
         bgBanner: res.bgBanner,
@@ -117,7 +119,7 @@ export class SfacgClient extends SfacgHttp {
         intro: res.expand.intro,
         tags: res.expand.sysTags.map((tag) => tag.tagName),
       };
-      return novelInfo ?? false;
+      return novelInfo;
     } catch (err: any) {
       console.error(
         `GET novelInfo failed: ${JSON.stringify(err.response.data.status.msg)}`
@@ -129,8 +131,8 @@ export class SfacgClient extends SfacgHttp {
   // 目录内容
   async volumeInfos(novelId: number): Promise<IvolumeInfos[] | boolean> {
     try {
-      let res = await this.get<volumeInfos>(`/novels/${novelId}/dirs`);
-      let volumeInfos = res.volumeList.map((volume): IvolumeInfos => {
+      const res = await this.get<volumeInfos>(`/novels/${novelId}/dirs`);
+      const volumeInfos = res.volumeList.map((volume): IvolumeInfos => {
         return {
           volumeId: volume.volumeId,
           title: volume.title,
@@ -163,7 +165,7 @@ export class SfacgClient extends SfacgHttp {
       let res = await this.get<contentInfos>(`/Chaps/${chapId}`, {
         expand: "content",
       });
-      let content = res.expand.content;
+      const content = res.expand.content;
       return content;
       // 待添加
     } catch (err: any) {
@@ -177,8 +179,15 @@ export class SfacgClient extends SfacgHttp {
   }
 
   async image(url: string): Promise<any> {
-    const response: Buffer = await this.get_rss(url);
-    return Buffer.from(response);
+    try {
+      const response: Buffer = await this.get_rss(url);
+      return Buffer.from(response);
+    } catch (err: any) {
+      console.error(
+        `GET image failed: ${JSON.stringify(err.response.data.status.msg)}`
+      );
+      return false;
+    }
   }
 
   // 搜索小说
@@ -186,23 +195,55 @@ export class SfacgClient extends SfacgHttp {
     novelName: string,
     page: number,
     size: number
-  ): Promise<any> {
-    const res = await this.get<searchInfos>("/search/novels/result/new", {
-      page: page,
-      q: novelName,
-      size: size,
-      sort: "hot",
-    });
-    return res;
+  ): Promise<IsearchInfos[] | boolean> {
+    try {
+      const res = await this.get<searchInfos>("/search/novels/result/new", {
+        page: page,
+        q: novelName,
+        size: size,
+        sort: "hot",
+      });
+      const searchInfos = res.novels.map((novel) => {
+        return {
+          authorId: novel.authorId, // 作者ID
+          lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
+          novelCover: novel.novelCover, // 小说封面URL
+          novelId: novel.novelId, // 小说ID
+          novelName: novel.novelName, // 小说名称
+        };
+      });
+      return searchInfos;
+    } catch (err: any) {
+      console.error(
+        `GET searchInfos failed: ${JSON.stringify(
+          err.response.data.status.msg
+        )}`
+      );
+      return false;
+    }
   }
 
   // 书架默认信息
-  async bookshelfInfos(): Promise<any> {
-    const res = await this.get<bookshelfInfos>("/user/Pockets", {
+  async bookshelfInfos(): Promise<IbookshelfInfos[] | boolean> {
+    const res = await this.get<bookshelfInfos[]>("/user/Pockets", {
       expand: "novels,albums,comics",
     });
-
-    return res ?? false;
+    let bookshelfInfos: IbookshelfInfos[] = [];
+    res.map((bookshelf) => {
+      let novels = bookshelf.expand.novels;
+      if (novels) {
+        novels.forEach((novel) => {
+          bookshelfInfos.push({
+            authorId: novel.authorId, // 作者ID
+            lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
+            novelCover: novel.novelCover, // 小说封面URL
+            novelId: novel.novelId, // 小说ID
+            novelName: novel.novelName, // 小说名称
+          });
+        });
+      }
+    });
+    return bookshelfInfos;
   }
 
   // 筛选分类信息
@@ -234,7 +275,7 @@ export class SfacgClient extends SfacgHttp {
           name: tag.tagName,
         });
       });
-      return tags ?? false;
+      return tags;
     } catch (err: any) {
       console.error(
         `GET tags failed: ${JSON.stringify(err.response.data.status.msg)}`
@@ -250,40 +291,75 @@ export class SfacgClient extends SfacgHttp {
   }
 
   // 购买章节
-  async orderChap(novelId: string, chapId: number[]) {
-    const res = await this.get(`/novels/${chapId}/orderedchaps`, {
-      orderType: "readOrder",
-      orderAll: false,
-      novelId: novelId,
-      autoOrder: false,
-      chapIds: [chapId],
-    });
-    return res ?? false;
+  async orderChap(novelId: string, chapId: number[]): Promise<any> {
+    try {
+      const res = await this.get(`/novels/${chapId}/orderedchaps`, {
+        orderType: "readOrder",
+        orderAll: false,
+        novelId: novelId,
+        autoOrder: false,
+        chapIds: [chapId],
+      });
+      return res;
+    } catch (err: any) {
+      console.error(
+        `orderChap failed: ${JSON.stringify(err.response.data.status.msg)}`
+      );
+      return false;
+    }
   }
 
-  async adBonusNum(): Promise<IadBonusNum> {
-    const res = await this.get<adBonusNum[]>(`user/tasks`, {
-      taskCategory: 5,
-      package: "com.sfacg",
-      deviceToken: SfacgHttp.DEVICE_TOKEN,
-      page: 0,
-      size: 20,
-    });
-    const adBonusNum = {
-      requireNum: res[0].requireNum,
-      completeNum: res[0].completeNum,
-      taskId: res[0].taskId,
-    };
-    return adBonusNum ?? false;
+  async adBonusNum(): Promise<IadBonusNum | boolean> {
+    try {
+      const res = await this.get<adBonusNum[]>(`user/tasks`, {
+        taskCategory: 5,
+        package: "com.sfacg",
+        deviceToken: SfacgHttp.DEVICE_TOKEN,
+        page: 0,
+        size: 20,
+      });
+      const adBonusNum = {
+        requireNum: res[0].requireNum,
+        completeNum: res[0].completeNum,
+        taskId: res[0].taskId,
+      };
+      return adBonusNum;
+    } catch (err: any) {
+      console.error(
+        `PUT adBonusNum failed: ${JSON.stringify(err.response.data.status.msg)}`
+      );
+      return false;
+    }
   }
 
-  async adBonus(adBonusNum?: IadBonusNum): Promise<any | boolean> {
-    const res = await this.put<any>(
-      `/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
-      {
-        num: 1,
-      }
-    );
-    return res ?? false;
+  async adBonus(): Promise<any | boolean> {
+    try {
+      const res = await this.put<any>(
+        `/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
+        {
+          num: 1,
+        }
+      );
+      return res;
+    } catch (err: any) {
+      console.error(
+        `PUT adBonus failed: ${JSON.stringify(err.response.data.status.msg)}`
+      );
+      return false;
+    }
+  }
+
+  async newSign() {
+    try {
+      const res = await this.put("/user/newSignInfo", {
+        signDate: this.getNowFormatDate(),
+      });
+      return res;
+    } catch (err: any) {
+      console.error(
+        `PUT newSign failed: ${JSON.stringify(err.response.data.status.msg)}`
+      );
+      return false;
+    }
   }
 }

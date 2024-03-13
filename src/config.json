@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "Base": {
+    "proxy": "",
+    "orderedChaps": false,
+    "accountSavefile": "Account",
+    "novelOutput": "novels"
+  },
+  "Sfacg": {
+    "sfacgAppName": "Sfacg",
+    "saveAccount": true,
+    "epubMake": true
+  }
+} 

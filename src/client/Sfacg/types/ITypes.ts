@@ -1,4 +1,4 @@
-import { Base } from "../../config";
+import { Base } from "../../../utils/config";
 
 export interface SfacgOption extends Base {
   sfacgAppName?: string;
@@ -63,3 +63,21 @@ export interface IadBonusNum {
   requireNum: number; // 未完成看广告领奖次数
   completeNum: number; // 已完成看广告领奖次数
 }
+
+export interface IbookshelfInfos {
+  authorId: number; // 作者ID
+  lastUpdateTime: string; // 最后更新时间
+  novelCover: string; // 小说封面URL
+  novelId: number; // 小说ID
+  novelName: string; // 小说名称
+}
+[];
+
+export interface IsearchInfos {
+  authorId: number; // 作者ID
+  lastUpdateTime: string; // 最后更新时间
+  novelCover: string; // 小说封面URL
+  novelId: number; // 小说ID
+  novelName: string; // 小说名称
+}
+[];

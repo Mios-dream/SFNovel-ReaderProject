@@ -138,12 +138,12 @@ export interface bookshelfInfos {
   isFull: boolean; // 是否已满
   canModify: boolean; // 是否可以修改
   expand: bookshelfInfos_Expand; // 扩展信息
-}
+}[]
 
 // _开头表示被categories和bookshelfInfos共享的扩展信息，
 export interface bookshelfInfos_Expand {
-  novels: _novel[]; // 小说数组
-  albums: _album[]; // 专辑数组
+  novels?: _novel[];
+  albums?: _album[]; // 专辑数组
 }
 
 // 小说信息
