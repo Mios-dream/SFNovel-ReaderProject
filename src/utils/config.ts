@@ -4,7 +4,6 @@ import config from "../config.json";
 export interface Register {
   userName: string;
   passWord: string;
-  token: string;
 }
 
 export interface AppConfig {

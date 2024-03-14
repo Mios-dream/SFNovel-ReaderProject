@@ -1,9 +1,8 @@
 {
   "version": "1.0.0",
   "Register": {
-    "userName": "MY1830",
-    "passWord": "dddd1111",
-    "token": ""
+    "userName": "",
+    "passWord": ""
   },
   "Base": {
     "proxy": "",

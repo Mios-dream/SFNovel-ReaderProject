@@ -1,12 +1,14 @@
-import path from "path";
 import fs from "fs";
-import Config from "./config";
 import { IaccountInfo } from "../client/Sfacg/types/ITypes";
+import Config from "./config";
 
-export class SfacgTool {
+export class SfacgAccountManager {
   saveAccountInfo: any;
+  saveAccountPath: any;
   constructor() {
-    
+    const _path = process.cwd()
+    this.saveAccountPath = `${_path}/Accounts/${Config.sfacg.}`;
+    this.saveAccountInfo = fs.readFileSync();
   }
   addAccount(acconutInfo: IaccountInfo) {}
   removeAccount(userName: string) {}
