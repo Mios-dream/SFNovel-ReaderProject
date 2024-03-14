@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosResponse } from "axios";
 import { v4 as uuidv4 } from "uuid";
 import { wrapper } from "axios-cookiejar-support";
 import { CookieJar } from "tough-cookie";
+import Config from "../../utils/config";
 
 const crypto = require("crypto");
 
@@ -25,13 +26,15 @@ export class SfacgHttp {
     this.clientRss = this._clientRss();
   }
 
-  setProxy(proxyUrl: URL): void {
-    this.client.defaults.proxy = {
-      host: proxyUrl.hostname,
-      port: parseInt(proxyUrl.port),
-    };
+  async init() {
+    let ProxyUrl = new URL(Config.sfacg.proxy??"");
+    if (ProxyUrl) {
+      this.client.defaults.proxy = {
+        host: ProxyUrl.hostname,
+        port: parseInt(ProxyUrl.port),
+      };
+    }
   }
-
   async get<T, E = any>(url: string, query?: E): Promise<T> {
     let response: AxiosResponse;
     url.startsWith("/Chaps") ? (this.client = this._client()) : "";
@@ -122,5 +125,22 @@ export class SfacgHttp {
       .digest("hex")
       .toUpperCase();
     return `nonce=${uuid}&timestamp=${timestamp}&devicetoken=${SfacgHttp.DEVICE_TOKEN}&sign=${hash}`;
+  }
+
+  async bounusetest() {
+    return await axios({
+      url: `https://api.sfacg.com/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
+      method: "put",
+      data: {
+        num: 1,
+      },
+      headers: {
+        cookie:
+          ".SFCommunity=D4B9C3A171728ED668F16A049EF99D2A1AEDC13C330D4ED41182A66E79D0BD0484060D95570BF74287F6EFE74DE3A22E3A73D6A9649DD3FE1DE346E0BD0EA7DB6A779CA0C45F9CAAC7E9F7770D79ED1D632F5512829A7F185D54CCE1C6ED5247; session_APP=78C2FC82A225B902DBF12548F355A2F8",
+        authorization: "Basic YW5kcm9pZHVzZXI6MWEjJDUxLXl0Njk7KkFjdkBxeHE=",
+        "user-agent": `boluobao/4.9.98(android;34)/H5/${SfacgHttp.DEVICE_TOKEN}/H5`,
+        sfsecurity: this.sfSecurity(),
+      },
+    });
   }
 }

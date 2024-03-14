@@ -81,3 +81,13 @@ export interface IsearchInfos {
   novelName: string; // 小说名称
 }
 [];
+
+export interface IregistInfo {
+  passWord: string;
+  nickName: string;
+  countryCode: string;
+  phoneNum: string;
+  email: string;
+  smsAuthCode: string;
+  shuMeiId: string;
+}

@@ -25,6 +25,8 @@ import {
 } from "./types/ITypes";
 
 export class SfacgClient extends SfacgHttp {
+
+
   /**
    *
    * @param username  用户名
@@ -333,20 +335,20 @@ export class SfacgClient extends SfacgHttp {
   }
 
   async adBonus(): Promise<any | boolean> {
-    try {
-      const res = await this.put<any>(
-        `/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
-        {
-          num: 1,
-        }
-      );
-      return res;
-    } catch (err: any) {
-      console.error(
-        `PUT adBonus failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      return false;
-    }
+    // try {
+    //   const res = await this.put<any>(
+    //     `/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
+    //     {
+    //       num:"1"
+    //     }
+    //   );
+    //   return res;
+    // } catch (err: any) {
+    //   console.error(
+    //     `PUT adBonus failed: ${JSON.stringify(err.response.data.status.msg)}`
+    //   );
+    //   return false;
+    // }
   }
 
   async newSign() {

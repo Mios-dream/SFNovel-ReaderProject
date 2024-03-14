@@ -1,27 +1,30 @@
 import { SfacgOption } from "../client/Sfacg/types/ITypes";
-import { promises as fsPromises } from "fs";
+import config from "../config.json";
+
+export interface Register {
+  userName: string;
+  passWord: string;
+  token: string;
+}
 
 export interface AppConfig {
   version: string;
+  Register: Register;
   sfacg: SfacgOption;
 }
 
 export interface Base {
   proxy?: string;
   orderedChaps?: boolean;
-  accountSavefile?: string;
   novelOutput?: string;
 }
 
-export async function loadConfig(): Promise<AppConfig> {
-  const _path = process.cwd();
-  const jsonString = await fsPromises.readFile(`${_path}/src/config.json`, "utf-8");
-  const config = JSON.parse(jsonString);
-  return {
-    version: config.version || "1.0.0",
-    sfacg: {
-      ...config.Base,
-      ...config.Sfacg,
-    },
-  };
-}
+const Config: AppConfig = {
+  version: config.version || "1.0.0",
+  Register: config.Register,
+  sfacg: {
+    ...config.Base,
+    ...config.Sfacg,
+  },
+};
+export default Config;
