@@ -1,7 +1,7 @@
 import { Base } from "../../../utils/config";
 
 export interface SfacgOption extends Base {
-  sfacgAppName?: string;
+  AppName?: string;
   epubMake?: boolean;
   saveAccount?: boolean;
 }
@@ -90,4 +90,8 @@ export interface IregistInfo {
   email: string;
   smsAuthCode: string;
   shuMeiId: string;
+}
+
+export interface saveAccountInfo {
+  data: IaccountInfo[]
 }

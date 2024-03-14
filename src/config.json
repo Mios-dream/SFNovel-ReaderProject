@@ -2,14 +2,13 @@
   "version": "1.0.0",
   "Register": {
     "userName": "",
-    "passWord": ""
-  },
-  "Base": {
-    "proxy": "",
-    "orderedChaps": false
+    "passWord": "",
+    "token":""
   },
   "Sfacg": {
-    "sfacgAppName": "Sfacg",
+    "AppName": "Sfacg",
+    "proxy": "",
+    "orderedChaps": true,
     "saveAccount": true,
     "epubMake": true
   }

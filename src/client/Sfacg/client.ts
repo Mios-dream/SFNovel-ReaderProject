@@ -310,7 +310,7 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
-
+  // 广告奖励次数
   async adBonusNum(): Promise<IadBonusNum | boolean> {
     try {
       const res = await this.get<adBonusNum[]>(`user/tasks`, {
@@ -333,7 +333,7 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
-
+  //  广告奖励
   async adBonus(): Promise<any | boolean> {
     // try {
     //   const res = await this.put<any>(
@@ -350,7 +350,7 @@ export class SfacgClient extends SfacgHttp {
     //   return false;
     // }
   }
-
+  // 签到
   async newSign() {
     try {
       const res = await this.put("/user/newSignInfo", {
