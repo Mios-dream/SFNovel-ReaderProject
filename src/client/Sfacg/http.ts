@@ -8,11 +8,10 @@ const crypto = require("crypto");
 
 export class SfacgHttp {
   static readonly HOST = "https://api.sfacg.com";
-  static readonly USER_AGENT_PREFIX = "boluobao/4.9.76(iOS;16.6)/appStore/";
   static readonly USER_AGENT_RSS =
     "SFReader/4.9.76 (iPhone; iOS 16.6; Scale/3.00)";
-  static readonly USERNAME = "apiuser";
-  static readonly PASSWORD = "3s#1-yt6e*Acv@qer";
+  static readonly USERNAME = "androiduser";
+  static readonly PASSWORD = "1a#$51-yt69;*Acv@qxq";
   static readonly SALT = "FMLxgOdsfxmN!Dt4";
   static readonly DEVICE_TOKEN = uuidv4().toUpperCase();
 
@@ -27,7 +26,7 @@ export class SfacgHttp {
   }
 
   async init() {
-    let ProxyUrl = new URL(Config.sfacg.proxy??"");
+    let ProxyUrl = new URL(Config.sfacg.proxy ?? "");
     if (ProxyUrl) {
       this.client.defaults.proxy = {
         host: ProxyUrl.hostname,
@@ -61,7 +60,7 @@ export class SfacgHttp {
     response = await this.client.post<T>(url, data, {
       jar: this.cookieJar,
     });
-    return response.status;
+    return url.startsWith("/session") ? response.status : response.data;
   }
 
   async put<T, E = any>(url: string, data: E): Promise<T> {
@@ -70,7 +69,7 @@ export class SfacgHttp {
     response = await this.client.put<T>(url, data, {
       jar: this.cookieJar,
     });
-    return response.data.data;
+    return response.data;
   }
 
   getNowFormatDate(): string {
@@ -94,7 +93,7 @@ export class SfacgHttp {
         headers: {
           Accept: "application/vnd.sfacg.api+json;version=1",
           "Accept-Language": "zh-Hans-CN;q=1",
-          "User-Agent": SfacgHttp.USER_AGENT_PREFIX + SfacgHttp.DEVICE_TOKEN,
+          "User-Agent": `boluobao/4.9.98(android;34)/H5/${SfacgHttp.DEVICE_TOKEN}/H5`,
           SFSecurity: this.sfSecurity(),
         },
       })
@@ -136,7 +135,7 @@ export class SfacgHttp {
       },
       headers: {
         cookie:
-          ".SFCommunity=D4B9C3A171728ED668F16A049EF99D2A1AEDC13C330D4ED41182A66E79D0BD0484060D95570BF74287F6EFE74DE3A22E3A73D6A9649DD3FE1DE346E0BD0EA7DB6A779CA0C45F9CAAC7E9F7770D79ED1D632F5512829A7F185D54CCE1C6ED5247; session_APP=78C2FC82A225B902DBF12548F355A2F8",
+          ".SFCommunity=9BCCB8A36D15FCCBAB99F851DB042AAA74D7911EBEF6D5FB017E03771458F8F45572D161F45CC6E40B50B4B9BC1511B121A5C1995768DAA40B49BB8EA05D5551E1834B0D994D47627DCBE735C58F6F0F03BF47BA62E4BD985AC602870CFC219A; session_APP=833DA315DDF76FDF9152F955619F1AE6",
         authorization: "Basic YW5kcm9pZHVzZXI6MWEjJDUxLXl0Njk7KkFjdkBxeHE=",
         "user-agent": `boluobao/4.9.98(android;34)/H5/${SfacgHttp.DEVICE_TOKEN}/H5`,
         sfsecurity: this.sfSecurity(),

@@ -1,5 +1,5 @@
 import { SfacgClient } from "./client/Sfacg/client";
-import fs from "fs";
+import fs from "fs-extra"
 import Config from "./utils/config";
 import { SfacgHttp } from "./client/Sfacg/http";
 (async () => {
@@ -8,54 +8,56 @@ import { SfacgHttp } from "./client/Sfacg/http";
   const sfacg = new SfacgClient();
   // 搜索小说信息
   const searchInfos = await sfacg.searchInfos("屠龙", 0, 10);
-  fs.writeFileSync("./TESTDATA/searchInfos.json", JSON.stringify(searchInfos));
+  await fs.outputJson("./TESTDATA/searchInfos.json", searchInfos);
+
   // 小说信息
   const novelInfo = await sfacg.novelInfo(216187);
-  fs.writeFileSync("./TESTDATA/novelInfo.json", JSON.stringify(novelInfo));
+  await fs.outputJson("./TESTDATA/novelInfo.json", novelInfo);
+
   // 作品分类信息
   const typeInfo = await sfacg.typeInfo();
-  fs.writeFileSync("./TESTDATA/typeInfo.json", JSON.stringify(typeInfo));
+  await fs.outputJson("./TESTDATA/typeInfo.json", typeInfo);
+
   // 所有标签信息
   const tags = await sfacg.tags();
-  fs.writeFileSync("./TESTDATA/tags.json", JSON.stringify(tags));
+  await fs.outputJson("./TESTDATA/tags.json", tags);
+
   // 章节列表
   const volumeInfos = await sfacg.volumeInfos(567122);
-  fs.writeFileSync("./TESTDATA/volumeInfos.json", JSON.stringify(volumeInfos));
+  await fs.outputJson("./TESTDATA/volumeInfos.json", volumeInfos);
 
-  // // 登录状态
-  // const loginInfo = await sfacg.login("13696458853", "dddd1111", SfacgOption);
-  // fs.writeFileSync("./TESTDATA/loginInfo.json", JSON.stringify(loginInfo));
-  // // 章节内容
-  // const contentInfos = await sfacg.contentInfos(7431226);
-  // fs.writeFileSync(
-  //   "./TESTDATA/contentInfos.json",
-  //   JSON.stringify(contentInfos)
-  // );
-  // // 我的书架信息
-  // const bookshelfInfos = await sfacg.bookshelfInfos();
-  // fs.writeFileSync(
-  //   "./TESTDATA/bookshelfInfos.json",
-  //   JSON.stringify(bookshelfInfos)
-  // );
+  // 登录状态
+  const loginInfo = await sfacg.login("13696458853", "dddd1111", SfacgOption);
+  await fs.outputJson("./TESTDATA/loginInfo.json", loginInfo);
 
-  // // 谷谷谷
-  // const novels = await sfacg.novels("0");
-  // fs.writeFileSync("./TESTDATA/novels.json", JSON.stringify(novels));
-  // // 图片测试
-  // const image = await sfacg.image(
-  //   "https://rss.sfacg.com/web/novel/images/UploadPic/2023/02/3c1d9d6a-339a-43e5-a3bb-d1174bd3ea0e.jpg"
-  // );
-  // fs.writeFileSync("./TESTDATA/image.webp", image);
-  // // 看广告领代币次数
-  // const adBonusNum = await sfacg.adBonusNum();
-  // fs.writeFileSync("./TESTDATA/adBonusNum.json", JSON.stringify(adBonusNum));
-  // // 看广告领代币
-  // const adBonus = await sfacg.adBonus();
-  // fs.writeFileSync("./TESTDATA/adBonus.json", JSON.stringify(adBonus));
-  // // 签到奖励
-  // const signBous = await sfacg.newSign();
-  // fs.writeFileSync("./TESTDATA/signBous.json", JSON.stringify(signBous));
+  // 章节内容
+  const contentInfos = await sfacg.contentInfos(7431226);
+  await fs.outputJson("./TESTDATA/contentInfos.json", contentInfos);
 
-  const bounustest = await sfacg.bounusetest();
-  fs.writeFileSync("./TESTDATA/bounustest.json", JSON.stringify(bounustest));
+  // 我的书架信息
+  const bookshelfInfos = await sfacg.bookshelfInfos();
+  await fs.outputJson("./TESTDATA/bookshelfInfos.json", bookshelfInfos);
+
+  // 谷谷谷
+  const novels = await sfacg.novels("0");
+  await fs.outputJson("./TESTDATA/novels.json", novels);
+
+  // 图片测试
+  const image = await sfacg.image(
+    "https://rss.sfacg.com/web/novel/images/UploadPic/2023/02/3c1d9d6a-339a-43e5-a3bb-d1174bd3ea0e.jpg"
+  );
+  await fs.outputFile("./TESTDATA/image.webp", image);
+
+  // 看广告领代币次数
+  const adBonusNum = await sfacg.adBonusNum();
+  await fs.outputJson("./TESTDATA/adBonusNum.json", adBonusNum);
+
+  // 看广告领代币
+  const adBonus = await sfacg.adBonus();
+  await fs.outputJson("./TESTDATA/adBonus.json", adBonus);
+
+  // 签到奖励
+  const signBous = await sfacg.newSign();
+  await fs.outputJson("./TESTDATA/signBous.json", signBous);
+
 })();

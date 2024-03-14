@@ -1,8 +1,8 @@
-import fs from "fs";
+import fs from "fs-extra";
 import path from "path";
 import { SfacgOption } from "../client/Sfacg/types/ITypes";
 
-// 假设这些接口已经在其他地方定义
+
 export interface Register {
   userName: string;
   passWord: string;
@@ -22,29 +22,42 @@ export interface Base {
 // 配置文件路径
 const CONFIG_PATH = path.join(__dirname, "../config.json");
 
-// 加载配置文件
-function loadConfig(): AppConfig {
-  try {
-    const configText = fs.readFileSync(CONFIG_PATH, { encoding: "utf-8" });
-    return JSON.parse(configText);
-  } catch (error) {
-    throw new Error(`无法加载配置文件: ${error}`);
+export class ProxyHandler<T extends Record<string, any>> {
+  private configPath: string;
+  private config: T;
+
+  constructor(configPath: string) {
+    this.configPath = configPath;
+    this.config = this.loadConfig();
+  }
+
+  // 加载配置文件
+  private loadConfig(): T {
+    try {
+      return fs.readJSONSync(this.configPath);
+    } catch (error) {
+      throw new Error(`无法加载配置文件: ${error}`);
+    }
+  }
+
+  createProxy(): T {
+    return new Proxy<T>(this.config, {
+      set: (target: T, property: string | symbol, value: any): boolean => {
+        if (typeof property === 'string') {
+          const updatedTarget = { ...target, [property]: value };
+          // 异步写入配置到文件
+          fs.writeJson(this.configPath, updatedTarget, { spaces: 2 })
+            .then(() => console.log('配置已自动保存。'))
+            .catch(err => console.error(`错误写入配置文件: ${err}`));
+          this.config = updatedTarget;
+        }
+        return true;
+      },
+    });
   }
 }
 
-// 创建一个代理来自动保存更改到配置文件
-const Config: AppConfig = new Proxy(loadConfig(), {
-  set(target: AppConfig, property: keyof AppConfig, value: any): boolean {
-    target[property] = value;
-    // 异步写入配置到文件
-    fs.writeFile(CONFIG_PATH, JSON.stringify(target, null, 2), (err) => {
-      if (err) {
-        console.error(`错误写入配置文件: ${err}`);
-        return false;
-      }
-    });
-    return true;
-  },
-});
+const configHandler = new ProxyHandler(CONFIG_PATH);
+const Config = configHandler.createProxy();
 
 export default Config;

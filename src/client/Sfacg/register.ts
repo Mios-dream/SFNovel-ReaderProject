@@ -12,16 +12,16 @@ export class SfacgRegister extends SfacgHttp {
      * @returns 
      */
   async avalibleNmae(name: string) {
-    return await this.post("/users/availablename", {
+    return this.post("/users/availablename", {
       nickName: name,
     });
   }
   async sendCode(phoneNum: number) {
-    return await this.post(`/sms/${phoneNum}/86`, "");
+    return this.post(`/sms/${phoneNum}/86`, "");
   }
 
   async codeverify(phoneNum: number, smsAuthCode: number) {
-    return await this.put(`/sms/${phoneNum}/86`, { smsAuthCode: smsAuthCode });
+    return this.put(`/sms/${phoneNum}/86`, { smsAuthCode: smsAuthCode });
   }
 
   async regist(
@@ -30,7 +30,7 @@ export class SfacgRegister extends SfacgHttp {
     phoneNum: number,
     smsAuthCode: number
   ) {
-    return await this.post("/user", {
+    return this.post("/user", {
       passWord: passWord,
       nickName: nickName,
       countryCode: "86",
