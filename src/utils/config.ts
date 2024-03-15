@@ -8,7 +8,6 @@ export interface Register {
   passWord: string;
   token: string
 }
-
 export interface AppConfig {
   version: string;
   Register: Register;
@@ -22,6 +21,7 @@ export interface Base {
 // 配置文件路径
 const CONFIG_PATH = path.join(__dirname, "../config.json");
 
+// Still in optimization, waitting to add the support for AcoountManager && smsService 
 export class ProxyHandler<T extends Record<string, any>> {
   private configPath: string;
   private config: T;

@@ -125,21 +125,4 @@ export class SfacgHttp {
       .toUpperCase();
     return `nonce=${uuid}&timestamp=${timestamp}&devicetoken=${SfacgHttp.DEVICE_TOKEN}&sign=${hash}`;
   }
-
-  async bounusetest() {
-    return await axios({
-      url: `https://api.sfacg.com/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
-      method: "put",
-      data: {
-        num: 1,
-      },
-      headers: {
-        cookie:
-          ".SFCommunity=9BCCB8A36D15FCCBAB99F851DB042AAA74D7911EBEF6D5FB017E03771458F8F45572D161F45CC6E40B50B4B9BC1511B121A5C1995768DAA40B49BB8EA05D5551E1834B0D994D47627DCBE735C58F6F0F03BF47BA62E4BD985AC602870CFC219A; session_APP=833DA315DDF76FDF9152F955619F1AE6",
-        authorization: "Basic YW5kcm9pZHVzZXI6MWEjJDUxLXl0Njk7KkFjdkBxeHE=",
-        "user-agent": `boluobao/4.9.98(android;34)/H5/${SfacgHttp.DEVICE_TOKEN}/H5`,
-        sfsecurity: this.sfSecurity(),
-      },
-    });
-  }
 }

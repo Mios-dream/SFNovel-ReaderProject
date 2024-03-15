@@ -105,6 +105,7 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
+  // Infos for this Novel
   async novelInfo(novelId: number): Promise<InovelInfo | boolean> {
     try {
       const res = await this.get<novelInfo>(`/novels/${novelId}`, {
@@ -359,4 +360,5 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
+
 }
