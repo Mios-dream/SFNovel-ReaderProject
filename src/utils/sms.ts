@@ -1,6 +1,6 @@
 import axios from "axios";
 import Config from "./config";
-
+import { smsGetPhone, smsLogin } from "./types/types";
 
 
 export class sms {
@@ -14,18 +14,16 @@ export class sms {
     this.token = Config.Register.token
   }
 
-  async sms(app: string) {
-    let sid: number = 50896
-    switch (app) {
-      case "sfacg":
-        sid = 50896
-      case "ciweimao":
-        sid = 22439
+  async sms(sid: number) {
+    let phone = await this.getPhone(sid)
+    if (!this.token || phone == 0) {
+      await this.login()
+      phone = await this.getPhone(sid)
     }
-    await this.getPhone(sid)
+    return phone
   }
   private async login() {
-    const res = await axios.post("http://h5.haozhuma.com/login.php", {
+    const res = await axios.post<smsLogin>("http://h5.haozhuma.com/login.php", {
       username: this.userName,
       password: this.passWord,
     });
@@ -33,22 +31,27 @@ export class sms {
     Config.Register.token = this.token
   }
   private async getPhone(sid: number): Promise<number> {
-    const res = await axios.post("http://api.haozhuma.com/sms/", {
-      api: "getPhone",
-      token: this.token,
-      sid: sid,
-      Province: "",
-      ascription: ""
-    })
-    return res.data.phone
+    try {
+      const res = await axios.post<smsGetPhone>("http://api.haozhuma.com/sms/", {
+        api: "getPhone",
+        token: this.token,
+        sid: sid,
+        Province: "",
+        ascription: ""
+      })
+      return Number(res.data.phone)
+    } catch (err: any) {
+      return 0
+    }
+
   }
-  private async receive(sid: number, phone: number): Promise<any> {
+  async receive(sid: number, phone: number): Promise<any> {
     const res = await axios.post("http://api.haozhuma.com/sms", {
       api: "getMessage",
       token: this.token,
       sid: sid,
       phone: phone,
-      tm: Date
+      tm: new Date().getTime
     })
     return res.data
   }

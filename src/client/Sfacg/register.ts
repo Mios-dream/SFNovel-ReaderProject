@@ -1,27 +1,31 @@
+import { sms } from "../../utils/sms";
 import { SfacgHttp } from "./http";
+import { codeverify, nameAvalible, regist, sendCode } from "./types/Types";
 
 export class SfacgRegister extends SfacgHttp {
-  // 验证名称是否可用
-  /**
-    成功响应
-    {"status":{"httpCode":200,"errorCode":200,"msgType":0,"msg":null},"data":{"availableName":"hehdvs3","nickName":{"valid":true,"msg":"success"}}}
+  phone: number = 0;
+  sms: sms;
+  constructor() {
+    super();
+    this.sms = new sms();
+  }
 
-    失败响应（其一）
-    {"status":{"httpCode":200,"errorCode":200,"msgType":0,"msg":null},"data":{"availableName":"hehdvs3","nickName":{"valid":false,"msg":"该昵称存在标点符号，请修改"}}}
-     * @param name 
-     * @returns 
-     */
-  async avalibleNmae(name: string) {
-    return this.post("/users/availablename", {
+  async avalibleNmae(name: string): Promise<boolean> {
+    const res = await this.post<nameAvalible>("/users/availablename", {
       nickName: name,
     });
+    return res.data.nickName.valid;
   }
-  async sendCode(phoneNum: number) {
-    return this.post(`/sms/${phoneNum}/86`, "");
+  async sendCode() {
+    this.phone = await this.sms.sms(50896);
+    let res = await this.post<sendCode>(`/sms/${this.phone}/86`, "");
+    return res.status.httpCode == 201;
   }
 
   async codeverify(phoneNum: number, smsAuthCode: number) {
-    return this.put(`/sms/${phoneNum}/86`, { smsAuthCode: smsAuthCode });
+    return this.put<codeverify>(`/sms/${phoneNum}/86`, {
+      smsAuthCode: smsAuthCode,
+    });
   }
 
   async regist(
@@ -30,7 +34,7 @@ export class SfacgRegister extends SfacgHttp {
     phoneNum: number,
     smsAuthCode: number
   ) {
-    return this.post("/user", {
+    let res = await this.post<regist>("/user", {
       passWord: passWord,
       nickName: nickName,
       countryCode: "86",
@@ -39,5 +43,8 @@ export class SfacgRegister extends SfacgHttp {
       smsAuthCode: smsAuthCode,
       shuMeiId: "",
     });
+    let accountID = res.data.accountId;
+    console.log("注册成功，账号ID为" + accountID);
+    return accountID;
   }
 }

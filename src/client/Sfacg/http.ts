@@ -54,7 +54,7 @@ export class SfacgHttp {
     return response.data;
   }
 
-  async post<T, E>(url: string, data: E): Promise<T> {
+  async post<T, E = any>(url: string, data: E): Promise<T> {
     let response: any;
     this.client = this._client();
     response = await this.client.post<T>(url, data, {

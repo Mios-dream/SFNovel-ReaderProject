@@ -3,11 +3,11 @@
   "Register": {
     "userName": "",
     "passWord": "",
-    "token":""
+    "token": ""
   },
   "Sfacg": {
-    "AppName": "Sfacg",
     "proxy": "",
+    "AppName": "Sfacg",
     "orderedChaps": true,
     "saveAccount": true,
     "epubMake": true

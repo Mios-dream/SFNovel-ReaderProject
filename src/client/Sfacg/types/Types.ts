@@ -138,7 +138,8 @@ export interface bookshelfInfos {
   isFull: boolean; // 是否已满
   canModify: boolean; // 是否可以修改
   expand: bookshelfInfos_Expand; // 扩展信息
-}[]
+}
+[];
 
 // _开头表示被categories和bookshelfInfos共享的扩展信息，
 export interface bookshelfInfos_Expand {
@@ -265,3 +266,29 @@ export interface adBonusNum {
   extendId: object; // 扩展ID对象（具体结构未说明）
 }
 [];
+
+// { "status": { "httpCode": 200, "errorCode": 200, "msgType": 0, "msg": null }, "data": { "availableName": "hehdvs3", "nickName": { "valid": true, "msg": "success" } } }
+//{"status":{"httpCode":200,"errorCode":200,"msgType":0,"msg":null},"data":{"availableName":"hehdvs3","nickName":{"valid":false,"msg":"该昵称存在标点符号，请修改"}}}
+export interface nameAvalible {
+  status: { httpCode: number; errorCode: number; msgType: number; msg: object };
+  data: { availableName: string; nickName: { valid: boolean; msg: string } };
+}
+
+// { "status": { "httpCode": 201, "errorCode": 200, "msgType": 0, "msg": null }, "data": null }
+export interface sendCode {
+  status: { httpCode: number; errorCode: number; msgType: number; msg: object };
+  data: object;
+}
+
+//{"status":{"httpCode":200,"errorCode":200,"msgType":0,"msg":null},"data":null}
+//{"status":{"httpCode":422,"errorCode":727,"msgType":0,"msg":"手机验证码错误"},"data":null}
+export interface codeverify {
+  status: { httpCode: number; errorCode: number; msgType: number; msg: object };
+  data: object;
+}
+
+//{"status":{"httpCode":201,"errorCode":200,"msgType":0,"msg":null},"data":{"accountId":9823829}}
+export interface regist {
+  status: { httpCode: number; errorCode: number; msgType: number; msg: object };
+  data: { accountId: number };
+}

@@ -19,13 +19,12 @@ import {
   IvolumeInfos,
   Ichapter,
   IadBonusNum,
-  SfacgOption,
   IbookshelfInfos,
   IsearchInfos,
 } from "./types/ITypes";
+import Config from "../../utils/config";
 
 export class SfacgClient extends SfacgHttp {
-
 
   /**
    *
@@ -36,14 +35,13 @@ export class SfacgClient extends SfacgHttp {
   async login(
     username: string,
     password: string,
-    option?: SfacgOption
   ): Promise<IaccountInfo | boolean> {
     try {
       const res = await this.post<number, IaccountInfo>("/sessions", {
         userName: username,
         passWord: password,
       });
-      if (option?.saveAccount) {
+      if (Config.sfacg.saveAccount) {
         const baseinfo: IaccountInfo = await this.userInfo();
         const money: IaccountInfo = await this.userMoney();
         const acconutInfo = {
@@ -337,13 +335,13 @@ export class SfacgClient extends SfacgHttp {
   //  广告奖励
   async adBonus(): Promise<any | boolean> {
 
-      const res = await this.put<any>(
-        `/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
-        {
-          num:"1"
-        }
-      );
-      return res;
+    const res = await this.put<any>(
+      `/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
+      {
+        num: "1"
+      }
+    );
+    return res;
 
   }
   // 签到

@@ -93,5 +93,8 @@ export interface IregistInfo {
 }
 
 export interface saveAccountInfo {
-  data: IaccountInfo[]
+  data: IaccountInfo[];
 }
+
+
+
