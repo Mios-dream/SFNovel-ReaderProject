@@ -267,6 +267,34 @@ export interface adBonusNum {
 }
 [];
 
+export interface adBonus {
+  status: { httpCode: number; errorCode: number; msgType: number; msg: object };
+  data: object;
+};
+
+export interface tasks {
+  recordId: number;
+  taskId: number;
+  requireNum: number;
+  completeNum: number;
+  status: number;
+  name: string;
+  desc: string;
+  link: string;
+  type: string;
+  addDate: string;
+  tips1: string;
+  tips2: string;
+  bonusInfo: { bonusType: number; bonus: number }[];
+  taskType: number;
+  category: number;
+  comic: object;
+  comicList: object;
+  exp: number;
+  extendId: object;
+}[];
+
+
 // { "status": { "httpCode": 200, "errorCode": 200, "msgType": 0, "msg": null }, "data": { "availableName": "hehdvs3", "nickName": { "valid": true, "msg": "success" } } }
 //{"status":{"httpCode":200,"errorCode":200,"msgType":0,"msg":null},"data":{"availableName":"hehdvs3","nickName":{"valid":false,"msg":"该昵称存在标点符号，请修改"}}}
 export interface nameAvalible {

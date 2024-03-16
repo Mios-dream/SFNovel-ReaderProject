@@ -26,7 +26,7 @@ export class SfacgHttp {
   }
 
   async init() {
-    let ProxyUrl = new URL(Config.sfacg.proxy ?? "");
+    let ProxyUrl = new URL(Config.Sfacg.proxy ?? "");
     if (ProxyUrl) {
       this.client.defaults.proxy = {
         host: ProxyUrl.hostname,
@@ -34,6 +34,7 @@ export class SfacgHttp {
       };
     }
   }
+
   async get<T, E = any>(url: string, query?: E): Promise<T> {
     let response: AxiosResponse;
     url.startsWith("/Chaps") ? (this.client = this._client()) : "";

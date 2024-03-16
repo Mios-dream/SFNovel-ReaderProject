@@ -1,20 +1,26 @@
-import { SfacgHttp } from "./http";
+import { SfacgHttp } from "./basehttp";
 import {
+  adBonus,
   adBonusNum,
   bookshelfInfos,
+  codeverify,
   contentInfos,
+  nameAvalible,
   novelInfo,
+  regist,
   searchInfos,
+  sendCode,
   tags,
+  tasks,
   typeInfo,
   userInfo,
   userMoney,
   volumeInfos,
 } from "./types/Types";
-
 import {
   Itag,
   IaccountInfo,
+  saveAccountInfo,
   InovelInfo,
   IvolumeInfos,
   Ichapter,
@@ -23,6 +29,8 @@ import {
   IsearchInfos,
 } from "./types/ITypes";
 import Config from "../../utils/config";
+import { sms } from "../../utils/sms";
+import fs from "fs-extra";
 
 export class SfacgClient extends SfacgHttp {
 
@@ -36,31 +44,23 @@ export class SfacgClient extends SfacgHttp {
     username: string,
     password: string,
   ): Promise<IaccountInfo | boolean> {
-    try {
-      const res = await this.post<number, IaccountInfo>("/sessions", {
+    const res = await this.post<number, IaccountInfo>("/sessions", {
+      userName: username,
+      passWord: password,
+    });
+    if (Config.Sfacg.saveAccount) {
+      const baseinfo: IaccountInfo = await this.userInfo();
+      const money: IaccountInfo = await this.userMoney();
+      const acconutInfo = {
         userName: username,
         passWord: password,
-      });
-      if (Config.sfacg.saveAccount) {
-        const baseinfo: IaccountInfo = await this.userInfo();
-        const money: IaccountInfo = await this.userMoney();
-        const acconutInfo = {
-          userName: username,
-          passWord: password,
-          ...baseinfo,
-          ...money,
-        };
-        return acconutInfo;
-      }
-      return res == 200 ? true : false;
-    } catch (err: any) {
-      console.error(
-        `${username} LOGIN failed : ${JSON.stringify(
-          err.response.data.status.msg
-        )}`
-      );
-      return false;
+        ...baseinfo,
+        ...money,
+      };
+      return acconutInfo;
     }
+    return res == 200 ? true : false;
+
   }
   /**
    * 仅当login的保存选项被打开时执行
@@ -309,6 +309,9 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
+}
+
+export class SfacgTasker extends SfacgHttp{
   // 广告奖励次数
   async adBonusNum(): Promise<IadBonusNum | boolean> {
     try {
@@ -333,15 +336,15 @@ export class SfacgClient extends SfacgHttp {
     }
   }
   //  广告奖励
-  async adBonus(): Promise<any | boolean> {
+  async adBonus(): Promise<boolean> {
 
-    const res = await this.put<any>(
+    const res = await this.put<adBonus>(
       `/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
       {
         num: "1"
       }
     );
-    return res;
+    return res.status.httpCode == 200;
 
   }
   // 签到
@@ -359,4 +362,107 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
+  // 获取任务列表
+  async getTasks() {
+    const res = await this.get<tasks[]>("/user/tasks", {
+      taskCategory: 1,
+      package: "com.sfacg",
+      deviceToken: SfacgHttp.DEVICE_TOKEN,
+      page: 0,
+      size: 20
+    })
+    res.filter((task) => task.status)
+  }
 }
+
+export class SfacgRegister extends SfacgHttp {
+  phone: number = 0;
+  sms: sms;
+  constructor() {
+    super();
+    this.sms = new sms();
+  }
+
+  async avalibleNmae(name: string): Promise<boolean> {
+    const res = await this.post<nameAvalible>("/users/availablename", {
+      nickName: name,
+    });
+    return res.data.nickName.valid;
+  }
+  async sendCode() {
+    this.phone = await this.sms.sms(50896);
+    const res = await this.post<sendCode>(`/sms/${this.phone}/86`, "");
+    return res.status.httpCode == 201;
+  }
+
+  async codeverify(phoneNum: number, smsAuthCode: number) {
+    const res = await this.put<codeverify>(`/sms/${phoneNum}/86`, {
+      smsAuthCode: smsAuthCode,
+    });
+    return res.status.httpCode == 200
+  }
+
+  async regist(
+    passWord: string,
+    nickName: string,
+    phoneNum: number,
+    smsAuthCode: number
+  ) {
+    let res = await this.post<regist>("/user", {
+      passWord: passWord,
+      nickName: nickName,
+      countryCode: "86",
+      phoneNum: phoneNum,
+      email: "",
+      smsAuthCode: smsAuthCode,
+      shuMeiId: "",
+    });
+    let accountID = res.data.accountId;
+    return accountID;
+  }
+}
+
+export class SfacgAccountManager {
+  private account: saveAccountInfo
+  constructor() {
+    // 代理一下，省的麻烦
+    const saveAccountPath = `${__dirname}/output/Accounts/${Config.Sfacg.AppName}.json`;
+    const saveAccountInfo: saveAccountInfo = fs.readJSONSync(saveAccountPath);
+    this.account = new Proxy(saveAccountInfo,
+      {
+        set(target: saveAccountInfo, p: keyof saveAccountInfo, newValue: any, receiver) {
+          target[p] = newValue;
+          fs.writeJSON(saveAccountPath, target, { spaces: 2 })
+            .then(() => console.log('账号已自动保存。'))
+            .catch(err => console.error(`错误写入账号文件: ${err}`));
+          return true
+        },
+
+      }
+
+    )
+  }
+  addCheckInfo(userName: string) {
+
+
+  }
+
+  addAccount(acconutInfo: IaccountInfo) {
+    this.account.data.push(acconutInfo)
+  }
+
+  removeAccount(userName: string) {
+    const index = this.account.data.findIndex((account) => {
+      account.userName == userName
+    })
+    if (index !== -1) {
+      this.account.data.splice(index, 1);
+    }
+  }
+  getAccountList() {
+    return this.account.data.map(({ userName, fireMoneyRemain = 0, couponsRemain = 0 }, index) =>
+      `${index + 1}.${userName} 余额： ${fireMoneyRemain + couponsRemain}`
+    ).join('\n');
+  }
+}
+

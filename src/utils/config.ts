@@ -11,7 +11,7 @@ export interface Register {
 export interface AppConfig {
   version: string;
   Register: Register;
-  sfacg: SfacgOption;
+  Sfacg: SfacgOption;
 }
 export interface Base {
   proxy?: string;
