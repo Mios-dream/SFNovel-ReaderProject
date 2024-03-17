@@ -19,7 +19,7 @@ export interface Base {
 }
 
 // 配置文件路径
-const CONFIG_PATH = path.join(__dirname, "../config.json");
+const CONFIG_PATH = path.resolve(__dirname, "../config.json");
 
 // Still in optimization, waitting to add the support for AcoountManager && smsService 
 function loadConfig() {

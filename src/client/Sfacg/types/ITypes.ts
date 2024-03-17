@@ -1,9 +1,13 @@
 import { Base } from "../../../utils/config";
 
 export interface SfacgOption extends Base {
-  AppName?: string;
+  AppName: string;
   epubMake?: boolean;
   saveAccount?: boolean;
+}
+
+export interface saveAccountInfo {
+  data: IaccountInfo[];
 }
 
 export interface IaccountInfo {
@@ -11,10 +15,11 @@ export interface IaccountInfo {
   passWord?: string; // 密码
   nickName?: string; // 昵称
   avatar?: string; // 头像网址
-  lastCheckIn?: string; //上次签到时间\
   vipLevel?: number; // vip等级
   fireMoneyRemain?: number; // 未使用的火币
   couponsRemain?: number; // 未使用的代币
+  lastCheckIn?: string; //上次签到时间\
+  cookie?: string
 }
 
 export interface Itag {
@@ -92,9 +97,7 @@ export interface IregistInfo {
   shuMeiId: string;
 }
 
-export interface saveAccountInfo {
-  data: IaccountInfo[];
-}
+
 
 
 

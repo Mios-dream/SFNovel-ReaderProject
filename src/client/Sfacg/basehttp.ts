@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosResponse } from "axios";
-import { v4 as uuidv4 } from "uuid";
+import { NIL, v4 as uuidv4 } from "uuid";
 import { wrapper } from "axios-cookiejar-support";
 import { CookieJar } from "tough-cookie";
 import Config from "../../utils/config";
@@ -17,21 +17,25 @@ export class SfacgHttp {
 
   private client: AxiosInstance;
   private clientRss: AxiosInstance;
-  private cookieJar: CookieJar;
+  cookieJar: CookieJar;
 
   constructor() {
+    this._init();
     this.cookieJar = new CookieJar();
     this.client = this._client();
     this.clientRss = this._clientRss();
   }
 
-  async init() {
-    let ProxyUrl = new URL(Config.Sfacg.proxy ?? "");
-    if (ProxyUrl) {
-      this.client.defaults.proxy = {
-        host: ProxyUrl.hostname,
-        port: parseInt(ProxyUrl.port),
-      };
+  private async _init() {
+    let ProxyUrl;
+    if (Config.Sfacg.proxy) {
+      ProxyUrl = new URL(Config.Sfacg.proxy);
+      if (ProxyUrl) {
+        this.client.defaults.proxy = {
+          host: ProxyUrl.hostname,
+          port: parseInt(ProxyUrl.port),
+        };
+      }
     }
   }
 

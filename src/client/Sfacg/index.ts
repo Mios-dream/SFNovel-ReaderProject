@@ -20,7 +20,6 @@ import {
 import {
   Itag,
   IaccountInfo,
-  saveAccountInfo,
   InovelInfo,
   IvolumeInfos,
   Ichapter,
@@ -30,37 +29,54 @@ import {
 } from "./types/ITypes";
 import Config from "../../utils/config";
 import { sms } from "../../utils/sms";
-import fs from "fs-extra";
+import { accountManager } from "../../utils/account";
+
 
 export class SfacgClient extends SfacgHttp {
+  accountManager: SfacgAccountManager
 
-  /**
-   *
-   * @param username  用户名
-   * @param password  密码
-   * @returns  登录状态
-   */
+  constructor() {
+    super();
+    this.accountManager = new SfacgAccountManager()
+  }
+
+
+  async init(userName: string, passWord: string): Promise<void> {
+    let cookie = this.accountManager.cookieGet(userName)
+    if (cookie) {
+      this.cookieJar.setCookieSync(cookie, SfacgHttp.HOST)
+    }
+    else {
+      await this.login(userName, passWord)
+    }
+  }
+  // 登录
   async login(
-    username: string,
-    password: string,
+    userName: string,
+    passWord: string,
   ): Promise<IaccountInfo | boolean> {
     const res = await this.post<number, IaccountInfo>("/sessions", {
-      userName: username,
-      passWord: password,
+      userName: userName,
+      passWord: passWord,
     });
+    if (res !== 200) {
+      return false
+    }
     if (Config.Sfacg.saveAccount) {
       const baseinfo: IaccountInfo = await this.userInfo();
       const money: IaccountInfo = await this.userMoney();
+      const cookie: string = this.cookieJar.getCookieStringSync(SfacgHttp.HOST)
       const acconutInfo = {
-        userName: username,
-        passWord: password,
+        userName: userName,
+        passWord: passWord,
+        cookie: cookie,
         ...baseinfo,
         ...money,
       };
+      this.accountManager.addAccount(acconutInfo)
       return acconutInfo;
     }
-    return res == 200 ? true : false;
-
+    return true
   }
   /**
    * 仅当login的保存选项被打开时执行
@@ -285,11 +301,11 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
-  // 获取分类主页
-  async novels(option: any): Promise<any> {
-    const res = await this.get(`/novels/${option}/sysTags/novels`);
-    return res ?? false;
-  }
+  // // 获取分类主页,一堆参数没卵用，懒得写了
+  // async novels(option: any): Promise<any> {
+  //   const res = await this.get(`/novels/${option}/sysTags/novels`);
+  //   return res ?? false;
+  // }
 
   // 购买章节
   async orderChap(novelId: string, chapId: number[]): Promise<any> {
@@ -309,9 +325,23 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
-}
 
-export class SfacgTasker extends SfacgHttp{
+  /**
+   *   
+   *  TaskTime Below !
+   * 。。。(> . <)。。。
+   * @param novelId 
+   * @param chapId 
+   * @returns 
+   */
+
+
+  async Tasker() {
+    const adBonusNum = this.adBonusNum()
+
+  }
+
+
   // 广告奖励次数
   async adBonusNum(): Promise<IadBonusNum | boolean> {
     try {
@@ -336,17 +366,24 @@ export class SfacgTasker extends SfacgHttp{
     }
   }
   //  广告奖励
-  async adBonus(): Promise<boolean> {
-
-    const res = await this.put<adBonus>(
-      `/user/tasks/21/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
-      {
-        num: "1"
-      }
-    );
-    return res.status.httpCode == 200;
-
+  async adBonus(id: string): Promise<boolean> {
+    try {
+      const res = await this.put<adBonus>(
+        `/user/tasks/${id}/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
+        {
+          num: "1"
+        }
+      );
+      return res.status.httpCode == 200;
+    }
+    catch (err: any) {
+      console.error(
+        `PUT adBonusNum failed: ${JSON.stringify(err.response.data.status.msg)}`
+      );
+      return false;
+    }
   }
+
   // 签到
   async newSign() {
     try {
@@ -371,9 +408,44 @@ export class SfacgTasker extends SfacgHttp{
       page: 0,
       size: 20
     })
-    res.filter((task) => task.status)
+    let a = res.filter((task) => task.status == 0)
+    return a
   }
+
+  // 得到分配的任务
+  async claimTask(id: number) {
+    const res = await this.post<any>(`/user/tasks/${id}`, {})
+    return res
+  }
+
+  // 阅读时长
+  async readTime(time: number) {
+    const res = await this.put("/user/readingtime", {
+      seconds: time,
+      entityType: 2,
+      chapterId: 477385,
+      entityId: 368037,
+      readingDate: this.getNowFormatDate()
+    })
+    return res
+  }
+
+  // 分享
+  async share(userId: string) {
+    const res = this.put(`/user/tasks?taskId=4&userId=${userId}`, {
+      env: 0
+    })
+    return res
+  }
+
+  // 任务得到奖励
+  async taskBonus(id: number) {
+    const res = await this.put<any>(`/user/tasks/${id}`, {})
+  }
+
 }
+
+
 
 export class SfacgRegister extends SfacgHttp {
   phone: number = 0;
@@ -422,37 +494,29 @@ export class SfacgRegister extends SfacgHttp {
   }
 }
 
-export class SfacgAccountManager {
-  private account: saveAccountInfo
+export class SfacgAccountManager extends accountManager {
   constructor() {
-    // 代理一下，省的麻烦
-    const saveAccountPath = `${__dirname}/output/Accounts/${Config.Sfacg.AppName}.json`;
-    const saveAccountInfo: saveAccountInfo = fs.readJSONSync(saveAccountPath);
-    this.account = new Proxy(saveAccountInfo,
-      {
-        set(target: saveAccountInfo, p: keyof saveAccountInfo, newValue: any, receiver) {
-          target[p] = newValue;
-          fs.writeJSON(saveAccountPath, target, { spaces: 2 })
-            .then(() => console.log('账号已自动保存。'))
-            .catch(err => console.error(`错误写入账号文件: ${err}`));
-          return true
-        },
-
-      }
-
-    )
+    super(Config.Sfacg.AppName);
   }
-  addCheckInfo(userName: string) {
 
+  cookieGet(userName: string) {
+    const accountInfo = this.account.data.find((account: { userName: string; }) => account.userName === userName);
+    return accountInfo ? accountInfo?.cookie : null;
+  }
+
+  addCheckInfo(userName: string) {
 
   }
 
   addAccount(acconutInfo: IaccountInfo) {
+    console.log(this.account.data)
+    console.log(acconutInfo)
     this.account.data.push(acconutInfo)
+    console.log(this.account.data)
   }
 
   removeAccount(userName: string) {
-    const index = this.account.data.findIndex((account) => {
+    const index = this.account.data.findIndex((account: { userName: string; }) => {
       account.userName == userName
     })
     if (index !== -1) {
@@ -460,9 +524,11 @@ export class SfacgAccountManager {
     }
   }
   getAccountList() {
-    return this.account.data.map(({ userName, fireMoneyRemain = 0, couponsRemain = 0 }, index) =>
+    return this.account.data.map(({ userName, fireMoneyRemain = 0, couponsRemain = 0 }: any, index: number) =>
       `${index + 1}.${userName} 余额： ${fireMoneyRemain + couponsRemain}`
     ).join('\n');
   }
+
+
 }
 
