@@ -1,18 +1,15 @@
-import { Base } from "../../../utils/config";
 
-export interface SfacgOption extends Base {
-  AppName: string;
-  epubMake?: boolean;
-  saveAccount?: boolean;
-}
 
-export interface saveAccountInfo {
+
+
+export interface SfacgsaveAccountInfo {
   data: IaccountInfo[];
 }
 
 export interface IaccountInfo {
   userName?: string; // 用户名
   passWord?: string; // 密码
+  accountId?:string // 用户ID
   nickName?: string; // 昵称
   avatar?: string; // 头像网址
   vipLevel?: number; // vip等级
@@ -66,7 +63,6 @@ export interface Ichapter {
 export interface IadBonusNum {
   taskId: number; // 任务ID
   requireNum: number; // 未完成看广告领奖次数
-  completeNum: number; // 已完成看广告领奖次数
 }
 
 export interface IbookshelfInfos {

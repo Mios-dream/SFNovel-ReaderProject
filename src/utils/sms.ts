@@ -1,17 +1,15 @@
 import axios from "axios";
-import Config from "./config";
 import { smsGetPhone, smsLogin } from "./types/types";
 
 
 export class sms {
   private userName: string;
   private passWord: string;
-  private token: string
+  private token: any
 
   constructor() {
-    this.userName = Config.Register.userName;
-    this.passWord = Config.Register.passWord;
-    this.token = Config.Register.token
+    this.userName = process.env.SMS_USERNAME ?? "1"
+    this.passWord = process.env.SMS_PASSWORD ?? "1"
   }
 
   async sms(sid: number) {
@@ -28,7 +26,6 @@ export class sms {
       password: this.passWord,
     });
     this.token = res.data.token;
-    Config.Register.token = this.token
   }
   private async getPhone(sid: number): Promise<number> {
     try {

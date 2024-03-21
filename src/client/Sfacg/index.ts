@@ -1,534 +1,80 @@
-import { SfacgHttp } from "./basehttp";
-import {
-  adBonus,
-  adBonusNum,
-  bookshelfInfos,
-  codeverify,
-  contentInfos,
-  nameAvalible,
-  novelInfo,
-  regist,
-  searchInfos,
-  sendCode,
-  tags,
-  tasks,
-  typeInfo,
-  userInfo,
-  userMoney,
-  volumeInfos,
-} from "./types/Types";
-import {
-  Itag,
-  IaccountInfo,
-  InovelInfo,
-  IvolumeInfos,
-  Ichapter,
-  IadBonusNum,
-  IbookshelfInfos,
-  IsearchInfos,
-} from "./types/ITypes";
-import Config from "../../utils/config";
-import { sms } from "../../utils/sms";
-import { accountManager } from "../../utils/account";
+import { initial, times } from "lodash";
+import readlineSync from 'readline-sync';
+import { SfacgAccountManager, SfacgClient, SfacgRegister } from "./client";
+// const baseinfo = await this.userInfo()
+// const money = await this.userMoney()
+// const cookie: string = this.cookieJar.getCookieStringSync(SfacgHttp.HOST)
+// const acconutInfo = {
+//   userName: userName,
+//   passWord: passWord,
+//   cookie: cookie,
+//   ...baseinfo,
+//   ...money,
+// };
 
 
-export class SfacgClient extends SfacgHttp {
-  accountManager: SfacgAccountManager
+export class Sfacg {
 
-  constructor() {
-    super();
-    this.accountManager = new SfacgAccountManager()
-  }
+    client: SfacgClient
+    accountManager: SfacgAccountManager
+    register: SfacgRegister
 
-
-  async init(userName: string, passWord: string): Promise<void> {
-    let cookie = this.accountManager.cookieGet(userName)
-    if (cookie) {
-      this.cookieJar.setCookieSync(cookie, SfacgHttp.HOST)
+    constructor() {
+        this.client = new SfacgClient()
+        this.accountManager = new SfacgAccountManager()
+        this.register = new SfacgRegister()
     }
-    else {
-      await this.login(userName, passWord)
-    }
-  }
-  // 登录
-  async login(
-    userName: string,
-    passWord: string,
-  ): Promise<IaccountInfo | boolean> {
-    const res = await this.post<number, IaccountInfo>("/sessions", {
-      userName: userName,
-      passWord: passWord,
-    });
-    if (res !== 200) {
-      return false
-    }
-    if (Config.Sfacg.saveAccount) {
-      const baseinfo: IaccountInfo = await this.userInfo();
-      const money: IaccountInfo = await this.userMoney();
-      const cookie: string = this.cookieJar.getCookieStringSync(SfacgHttp.HOST)
-      const acconutInfo = {
-        userName: userName,
-        passWord: passWord,
-        cookie: cookie,
-        ...baseinfo,
-        ...money,
-      };
-      this.accountManager.addAccount(acconutInfo)
-      return acconutInfo;
-    }
-    return true
-  }
-  /**
-   * 仅当login的保存选项被打开时执行
-   * @returns 用户信息
-   */
-  async userInfo(): Promise<any> {
-    try {
-      const res = await this.get<userInfo>("/user");
-      // 补充用户基础信息
-      const baseinfo = {
-        nickName: res.nickName,
-        avatar: res.avatar,
-      };
-      return baseinfo;
-    } catch (err: any) {
-      console.error(
-        `GET userInfo failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      return false;
-    }
-  }
-  /**
-   * 仅当login的保存选项被打开时执行
-   * @returns
-   */
-  async userMoney(): Promise<any> {
-    try {
-      const res = await this.get<userMoney>("/user/money");
-      // 补充用户余额信息
-      const money = {
-        fireMoneyRemain: res.fireMoneyRemain,
-        couponsRemain: res.couponsRemain,
-      };
-      return money;
-    } catch (err: any) {
-      console.error(
-        `GET userMoney failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      return false;
-    }
-  }
 
-  // Infos for this Novel
-  async novelInfo(novelId: number): Promise<InovelInfo | boolean> {
-    try {
-      const res = await this.get<novelInfo>(`/novels/${novelId}`, {
-        expand: "intro,typeName,sysTags",
-      });
-      const novelInfo = {
-        lastUpdateTime: res.lastUpdateTime,
-        novelCover: res.novelCover,
-        bgBanner: res.bgBanner,
-        novelName: res.novelName,
-        isFinish: res.isFinish,
-        authorName: res.authorName,
-        charCount: res.charCount,
-        intro: res.expand.intro,
-        tags: res.expand.sysTags.map((tag) => tag.tagName),
-      };
-      return novelInfo;
-    } catch (err: any) {
-      console.error(
-        `GET novelInfo failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      return false;
-    }
-  }
-
-  // 目录内容
-  async volumeInfos(novelId: number): Promise<IvolumeInfos[] | boolean> {
-    try {
-      const res = await this.get<volumeInfos>(`/novels/${novelId}/dirs`);
-      const volumeInfos = res.volumeList.map((volume): IvolumeInfos => {
-        return {
-          volumeId: volume.volumeId,
-          title: volume.title,
-          chapterList: volume.chapterList.map((chapter): Ichapter => {
-            return {
-              chapId: chapter.chapId,
-              needFireMoney: chapter.needFireMoney,
-              charCount: chapter.charCount,
-              chapOrder: chapter.chapOrder,
-              isVip: chapter.isVip,
-              ntitle: chapter.ntitle,
-            };
-          }),
-        };
-      });
-      return volumeInfos ?? false;
-    } catch (err: any) {
-      console.error(
-        `GET volumeInfos failed: ${JSON.stringify(
-          err.response.data.status.msg
-        )}`
-      );
-      return false;
-    }
-  }
-
-  // 获取小说内容
-  async contentInfos(chapId: number): Promise<string | boolean> {
-    try {
-      let res = await this.get<contentInfos>(`/Chaps/${chapId}`, {
-        expand: "content",
-      });
-      const content = res.expand.content;
-      return content;
-      // 待添加
-    } catch (err: any) {
-      console.error(
-        `GET contentInfos failed: ${JSON.stringify(
-          err.response.data.status.msg
-        )}`
-      );
-      return false;
-    }
-  }
-
-  async image(url: string): Promise<any> {
-    try {
-      const response: Buffer = await this.get_rss(url);
-      return Buffer.from(response);
-    } catch (err: any) {
-      console.error(
-        `GET image failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      return false;
-    }
-  }
-
-  // 搜索小说
-  async searchInfos(
-    novelName: string,
-    page: number,
-    size: number
-  ): Promise<IsearchInfos[] | boolean> {
-    try {
-      const res = await this.get<searchInfos>("/search/novels/result/new", {
-        page: page,
-        q: novelName,
-        size: size,
-        sort: "hot",
-      });
-      const searchInfos = res.novels.map((novel) => {
-        return {
-          authorId: novel.authorId, // 作者ID
-          lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
-          novelCover: novel.novelCover, // 小说封面URL
-          novelId: novel.novelId, // 小说ID
-          novelName: novel.novelName, // 小说名称
-        };
-      });
-      return searchInfos;
-    } catch (err: any) {
-      console.error(
-        `GET searchInfos failed: ${JSON.stringify(
-          err.response.data.status.msg
-        )}`
-      );
-      return false;
-    }
-  }
-
-  // 书架默认信息
-  async bookshelfInfos(): Promise<IbookshelfInfos[] | boolean> {
-    const res = await this.get<bookshelfInfos[]>("/user/Pockets", {
-      expand: "novels,albums,comics",
-    });
-    let bookshelfInfos: IbookshelfInfos[] = [];
-    res.map((bookshelf) => {
-      let novels = bookshelf.expand.novels;
-      if (novels) {
-        novels.forEach((novel) => {
-          bookshelfInfos.push({
-            authorId: novel.authorId, // 作者ID
-            lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
-            novelCover: novel.novelCover, // 小说封面URL
-            novelId: novel.novelId, // 小说ID
-            novelName: novel.novelName, // 小说名称
-          });
-        });
-      }
-    });
-    return bookshelfInfos;
-  }
-
-  // 筛选分类信息
-  async typeInfo(): Promise<typeInfo[]> {
-    try {
-      const res = await this.get<typeInfo[]>("/noveltypes");
-      return res ?? false;
-    } catch (err: any) {
-      console.error(
-        `GET typeInfo failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      throw err;
-    }
-  }
-
-  // 获取所有标签
-  async tags(): Promise<Itag[]> {
-    try {
-      const res = await this.get<tags[]>("/novels/0/sysTags");
-      const tags: Itag[] = [
-        {
-          id: 74,
-          name: "百合",
-        },
-      ];
-      res.map((tag) => {
-        tags.push({
-          id: tag.sysTagId,
-          name: tag.tagName,
-        });
-      });
-      return tags;
-    } catch (err: any) {
-      console.error(
-        `GET tags failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      throw err;
-    }
-  }
-
-  // // 获取分类主页,一堆参数没卵用，懒得写了
-  // async novels(option: any): Promise<any> {
-  //   const res = await this.get(`/novels/${option}/sysTags/novels`);
-  //   return res ?? false;
-  // }
-
-  // 购买章节
-  async orderChap(novelId: string, chapId: number[]): Promise<any> {
-    try {
-      const res = await this.get(`/novels/${chapId}/orderedchaps`, {
-        orderType: "readOrder",
-        orderAll: false,
-        novelId: novelId,
-        autoOrder: false,
-        chapIds: [chapId],
-      });
-      return res;
-    } catch (err: any) {
-      console.error(
-        `orderChap failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      return false;
-    }
-  }
-
-  /**
-   *   
-   *  TaskTime Below !
-   * 。。。(> . <)。。。
-   * @param novelId 
-   * @param chapId 
-   * @returns 
-   */
-
-
-  async Tasker() {
-    const adBonusNum = this.adBonusNum()
-
-  }
-
-
-  // 广告奖励次数
-  async adBonusNum(): Promise<IadBonusNum | boolean> {
-    try {
-      const res = await this.get<adBonusNum[]>(`user/tasks`, {
-        taskCategory: 5,
-        package: "com.sfacg",
-        deviceToken: SfacgHttp.DEVICE_TOKEN,
-        page: 0,
-        size: 20,
-      });
-      const adBonusNum = {
-        requireNum: res[0].requireNum,
-        completeNum: res[0].completeNum,
-        taskId: res[0].taskId,
-      };
-      return adBonusNum;
-    } catch (err: any) {
-      console.error(
-        `PUT adBonusNum failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      return false;
-    }
-  }
-  //  广告奖励
-  async adBonus(id: string): Promise<boolean> {
-    try {
-      const res = await this.put<adBonus>(
-        `/user/tasks/${id}/advertisement?aid=43&deviceToken=${SfacgHttp.DEVICE_TOKEN}`,
-        {
-          num: "1"
+    init() {
+        const answer = readlineSync.keyIn('[1]帮人提书\n[2]每日奖励\n[3]账号管理\n[4]多账号提书\n[5]注册机启动：\n选择一个选项:', {
+            limit: '12345'
+        })
+        switch (answer) {
+            case "1":
+                this.Once()
+                break
+            case "2":
+                this.Bonus()
+                break
+            case "3":
+                this.Account()
+                break
+            case "4":
+                this.Multi()
+                break
+            case "5":
+                this.Regist()
+                break
         }
-      );
-      return res.status.httpCode == 200;
     }
-    catch (err: any) {
-      console.error(
-        `PUT adBonusNum failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      return false;
+
+    Once() {
+        const userName = readlineSync.question('输入账号：');
+        const passWord = readlineSync.question('输入密码：', {
+            hideEchoBack: true
+        });
+        this.client.login(userName, passWord)
+        const a = readlineSync.keyIn("[1]直接搜书\n[2]书架选书")
+        switch (a) {
+            case "1":
+                this.client.searchInfos("1")
+        }
+
     }
-  }
 
-  // 签到
-  async newSign() {
-    try {
-      const res = await this.put("/user/newSignInfo", {
-        signDate: this.getNowFormatDate(),
-      });
-      return res;
-    } catch (err: any) {
-      console.error(
-        `PUT newSign failed: ${JSON.stringify(err.response.data.status.msg)}`
-      );
-      return false;
+    Regist() {
+
     }
-  }
 
-  // 获取任务列表
-  async getTasks() {
-    const res = await this.get<tasks[]>("/user/tasks", {
-      taskCategory: 1,
-      package: "com.sfacg",
-      deviceToken: SfacgHttp.DEVICE_TOKEN,
-      page: 0,
-      size: 20
-    })
-    let a = res.filter((task) => task.status == 0)
-    return a
-  }
+    Bonus() {
 
-  // 得到分配的任务
-  async claimTask(id: number) {
-    const res = await this.post<any>(`/user/tasks/${id}`, {})
-    return res
-  }
+    }
 
-  // 阅读时长
-  async readTime(time: number) {
-    const res = await this.put("/user/readingtime", {
-      seconds: time,
-      entityType: 2,
-      chapterId: 477385,
-      entityId: 368037,
-      readingDate: this.getNowFormatDate()
-    })
-    return res
-  }
+    Multi() {
 
-  // 分享
-  async share(userId: string) {
-    const res = this.put(`/user/tasks?taskId=4&userId=${userId}`, {
-      env: 0
-    })
-    return res
-  }
+    }
 
-  // 任务得到奖励
-  async taskBonus(id: number) {
-    const res = await this.put<any>(`/user/tasks/${id}`, {})
-  }
+    Account() {
 
+    }
 }
-
-
-
-export class SfacgRegister extends SfacgHttp {
-  phone: number = 0;
-  sms: sms;
-  constructor() {
-    super();
-    this.sms = new sms();
-  }
-
-  async avalibleNmae(name: string): Promise<boolean> {
-    const res = await this.post<nameAvalible>("/users/availablename", {
-      nickName: name,
-    });
-    return res.data.nickName.valid;
-  }
-  async sendCode() {
-    this.phone = await this.sms.sms(50896);
-    const res = await this.post<sendCode>(`/sms/${this.phone}/86`, "");
-    return res.status.httpCode == 201;
-  }
-
-  async codeverify(phoneNum: number, smsAuthCode: number) {
-    const res = await this.put<codeverify>(`/sms/${phoneNum}/86`, {
-      smsAuthCode: smsAuthCode,
-    });
-    return res.status.httpCode == 200
-  }
-
-  async regist(
-    passWord: string,
-    nickName: string,
-    phoneNum: number,
-    smsAuthCode: number
-  ) {
-    let res = await this.post<regist>("/user", {
-      passWord: passWord,
-      nickName: nickName,
-      countryCode: "86",
-      phoneNum: phoneNum,
-      email: "",
-      smsAuthCode: smsAuthCode,
-      shuMeiId: "",
-    });
-    let accountID = res.data.accountId;
-    return accountID;
-  }
-}
-
-export class SfacgAccountManager extends accountManager {
-  constructor() {
-    super(Config.Sfacg.AppName);
-  }
-
-  cookieGet(userName: string) {
-    const accountInfo = this.account.data.find((account: { userName: string; }) => account.userName === userName);
-    return accountInfo ? accountInfo?.cookie : null;
-  }
-
-  addCheckInfo(userName: string) {
-
-  }
-
-  addAccount(acconutInfo: IaccountInfo) {
-    console.log(this.account.data)
-    console.log(acconutInfo)
-    this.account.data.push(acconutInfo)
-    console.log(this.account.data)
-  }
-
-  removeAccount(userName: string) {
-    const index = this.account.data.findIndex((account: { userName: string; }) => {
-      account.userName == userName
-    })
-    if (index !== -1) {
-      this.account.data.splice(index, 1);
-    }
-  }
-  getAccountList() {
-    return this.account.data.map(({ userName, fireMoneyRemain = 0, couponsRemain = 0 }: any, index: number) =>
-      `${index + 1}.${userName} 余额： ${fireMoneyRemain + couponsRemain}`
-    ).join('\n');
-  }
-
-
-}
-

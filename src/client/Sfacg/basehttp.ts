@@ -2,9 +2,7 @@ import axios, { AxiosInstance, AxiosResponse } from "axios";
 import { NIL, v4 as uuidv4 } from "uuid";
 import { wrapper } from "axios-cookiejar-support";
 import { CookieJar } from "tough-cookie";
-import Config from "../../utils/config";
-
-const crypto = require("crypto");
+import crypto from "crypto"
 
 export class SfacgHttp {
   static readonly HOST = "https://api.sfacg.com";
@@ -20,28 +18,15 @@ export class SfacgHttp {
   cookieJar: CookieJar;
 
   constructor() {
-    this._init();
     this.cookieJar = new CookieJar();
     this.client = this._client();
     this.clientRss = this._clientRss();
   }
 
-  private async _init() {
-    let ProxyUrl;
-    if (Config.Sfacg.proxy) {
-      ProxyUrl = new URL(Config.Sfacg.proxy);
-      if (ProxyUrl) {
-        this.client.defaults.proxy = {
-          host: ProxyUrl.hostname,
-          port: parseInt(ProxyUrl.port),
-        };
-      }
-    }
-  }
 
   async get<T, E = any>(url: string, query?: E): Promise<T> {
     let response: AxiosResponse;
-    url.startsWith("/Chaps") ? (this.client = this._client()) : "";
+    url.startsWith("/Chaps") && (this.client = this._client())
     response = await this.client.get<T>(url, {
       jar: this.cookieJar,
       params: query,

@@ -13,6 +13,10 @@ export interface smsGetPhone {
     phone_gsd: string;
 };
 
+export interface saveAccountInfo {
+    data: any
+}
+
 
 
 

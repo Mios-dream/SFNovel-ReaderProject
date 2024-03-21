@@ -88,7 +88,7 @@ export interface userMoney {
   fireMoneyUsed: number; // 已使用火币
   fireMoneyRemain: number; // 未使用的火币
   vipLevel: number; // vip等级
-  couponsRemain: number; // 未使用的代币
+  couponsRemain: number; // 未使用的代币 
 }
 
 // 小说目录详情
@@ -267,10 +267,7 @@ export interface adBonusNum {
 }
 [];
 
-export interface adBonus {
-  status: { httpCode: number; errorCode: number; msgType: number; msg: object };
-  data: object;
-};
+
 
 export interface tasks {
   recordId: number;
@@ -294,6 +291,31 @@ export interface tasks {
   extendId: object;
 }[];
 
+// 定义 Status 接口来表示 status 的结构
+export interface Status {
+  httpCode: number;
+  errorCode: number;
+  msgType: number;
+  msg: object;
+}
+
+// 定义 Response 接口来表示整个响应的结构
+export interface Response {
+  status: Status;
+  data: object;
+}
+
+export type adBonus = Response;
+export type claimTask = Response;
+export type readTime = Response;
+
+// { "status": { "httpCode": 201, "errorCode": 200, "msgType": 0, "msg": null }, "data": null }
+export type sendCode = Response;
+
+//{"status":{"httpCode":200,"errorCode":200,"msgType":0,"msg":null},"data":null}
+//{"status":{"httpCode":422,"errorCode":727,"msgType":0,"msg":"手机验证码错误"},"data":null}
+export type codeverify = Response
+
 
 // { "status": { "httpCode": 200, "errorCode": 200, "msgType": 0, "msg": null }, "data": { "availableName": "hehdvs3", "nickName": { "valid": true, "msg": "success" } } }
 //{"status":{"httpCode":200,"errorCode":200,"msgType":0,"msg":null},"data":{"availableName":"hehdvs3","nickName":{"valid":false,"msg":"该昵称存在标点符号，请修改"}}}
@@ -302,21 +324,10 @@ export interface nameAvalible {
   data: { availableName: string; nickName: { valid: boolean; msg: string } };
 }
 
-// { "status": { "httpCode": 201, "errorCode": 200, "msgType": 0, "msg": null }, "data": null }
-export interface sendCode {
-  status: { httpCode: number; errorCode: number; msgType: number; msg: object };
-  data: object;
-}
-
-//{"status":{"httpCode":200,"errorCode":200,"msgType":0,"msg":null},"data":null}
-//{"status":{"httpCode":422,"errorCode":727,"msgType":0,"msg":"手机验证码错误"},"data":null}
-export interface codeverify {
-  status: { httpCode: number; errorCode: number; msgType: number; msg: object };
-  data: object;
-}
-
 //{"status":{"httpCode":201,"errorCode":200,"msgType":0,"msg":null},"data":{"accountId":9823829}}
 export interface regist {
   status: { httpCode: number; errorCode: number; msgType: number; msg: object };
   data: { accountId: number };
 }
+
+
