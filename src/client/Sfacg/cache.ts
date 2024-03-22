@@ -1,26 +1,15 @@
+import { Server} from "../../utils/db"
 
 export class SfacgCache {
 
+
+    // // 数据库中找到该书，若无则创建空表，返回未有章节id
+    // findBook(bookId: string) {
         
-    // 数据库中找到该书，若无则创建空表，返回未有章节id
-    findBook(bookId: string) {
+    // }
 
-    }
-
-    saveBook(bookId: number, bookName: string) {
-
-    }
-
-    replaceImage(chapId: number, content: string) {
-
-    }
-
-    jsonToTxt() {
-
-    }
-
-    txtToEpub() {
-
+    saveNovelInfo() {
+        
     }
 
 }

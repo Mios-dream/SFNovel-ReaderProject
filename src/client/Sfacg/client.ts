@@ -175,8 +175,6 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
-
-
   // 获取小说内容
   async contentInfos(chapId: number): Promise<string | false> {
     try {
