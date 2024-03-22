@@ -8,8 +8,12 @@ export class sms {
   private token: any
 
   constructor() {
-    this.userName = process.env.SMS_USERNAME ?? "1"
-    this.passWord = process.env.SMS_PASSWORD ?? "1"
+    this.userName = process.env.SMS_USERNAME ?? ""
+    this.passWord = process.env.SMS_PASSWORD ?? ""
+    if (!this.userName || !this.passWord) {
+      console.error("无接码账号信息，请先填写！")
+      process.exit()
+    }
   }
 
   async sms(sid: number) {

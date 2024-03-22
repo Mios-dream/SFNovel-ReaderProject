@@ -1,11 +1,6 @@
 
 
 
-
-export interface SfacgsaveAccountInfo {
-  data: IaccountInfo[];
-}
-
 export interface IaccountInfo {
   userName?: string; // 用户名
   passWord?: string; // 密码
@@ -16,7 +11,7 @@ export interface IaccountInfo {
   fireMoneyRemain?: number; // 未使用的火币
   couponsRemain?: number; // 未使用的代币
   lastCheckIn?: string; //上次签到时间\
-  cookie?: string
+  cookie?: string // 用户凭证 
 }
 
 export interface Itag {
@@ -31,9 +26,9 @@ export interface IcontentInfos {
 }
 
 export interface InovelInfo {
+  novelId: number; // 小说ID
   lastUpdateTime: string; // 最后更新时间
   novelCover: string; // 小说封面
-  bgBanner: string; // 背景横幅
   novelName: string; // 小说名称
   isFinish: boolean; // 是否已完结
   authorName: string; // 作者名称
@@ -42,9 +37,6 @@ export interface InovelInfo {
   tags: string[]; //标签
 }
 
-export interface saveContentInfo {
-  data: IvolumeInfos[]
-}
 
 // 卷列表
 export interface IvolumeInfos {
@@ -58,8 +50,6 @@ export interface IvolumeInfos {
 export interface Ichapter {
   chapId: number; // 章节ID
   needFireMoney: number; // 所需火币
-  charCount: number; // 字符数
-  chapOrder: number; // 章节顺序
   isVip: boolean; // 是否为VIP章节
   ntitle: string; // 新标题
   content?: string //内容

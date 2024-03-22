@@ -127,9 +127,9 @@ export class SfacgClient extends SfacgHttp {
         expand: "intro,typeName,sysTags",
       });
       const novelInfo = {
+        novelId: res.novelId,
         lastUpdateTime: res.lastUpdateTime,
         novelCover: res.novelCover,
-        bgBanner: res.bgBanner,
         novelName: res.novelName,
         isFinish: res.isFinish,
         authorName: res.authorName,
@@ -158,8 +158,6 @@ export class SfacgClient extends SfacgHttp {
             return {
               chapId: chapter.chapId,
               needFireMoney: chapter.needFireMoney,
-              charCount: chapter.charCount,
-              chapOrder: chapter.chapOrder,
               isVip: chapter.isVip,
               ntitle: chapter.ntitle,
             };

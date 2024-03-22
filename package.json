@@ -25,6 +25,7 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.39.8",
     "axios": "^1.6.7",
     "axios-cookiejar-support": "^5.0.0",
     "deasync": "^0.1.29",
