@@ -4,7 +4,7 @@
 export interface IaccountInfo {
   userName?: string; // 用户名
   passWord?: string; // 密码
-  accountId?: string // 用户ID
+  accountId?: number // 用户ID
   nickName?: string; // 昵称
   avatar?: string; // 头像网址
   vipLevel?: number; // vip等级

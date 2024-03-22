@@ -76,8 +76,7 @@ export class SfacgClient extends SfacgHttp {
     });
     return res == 200
   }
-
-
+  
   /**
    * 仅当login的保存选项被打开时执行
    * @returns 用户信息
