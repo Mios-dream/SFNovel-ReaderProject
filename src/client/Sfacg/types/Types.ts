@@ -267,7 +267,10 @@ export interface adBonusNum {
 }
 [];
 
-
+export interface newSign {
+  status: { httpCode: number; errorCode: number; msgType: number; msg: object };
+  data: { num: number; image: string; name: string }[];
+}
 
 export interface tasks {
   recordId: number;

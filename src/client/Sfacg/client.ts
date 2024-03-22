@@ -7,6 +7,7 @@ import {
   codeverify,
   contentInfos,
   nameAvalible,
+  newSign,
   novelInfo,
   readTime,
   regist,
@@ -30,8 +31,8 @@ import {
   IsearchInfos,
 } from "./types/ITypes";
 import { sms } from "../../utils/sms";
-import { accountManager } from "../../utils/account";
-import fs from "fs-extra"
+import { SfacgAccountManager } from "./account";
+
 
 
 export class SfacgClient extends SfacgHttp {
@@ -165,7 +166,7 @@ export class SfacgClient extends SfacgHttp {
           }),
         };
       });
-      return volumeInfos ?? false;
+      return volumeInfos
     } catch (err: any) {
       console.error(
         `GET volumeInfos failed: ${JSON.stringify(
@@ -175,6 +176,8 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
+
+
 
   // 获取小说内容
   async contentInfos(chapId: number): Promise<string | false> {
@@ -336,28 +339,30 @@ export class SfacgClient extends SfacgHttp {
    */
 
 
-  async Tasker() {
-    // adBonusNum, newSign, getTasks, claimTask
+  // async Tasker() {
+  //   // adBonusNum, newSign, getTasks, claimTask
 
-    // adBonus, readTime, share
+  //   // adBonus, readTime, share
 
-    // taskBonus
-    const SignInfo = await this.newSign()
-    const tasks = await this.getTasks() as number[]
-    tasks.map(async (taskId) => {
-      await this.claimTask(taskId)
-    })
-    await this.readTime(120)
-    const { taskId, requireNum } = await this.adBonusNum() as IadBonusNum
-    console.log(`需要观看广告的次数：${requireNum} `)
-    for (let i = 0; i < requireNum; i++) {
-      await this.adBonus(taskId)
-      await this.taskBonus(taskId)
-    }
-
-
-
-  }
+  //   // taskBonus
+  //   await this.newSign()
+  //   const tasks = await this.getTasks() as number[]
+  //   tasks.map(async (taskId) => {
+  //     await this.claimTask(taskId)
+  //   })
+  //   await this.readTime(120)
+  //   await this.share(userId)
+  //   tasks.map(async (taskId) => {
+  //     await this.taskBonus(taskId)
+  //   })
+  //   const { taskId, requireNum } = await this.adBonusNum() as IadBonusNum
+  //   await this.claimTask(taskId)
+  //   console.log(`需要观看广告的次数：${requireNum} `)
+  //   for (let i = 0; i < requireNum; i++) {
+  //     await this.adBonus(taskId)
+  //     await this.taskBonus(taskId)
+  //   }
+  // }
 
 
   // 广告奖励次数
@@ -406,10 +411,10 @@ export class SfacgClient extends SfacgHttp {
   // 签到
   async newSign() {
     try {
-      const res = await this.put("/user/newSignInfo", {
+      const res = await this.put<newSign>("/user/newSignInfo", {
         signDate: this.getNowFormatDate(),
       });
-      return res;
+      return res.status.httpCode == 200
     } catch (err: any) {
       console.error(
         `PUT newSign failed: ${JSON.stringify(err.response.data.status.msg)}`
@@ -547,59 +552,5 @@ export class SfacgRegister extends SfacgHttp {
   }
 }
 
-export class SfacgAccountManager extends accountManager {
-  constructor() {
-    super("Sfacg");
-  }
-  cookieGet(userName: string) {
-    const index = this.findAccountIndex(userName)
-    if (index !== -1) {
-      return this.account.data[index].cookie
-    }
-  }
 
-  cookieSave(userName: string, newCookie: string) {
-    const index = this.findAccountIndex(userName)
-    if (index !== -1) {
-      this.account.data[index].cookie = newCookie
-      fs.writeJSONSync(this.saveAccountPath, this.account)
-    }
-  }
-
-  addCheckInfo(userName: string) {
-    const index = this.findAccountIndex(userName)
-    if (index !== -1) {
-      this.account.data[index].lastCheckIn = new Date()
-      fs.writeJSONSync(this.saveAccountPath, this.account)
-    }
-  }
-
-  addAccount(acconutInfo: IaccountInfo) {
-    this.account.data.push(acconutInfo)
-    fs.writeJSONSync(this.saveAccountPath, this.account)
-  }
-
-  removeAccount(userName: string) {
-    const index = this.findAccountIndex(userName)
-    if (index !== -1) {
-      this.account.data.splice(index, 1);
-    }
-    fs.writeJSONSync(this.saveAccountPath, this.account)
-  }
-
-  getAccountList() {
-    return this.account.data.map(({ userName, fireMoneyRemain = 0, couponsRemain = 0 }: any, index: number) =>
-      `${index + 1}.${userName} 余额： ${fireMoneyRemain + couponsRemain}`
-    ).join('\n');
-  }
-
-
-  findAccountIndex(userName: string) {
-    const index = this.account.data.findIndex((account: { userName: string; }) => {
-      account.userName == userName
-    })
-    return index
-  }
-
-}
 

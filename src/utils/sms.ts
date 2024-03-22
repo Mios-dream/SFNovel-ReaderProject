@@ -20,6 +20,7 @@ export class sms {
     }
     return phone
   }
+
   private async login() {
     const res = await axios.post<smsLogin>("http://h5.haozhuma.com/login.php", {
       username: this.userName,

@@ -9,7 +9,7 @@ export interface SfacgsaveAccountInfo {
 export interface IaccountInfo {
   userName?: string; // 用户名
   passWord?: string; // 密码
-  accountId?:string // 用户ID
+  accountId?: string // 用户ID
   nickName?: string; // 昵称
   avatar?: string; // 头像网址
   vipLevel?: number; // vip等级
@@ -42,6 +42,10 @@ export interface InovelInfo {
   tags: string[]; //标签
 }
 
+export interface saveContentInfo {
+  data: IvolumeInfos[]
+}
+
 // 卷列表
 export interface IvolumeInfos {
   volumeId: number; // 卷ID
@@ -58,6 +62,7 @@ export interface Ichapter {
   chapOrder: number; // 章节顺序
   isVip: boolean; // 是否为VIP章节
   ntitle: string; // 新标题
+  content?: string //内容
 }
 
 export interface IadBonusNum {

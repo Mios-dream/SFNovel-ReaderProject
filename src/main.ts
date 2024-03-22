@@ -1,34 +1,23 @@
-import { Sfacg } from "./client/Sfacg";
-import { SfacgAccountManager, SfacgClient } from "./client/Sfacg/client";
-import fs from "fs-extra"
+function parseContent(chapId: number, content: string): { content: string, urls: string[] } {
 
-(async () => {
-    // const sfacg = new SfacgClient()
-    // await sfacg.login("13696458853", "dddd1111")
+    // 创建一个正则表达式用来匹配图片URL
+    const imgRegExp = /\[img=[\d]+,[\d]+\](.*?)\[\/img\]/g;
 
-    const sfacg = new Sfacg()
-    sfacg.init()
+    // 创建一个数组存储找到的图片URL
+    let urls: string[] = [];
 
-    // let a = await sfacg.adBonus(21)
-    // console.log(a)
-    // fs.outputJsonSync("./TESTDATA/adBonus.json", a)
+    // 替换content中的图片URL，并将找到的URL添加到数组中
+    const newContent = content.replace(imgRegExp, (match, url) => {
+        urls.push(url);
+        return `![](${chapId}.n.webp)`;
+    });
 
-    // let a = await sfacg.claimTask(21)
-    // console.log(a)
-    // fs.outputJsonSync("./TESTDATA/claimTask.json", a)
+    // 返回替换后的content和找到的URL数组
+    return { content: newContent, urls };
+}
 
-    // let a = await sfacg.adBonus(21)
-    // let b = await sfacg.adBonusNum()
-    // console.log(a)
-    // console.log(b)
-    // fs.outputJsonSync("./TESTDATA/adBonus.json", a)
-    // fs.outputJsonSync("./TESTDATA/adBonusNum.json", b)
-    // const a = new SfacgAccountManager()
-    // a.addAccount({ 
-    //     userName: "11111", // 用户名
-    //     passWord: "2222222" // 密码
-    // })
-
-    // Config.Sfacg .proxy = "14561"
-})()
-
+// 测试函数
+const chapId = 21;
+const content = "\r\r\n[img=700,494]https://rss.sfacg.com/web/novel/images/UploadPic/2023/02/3c1d9d6a-339a-43e5-a3bb-d1174bd3ea0e.jpg[/img]\r\r\n夏鲁鲁与夏依\r\n感谢sf画师绘制";
+const result = parseContent(chapId, content);
+console.log(result);

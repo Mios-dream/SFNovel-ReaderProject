@@ -1,6 +1,8 @@
-import { initial, times } from "lodash";
+
 import readlineSync from 'readline-sync';
-import { SfacgAccountManager, SfacgClient, SfacgRegister } from "./client";
+import { IsearchInfos } from "./types/ITypes";
+import { SfacgAccountManager } from "./account";
+import { SfacgClient, SfacgRegister } from "./client";
 // const baseinfo = await this.userInfo()
 // const money = await this.userMoney()
 // const cookie: string = this.cookieJar.getCookieStringSync(SfacgHttp.HOST)
@@ -48,16 +50,24 @@ export class Sfacg {
         }
     }
 
-    Once() {
+    async Once() {
         const userName = readlineSync.question('输入账号：');
         const passWord = readlineSync.question('输入密码：', {
             hideEchoBack: true
         });
         this.client.login(userName, passWord)
-        const a = readlineSync.keyIn("[1]直接搜书\n[2]书架选书")
+        const a = readlineSync.keyIn("[1]直接搜书\n[2]书架选书", { limit: '12' })
         switch (a) {
             case "1":
-                this.client.searchInfos("1")
+                const bookname = readlineSync.question("请输入书名：")
+                const books = await this.client.searchInfos(bookname)
+                const id = books ? this.selectBookFromList(books) : books
+                id && this.client.volumeInfos(id)
+                
+                break
+            case "2":
+
+
         }
 
     }
@@ -76,5 +86,20 @@ export class Sfacg {
 
     Account() {
 
+    }
+
+    async downLoadBook(bookId: number) {
+        const volunms = await this.client.volumeInfos(bookId)
+
+    }
+
+    selectBookFromList(books: IsearchInfos[]): number {
+        books.forEach((book, index) => {
+            console.log(`[${index + 1}] ${book.novelName} - ${book.authorId}`);
+        });
+        const bookIndex = readlineSync.question("请输入书序号选择：", {
+            limit: new RegExp(`^[1-${books.length}]$`) // 限制用户只能输入在书列表范围内的数字
+        });
+        return books[parseInt(bookIndex) - 1].novelId;
     }
 }
