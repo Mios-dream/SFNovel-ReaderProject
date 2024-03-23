@@ -1,11 +1,10 @@
+import { Sfacg } from "./client/Sfacg/index";
 
-
-
-import dotenv from 'dotenv';
-dotenv.config();
-import { Sfacg } from "./client/Sfacg/index.js";
 const a = new Sfacg()
 a.init()
+
+
+
 
 // function parseContent(chapId: number, content: string): { content: string, urls: string[] } {
 //     // 创建一个正则表达式用来匹配图片URL

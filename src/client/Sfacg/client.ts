@@ -13,7 +13,9 @@ import {
   regist,
   searchInfos,
   sendCode,
+  share,
   tags,
+  taskBonus,
   tasks,
   typeInfo,
   userInfo,
@@ -74,9 +76,10 @@ export class SfacgClient extends SfacgHttp {
       userName: userName,
       passWord: passWord,
     });
+    
     return res == 200
   }
-  
+
   /**
    * 仅当login的保存选项被打开时执行
    * @returns 用户信息
@@ -109,8 +112,9 @@ export class SfacgClient extends SfacgHttp {
       const money = {
         fireMoneyRemain: res.fireMoneyRemain,
         couponsRemain: res.couponsRemain,
+        vipLevel: res.vipLevel
       };
-      return money;
+      return res;
     } catch (err: any) {
       console.error(
         `GET userMoney failed: ${JSON.stringify(err.response.data.status.msg)}`
@@ -334,30 +338,6 @@ export class SfacgClient extends SfacgHttp {
    */
 
 
-  // async Tasker() {
-  //   // adBonusNum, newSign, getTasks, claimTask
-
-  //   // adBonus, readTime, share
-
-  //   // taskBonus
-  //   await this.newSign()
-  //   const tasks = await this.getTasks() as number[]
-  //   tasks.map(async (taskId) => {
-  //     await this.claimTask(taskId)
-  //   })
-  //   await this.readTime(120)
-  //   await this.share(userId)
-  //   tasks.map(async (taskId) => {
-  //     await this.taskBonus(taskId)
-  //   })
-  //   const { taskId, requireNum } = await this.adBonusNum() as IadBonusNum
-  //   await this.claimTask(taskId)
-  //   console.log(`需要观看广告的次数：${requireNum} `)
-  //   for (let i = 0; i < requireNum; i++) {
-  //     await this.adBonus(taskId)
-  //     await this.taskBonus(taskId)
-  //   }
-  // }
 
 
   // 广告奖励次数
@@ -445,7 +425,7 @@ export class SfacgClient extends SfacgHttp {
   async claimTask(id: number) {
     try {
       const res = await this.post<claimTask>(`/user/tasks/${id}`, {})
-      return res
+      return res.status.httpCode == 201
     } catch (err: any) {
       console.error(
         `POST claimTasK${id} failed: ${JSON.stringify(err.response.data.status.msg)}`
@@ -459,7 +439,7 @@ export class SfacgClient extends SfacgHttp {
   async readTime(time: number) {
     try {
       const res = await this.put<readTime>("/user/readingtime", {
-        seconds: time,
+        seconds: time * 60,
         entityType: 2,
         chapterId: 477385,
         entityId: 368037,
@@ -476,12 +456,12 @@ export class SfacgClient extends SfacgHttp {
   }
 
   // 分享
-  async share(userId: number) {
+  async share(accountID: number) {
     try {
-      const res = this.put(`/user/tasks?taskId=4&userId=${userId}`, {
+      const res = await this.put<share>(`/user/tasks?taskId=4&userId=${accountID}`, {
         env: 0
       })
-      return res
+      return res.status.httpCode == 200
     } catch (err: any) {
       console.error(
         `PUT share failed: ${JSON.stringify(err.response.data.status.msg)}`
@@ -493,7 +473,16 @@ export class SfacgClient extends SfacgHttp {
 
   // 任务得到奖励
   async taskBonus(id: number) {
-    const res = await this.put<any>(`/user/tasks/${id}`, {})
+    try {
+      const res = await this.put<taskBonus>(`/user/tasks/${id}`, {})
+      return res.status.httpCode == 200
+    } catch (err: any) {
+      if (id == 21) { return false }
+      console.error(
+        `PUT taskBonus${id} failed: ${JSON.stringify(err.response.data.status.msg)}`
+      );
+      return false;
+    }
   }
 
 }

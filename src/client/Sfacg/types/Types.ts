@@ -311,6 +311,23 @@ export interface Response {
 export type adBonus = Response;
 export type claimTask = Response;
 export type readTime = Response;
+export type share = Response
+
+export interface taskBonus{
+  status: { httpCode: number; errorCode: number; msgType: number; msg: object };
+  data: {
+    ticketNum: number;
+    couponNum: number;
+    fireMoney: number;
+    fireCoin: number;
+    rmb: number;
+    widgetId: number;
+    exp: number;
+    pearCoin: number;
+    luckyDrawCouponNum: number;
+  };
+};
+
 
 // { "status": { "httpCode": 201, "errorCode": 200, "msgType": 0, "msg": null }, "data": null }
 export type sendCode = Response;
