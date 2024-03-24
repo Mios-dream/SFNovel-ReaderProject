@@ -31,7 +31,7 @@ jobs:
         run: npm ci
 
       - name: ts-node run
-        run: npm run checkin
+        run: npm run checkIn
 
       # # 其他可能的优化步骤
       # - name: Cache node modules
