@@ -1,6 +1,6 @@
 import { IaccountInfo, IadBonusNum, IsearchInfos } from "./types/ITypes";
 import { SfacgAccountManager } from "./account";
-import { SfacgClient} from "./client";
+import { SfacgClient } from "./client";
 import readline from "readline"
 import { SfacgRegister } from "./register";
 import { sms } from "../../utils/sms";
@@ -21,7 +21,7 @@ export class Sfacg {
     client: SfacgClient;
     accountManager: SfacgAccountManager;
     register: SfacgRegister;
-    sms:sms
+    sms: sms
 
     constructor() {
         this.client = new SfacgClient();
@@ -117,7 +117,7 @@ export class Sfacg {
 
     async Regist() {
 
-     }
+    }
 
     async Bonus() {
         rl.close();
@@ -204,12 +204,12 @@ export class Sfacg {
         if (cookie) {
             anonClient.cookie = cookie
             result = (todo == "getTasks") ? await anonClient.getTasks() : await anonClient.userInfo()
-            result && console.log(`${acconutInfo.userName}原ck可用`);
+            result && console.log(`${this.Secret(acconutInfo.userName as string)}原ck可用`);
         }
         if ((!cookie || !result) && userName && passWord) {
             const a = await anonClient.login(userName, passWord)
             if (a) {
-                console.log(`${acconutInfo.userName}ck重置`);
+                console.log(`${this.Secret(acconutInfo.userName as string)}ck重置`);
                 result = (todo == "getTasks") ? await anonClient.getTasks() : await anonClient.userInfo()
             }
             else {
@@ -217,5 +217,9 @@ export class Sfacg {
             }
         }
         return { result, anonClient }
+    }
+
+    private Secret(phoneNumber: string) {
+        return phoneNumber.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
     }
 }
