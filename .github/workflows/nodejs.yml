@@ -11,6 +11,7 @@ jobs:
     environment:
       name: supabase
       url: https://supabase.com
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,8 +20,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
-      - name: Use Secret as Environment Variable
         env:
           SMS_USERNAME: ${{ secrets.SMS_USERNAME }}
           SMS_PASSWORD: ${{ secrets.SMS_PASSWORD }}
