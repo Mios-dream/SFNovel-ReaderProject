@@ -7,9 +7,6 @@ on:
 jobs:
   run-ts-script:
     runs-on: windows-latest
-    environment:
-      name: supabase
-      url: https://supabase.com
 
     steps:
       - name: Checkout repository
@@ -20,18 +17,18 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-        env:
-          SMS_USERNAME: ${{ secrets.SMS_USERNAME }}
-          SMS_PASSWORD: ${{ secrets.SMS_PASSWORD }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
       - name: Install
         run: npm ci
 
       - name: ts-node run
         run: npm run checkin
+        env:
+          SMS_USERNAME: ${{ secrets.SMS_USERNAME }}
+          SMS_PASSWORD: ${{ secrets.SMS_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
       # # 其他可能的优化步骤
       # - name: Cache node modules
