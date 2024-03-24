@@ -34,6 +34,7 @@ import {
 } from "./types/ITypes";
 import { sms } from "../../utils/sms";
 import { SfacgAccountManager } from "./account";
+import { Cookie } from "tough-cookie";
 
 
 
@@ -71,13 +72,15 @@ export class SfacgClient extends SfacgHttp {
   async login(
     userName: string,
     passWord: string,
-  ): Promise<IaccountInfo | boolean> {
-    const res = await this.post<number, IaccountInfo>("/sessions", {
+  ): Promise<boolean> {
+    const res = await this.post<any>("/sessions", {
       userName: userName,
       passWord: passWord,
     });
-    
-    return res == 200
+    this.cookie = res.status == 200 && res.headers["set-cookie"].map((cookie: any) => {
+      return cookie.split(';')[0]; 
+    }).join('; ');
+    return res.status == 200
   }
 
   /**

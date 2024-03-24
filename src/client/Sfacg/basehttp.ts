@@ -1,7 +1,5 @@
-import axios, { AxiosInstance, AxiosResponse } from "axios";
+import axios, { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 import { v4 as uuidv4 } from "uuid";
-import { wrapper } from "axios-cookiejar-support";
-import { CookieJar } from "tough-cookie";
 import crypto from "crypto"
 
 export class SfacgHttp {
@@ -13,24 +11,12 @@ export class SfacgHttp {
   static readonly SALT = "FMLxgOdsfxmN!Dt4";
   static readonly DEVICE_TOKEN = uuidv4().toUpperCase();
 
-  private client: AxiosInstance;
-  private clientRss: AxiosInstance;
-  cookieJar: CookieJar;
-
-  constructor() {
-    this.cookieJar = new CookieJar();
-    this.client = this._client();
-    this.clientRss = this._clientRss();
-  }
+  cookie: string | undefined
 
 
   async get<T, E = any>(url: string, query?: E): Promise<T> {
     let response: AxiosResponse;
-    url.startsWith("/Chaps") && (this.client = this._client())
-    response = await this.client.get<T>(url, {
-      jar: this.cookieJar,
-      params: query,
-    });
+    response = await axios.get<T>(url, this._client(query));
     return url.startsWith("/sessions")
       ? response.data.status
       : response.data.data;
@@ -38,27 +24,19 @@ export class SfacgHttp {
 
   async get_rss<E>(url: string): Promise<E> {
     let response: AxiosResponse;
-    response = await this.clientRss.get(url, {
-      jar: this.cookieJar,
-    });
+    response = await axios.get(url);
     return response.data;
   }
 
   async post<T, E = any>(url: string, data: E): Promise<T> {
     let response: any;
-    this.client = this._client();
-    response = await this.client.post<T>(url, data, {
-      jar: this.cookieJar,
-    });
-    return url.startsWith("/session") ? response.status : response.data;
+    response = await axios.post<T>(url, data, this._client());
+    return url.startsWith("/session") ? response : response.data;
   }
 
   async put<T, E = any>(url: string, data: E): Promise<T> {
     let response: any;
-    this.client = this._client();
-    response = await this.client.put<T>(url, data, {
-      jar: this.cookieJar,
-    });
+    response = await axios.put<T>(url, data, this._client());
     return response.data;
   }
 
@@ -70,40 +48,27 @@ export class SfacgHttp {
     return `${year}-${month}-${day}`;
   }
 
-  private _client() {
+  private _client(query?: any): axios.AxiosRequestConfig {
     // 初始化axios实例
-    return wrapper(
-      axios.create({
-        withCredentials: true,
-        baseURL: SfacgHttp.HOST,
-        auth: {
-          username: SfacgHttp.USERNAME,
-          password: SfacgHttp.PASSWORD,
-        },
-        headers: {
-          Accept: "application/vnd.sfacg.api+json;version=1",
-          "Accept-Language": "zh-Hans-CN;q=1",
-          "User-Agent": `boluobao/4.9.98(android;34)/H5/${SfacgHttp.DEVICE_TOKEN}/H5`,
-          SFSecurity: this.sfSecurity(),
-        },
-      })
-    );
+    return {
+      withCredentials: true,
+      baseURL: SfacgHttp.HOST,
+      auth: {
+        username: SfacgHttp.USERNAME,
+        password: SfacgHttp.PASSWORD,
+      },
+      headers: {
+        cookie: this.cookie,
+        Accept: "application/vnd.sfacg.api+json;version=1",
+        "Accept-Language": "zh-Hans-CN;q=1",
+        "User-Agent": `boluobao/4.9.98(android;34)/H5/${SfacgHttp.DEVICE_TOKEN}/H5`,
+        SFSecurity: this.sfSecurity(),
+      },
+      params: query,
+    }
   }
 
-  private _clientRss() {
-    // 初始化rss client实例
-    return (this.clientRss = wrapper(
-      axios.create({
-        responseType: "arraybuffer",
-        baseURL: SfacgHttp.HOST,
-        headers: {
-          "User-Agent": SfacgHttp.USER_AGENT_RSS,
-          Accept: "image/webp,image/*,*/*;q=0.8",
-          "Accept-Language": "zh-CN,zh-Hans;q=0.9",
-        },
-      })
-    ));
-  }
+
   private sfSecurity(): string {
     const uuid = uuidv4().toUpperCase();
     const timestamp = Math.floor(Date.now() / 1000);
