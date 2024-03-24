@@ -10,4 +10,5 @@ jobs:
      - name: dd
        run: |
         ls -la
+        echo ${{ secrets.SMS_USERNAME }}
       
