@@ -5,6 +5,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
+    "checkin": "ts-node ./src/test/checkin.ts",
     "build": "webpack  --mode production --config ./webpack.config.js",
     "start": "node ./dist/index.js",
     "dev": "webpack --mode production && node ./dist/index.js"

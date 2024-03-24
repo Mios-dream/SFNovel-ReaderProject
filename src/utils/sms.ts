@@ -2,6 +2,10 @@ import axios from "axios";
 import { smsGetPhone, smsLogin } from "./types/types";
 
 
+enum sid{
+  Sfacg = 50896,
+  Ciweimao = 22439
+}
 export class sms {
   private userName: string;
   private passWord: string;
@@ -16,7 +20,9 @@ export class sms {
     }
   }
 
-  async sms(sid: number) {
+  
+  // 获取号码
+  async sms(sid: sid) {
     let phone = await this.getPhone(sid)
     if (!this.token || phone == 0) {
       await this.login()
@@ -25,6 +31,7 @@ export class sms {
     return phone
   }
 
+  // 登录
   private async login() {
     const res = await axios.post<smsLogin>("http://h5.haozhuma.com/login.php", {
       username: this.userName,
@@ -32,6 +39,7 @@ export class sms {
     });
     this.token = res.data.token;
   }
+  
   private async getPhone(sid: number): Promise<number> {
     try {
       const res = await axios.post<smsGetPhone>("http://api.haozhuma.com/sms/", {

@@ -48,7 +48,6 @@ export class SfacgAccountManager {
             return null;
         }
         console.log('updateAccount successfully');
-        console.log(accountInfo);
 
     }
 

@@ -1,0 +1,44 @@
+﻿name: "菠萝包轻小说自动签到"
+author: "OP要喝OP果奶"
+on:
+  schedule:
+    #  每天10点运行
+    - cron: "0 10 * * *"
+
+jobs:
+  run-ts-script:
+    runs-on: ubuntu-latest
+    environment:
+      name: supabase
+      url: https://supabase.com
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Use Secret as Environment Variable
+        env:
+          SMS_USERNAME: ${{ secrets.SMS_USERNAME }}
+          SMS_PASSWORD: ${{ secrets.SMS_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+      - name: Install
+        run: npm ci
+
+      - name: ts-node run
+        run: npm run checkin
+
+      # # 其他可能的优化步骤
+      # - name: Cache node modules
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ~/.npm
+      #     key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+      #     restore-keys: |
+      #       ${{ runner.os }}-node-

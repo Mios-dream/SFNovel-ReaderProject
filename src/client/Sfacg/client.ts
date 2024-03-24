@@ -4,15 +4,11 @@ import {
   adBonusNum,
   bookshelfInfos,
   claimTask,
-  codeverify,
   contentInfos,
-  nameAvalible,
   newSign,
   novelInfo,
   readTime,
-  regist,
   searchInfos,
-  sendCode,
   share,
   tags,
   taskBonus,
@@ -24,7 +20,6 @@ import {
 } from "./types/Types";
 import {
   Itag,
-  IaccountInfo,
   InovelInfo,
   IvolumeInfos,
   Ichapter,
@@ -32,9 +27,7 @@ import {
   IbookshelfInfos,
   IsearchInfos,
 } from "./types/ITypes";
-import { sms } from "../../utils/sms";
 import { SfacgAccountManager } from "./account";
-import { Cookie } from "tough-cookie";
 
 
 
@@ -492,52 +485,6 @@ export class SfacgClient extends SfacgHttp {
 
 
 
-export class SfacgRegister extends SfacgHttp {
-  phone: number = 0;
-  sms: sms;
-  constructor() {
-    super();
-    this.sms = new sms();
-  }
-
-  async avalibleNmae(name: string): Promise<boolean> {
-    const res = await this.post<nameAvalible>("/users/availablename", {
-      nickName: name,
-    });
-    return res.data.nickName.valid;
-  }
-  async sendCode() {
-    this.phone = await this.sms.sms(50896);
-    const res = await this.post<sendCode>(`/sms/${this.phone}/86`, "");
-    return res.status.httpCode == 201;
-  }
-
-  async codeverify(phoneNum: number, smsAuthCode: number) {
-    const res = await this.put<codeverify>(`/sms/${phoneNum}/86`, {
-      smsAuthCode: smsAuthCode,
-    });
-    return res.status.httpCode == 200
-  }
-
-  async regist(
-    passWord: string,
-    nickName: string,
-    phoneNum: number,
-    smsAuthCode: number
-  ) {
-    let res = await this.post<regist>("/user", {
-      passWord: passWord,
-      nickName: nickName,
-      countryCode: "86",
-      phoneNum: phoneNum,
-      email: "",
-      smsAuthCode: smsAuthCode,
-      shuMeiId: "",
-    });
-    let accountID = res.data.accountId;
-    return accountID;
-  }
-}
 
 
 

@@ -17,5 +17,4 @@ logs
 .vscode/
 *.sw*
 
-# 忽略package-lock.json
-package-lock.json
+

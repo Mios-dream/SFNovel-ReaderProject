@@ -1,7 +1,9 @@
 import { IaccountInfo, IadBonusNum, IsearchInfos } from "./types/ITypes";
 import { SfacgAccountManager } from "./account";
-import { SfacgClient, SfacgRegister } from "./client";
+import { SfacgClient} from "./client";
 import readline from "readline"
+import { SfacgRegister } from "./register";
+import { sms } from "../../utils/sms";
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -19,11 +21,13 @@ export class Sfacg {
     client: SfacgClient;
     accountManager: SfacgAccountManager;
     register: SfacgRegister;
+    sms:sms
 
     constructor() {
         this.client = new SfacgClient();
         this.accountManager = new SfacgAccountManager();
         this.register = new SfacgRegister();
+        this.sms = new sms()
     }
 
     async init() {
@@ -111,34 +115,36 @@ export class Sfacg {
         rl.close();
     }
 
-    Regist() { }
+    async Regist() {
+
+     }
 
     async Bonus() {
         rl.close();
         const accounts = await this.accountManager.allCookiesGet()
         accounts?.map(async (account) => {
-            const { result, anonClient } = await this.initClient(account, "getTasks")
+            const { result, anonClient } = await this.initClient(account, "getTasks")// 初始化客户端，判断ck是否有效，返回可用线程
             account.cookie = anonClient.cookie
             console.log(result);
             result.map((taskId: any) => {
-                anonClient.claimTask(taskId)
+                anonClient.claimTask(taskId) // 接受任务
             })
-            const { taskId, requireNum } = await anonClient.adBonusNum() as IadBonusNum
-            const signInfo = await anonClient.newSign()
+            const signInfo = await anonClient.newSign() // 签到
             signInfo && console.log(`用户${account.userName}签到成功`);
-            await anonClient.readTime(120)
-            await anonClient.share(account.accountId)
+            await anonClient.readTime(120)// 阅读时长
+            await anonClient.share(account.accountId) // 每日分享
             result.map((taskId: any) => {
-                anonClient.taskBonus(taskId)
+                anonClient.taskBonus(taskId)// 领取奖励
             })
-            await anonClient.claimTask(taskId)
+            const { taskId, requireNum } = await anonClient.adBonusNum() as IadBonusNum // 广告基础信息
+            await anonClient.claimTask(taskId) // 接受广告任务
             console.log(`需要观看广告的次数：${requireNum} `)
             for (let i = 0; i < requireNum; i++) {
-                const adBonusInfo = await anonClient.adBonus(taskId)
-                await anonClient.taskBonus(taskId)
+                const adBonusInfo = await anonClient.adBonus(taskId)// 广告奖励
+                await anonClient.taskBonus(taskId)// 这个不知道有没有用
                 adBonusInfo && console.log(`用户${account.userName}完成了第${i}次广告`);
             }
-            await this.updateUserInfo(account)
+            await this.updateUserInfo(account) // 账号信息更新
         })
 
     }
