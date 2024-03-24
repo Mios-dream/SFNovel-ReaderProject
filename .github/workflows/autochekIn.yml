@@ -6,7 +6,7 @@ on:
   workflow_dispatch: # 允许手动触发工作流
 jobs:
   run-ts-script:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     environment:
       name: supabase
       url: https://supabase.com
