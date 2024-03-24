@@ -1,5 +1,5 @@
 ﻿name: "菠萝包轻小说自动签到"
-run-namer: "OP要喝OP果奶"
+run-name: "OP要喝OP果奶"
 on:
   schedule:
     - cron: "0 10 * * *" # 每天10点运行
