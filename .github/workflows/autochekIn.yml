@@ -2,9 +2,8 @@
 author: "OP要喝OP果奶"
 on:
   schedule:
-    #  每天10点运行
-    - cron: "0 10 * * *"
-
+    - cron: "0 10 * * *" # 每天10点运行
+  workflow_dispatch: # 允许手动触发工作流
 jobs:
   run-ts-script:
     runs-on: ubuntu-latest
