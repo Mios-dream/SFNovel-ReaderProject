@@ -9,5 +9,5 @@ jobs:
     steps:
      - name: dd
        run: |
-        ls la
+        ls -la
       
