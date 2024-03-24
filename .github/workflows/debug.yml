@@ -1,3 +1,4 @@
+name: "DEBUG"
 on:
   workflow_dispatch:
 jobs:
@@ -6,6 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - run: |
-        ls
+     - name: dd
+       run: |
+        ls la
       
