@@ -7,7 +7,5 @@ jobs:
     
     steps:
     - run: |
-        cd src
-        cd test
         ls
       
