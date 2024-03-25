@@ -119,14 +119,12 @@ export class Sfacg {
 
     async Regist() {
         rl.close();
-        const phone = await this.GetAvaliblePhone()
-        console.log(`获取到的手机号：${phone}`);
-        const _send = await this.register.sendCode(phone)
-        if (_send) {
+        const phone = await this.GetAvaliblePhone()// 这里已经同时发送短信了，不必重复操作
+        const name = await this.GetAvalibleName()
+        console.log(`获取到的昵称：${name}，获取到的手机号：${phone}`);
+        if (phone) {
             const code = await this.waitForCode(sid.Sfacg, phone)
             const verify = code && await this.register.codeverify(phone, code)
-            const name = await this.GetAvalibleName()
-            console.log(`获取到的昵称：${name}`);
             const AcountId = verify && await this.register.regist(process.env.REGIST_PASSWORD ?? "dddd1111", name, phone, code)
             if (AcountId) {
                 console.log(`注册成功，账号：${phone}，密码：${process.env.REGIST_PASSWORD ?? "dddd1111"}`);
