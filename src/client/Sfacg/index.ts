@@ -128,7 +128,7 @@ export class Sfacg {
             const AcountId = verify && await this.register.regist(process.env.REGIST_PASSWORD ?? "dddd1111", name, phone, code)
             if (AcountId) {
                 console.log(`注册成功，账号：${phone}，密码：${process.env.REGIST_PASSWORD ?? "dddd1111"}`);
-                await this.updateUserInfo({ userName: phone, passWord: process.env.REGIST_PASSWORD ?? "dddd1111" } as IaccountInfo)
+                await this.updateUserInfo({ userName: phone, passWord: process.env.REGIST_PASSWORD ?? "dddd1111" } as IaccountInfo, true)
             }
         }
     }
@@ -144,6 +144,10 @@ export class Sfacg {
                 if (task.status == 0)
                     await anonClient.claimTask(task.taskId)
             })
+            const Fav = await anonClient.NewAccountFavBonus()
+            Fav && console.log("新号收藏任务完成")
+            const Follow = await anonClient.NewAccountFollowBonus()
+            Follow && console.log("新号关注任务完成")
             const signInfo = await anonClient.newSign() // 签到
             signInfo && console.log(`用户${account.userName}签到成功`);
             await anonClient.readTime(120)// 阅读时长
