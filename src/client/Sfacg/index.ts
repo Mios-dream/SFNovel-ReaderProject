@@ -3,7 +3,7 @@ import { SfacgCache } from "./cache";
 import { SfacgClient } from "./client";
 import readline from "readline"
 import { SfacgRegister } from "./register";
-import { sid, sms } from "../../utils/sms";
+import { sid, sms, smsAction } from "../../utils/sms";
 import { tasks } from "./types/Types";
 import { promises } from "fs-extra";
 
@@ -273,6 +273,7 @@ export class Sfacg {
         const phone = await this.sms.getPhone(sid.Sfacg)
         console.log(`获取到的手机号：${phone}`);
         const status = phone && this.register.sendCode(phone)
+        !status && this.sms.getPhone(sid.Sfacg, smsAction.cacel)
         return status ? phone : await this.GetAvaliblePhone()
     }
 

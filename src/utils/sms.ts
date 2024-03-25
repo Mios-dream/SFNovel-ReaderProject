@@ -6,6 +6,10 @@ export enum sid {
   Sfacg = 50896,
   Ciweimao = 22439
 }
+export enum smsAction {
+  cacel = "cancelRecv",
+  get = "getPhone"
+}
 
 const headers = {
   "Accept": "*/*",
@@ -62,10 +66,10 @@ export class sms {
     }
   }
 
-  async getPhone(sid: sid) {
+  async getPhone(sid: sid, api: smsAction = smsAction.get) {
     try {
       const res = await axios.post<smsGetPhone>("http://api.haozhuma.com/sms/", {
-        api: "getPhone",
+        api: api,
         token: this.token,
         sid: sid,
         Province: "",
