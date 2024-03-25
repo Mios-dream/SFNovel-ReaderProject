@@ -139,7 +139,6 @@ export class Sfacg {
         accounts?.map(async (account) => {
             const { result, anonClient } = await this.initClient(account, "getTasks")// 初始化客户端，判断ck是否有效，返回可用线程
             account.cookie = anonClient.cookie
-            console.log(`用户${account.userName}领取了任务${(result as tasks[]).map((task) => task.name)}`)
             result.map(async (task: tasks) => {
                 if (task.status == 0)
                     await anonClient.claimTask(task.taskId)
