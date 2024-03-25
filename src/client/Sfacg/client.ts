@@ -71,7 +71,7 @@ export class SfacgClient extends SfacgHttp {
       passWord: passWord,
     });
     this.cookie = res.status == 200 && res.headers["set-cookie"].map((cookie: any) => {
-      return cookie.split(';')[0]; 
+      return cookie.split(';')[0];
     }).join('; ');
     return res.status == 200
   }
@@ -349,6 +349,7 @@ export class SfacgClient extends SfacgHttp {
       const adBonusNum = {
         requireNum: res[0].requireNum,
         taskId: res[0].taskId,
+        completeNum: res[0].completeNum,
       };
       return adBonusNum;
     } catch (err: any) {
@@ -387,8 +388,12 @@ export class SfacgClient extends SfacgHttp {
       });
       return res.status.httpCode == 200
     } catch (err: any) {
+      let errmsg = err.response.data.status.msg
+      if (errmsg == "该日期已签到，请重新确认并提交") {
+        return true
+      }
       console.error(
-        `PUT newSign failed: ${JSON.stringify(err.response.data.status.msg)}`
+        `PUT newSign failed: ${JSON.stringify(errmsg)}`
       );
       return false;
     }
@@ -404,10 +409,7 @@ export class SfacgClient extends SfacgHttp {
         page: 0,
         size: 20
       })
-      const tasks = res.filter((task) => task.status == 0)
-      return tasks.map(task => (
-        task.taskId
-      ))
+      return res
     } catch (err: any) {
       console.error(
         `GET Tasks failed: ${JSON.stringify(err.response.data.status.msg)}`
@@ -423,8 +425,12 @@ export class SfacgClient extends SfacgHttp {
       const res = await this.post<claimTask>(`/user/tasks/${id}`, {})
       return res.status.httpCode == 201
     } catch (err: any) {
+      let errmsg = err.response.data.status.msg
+      if (errmsg = "不能重复领取日常任务哦~") {
+        return true
+      }
       console.error(
-        `POST claimTasK${id} failed: ${JSON.stringify(err.response.data.status.msg)}`
+        `POST claimTasK${id} failed: ${JSON.stringify(errmsg)}`
       );
       return false;
     }

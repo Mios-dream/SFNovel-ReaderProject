@@ -57,7 +57,8 @@ export interface Ichapter {
 
 export interface IadBonusNum {
   taskId: number; // 任务ID
-  requireNum: number; // 未完成看广告领奖次数
+  requireNum: number; // 总看广告领奖次数
+  completeNum: number // 已完成看广告领奖次数
 }
 
 export interface IbookshelfInfos {

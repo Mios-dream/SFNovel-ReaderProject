@@ -3,7 +3,6 @@ run-name: "OP要喝OP果奶"
 on:
   schedule:
     - cron: "0 2 * * *" # 每天UTC时间2点运行，对应北京时间上午10点
-    - cron: "10 7 * * *" # 每天UTC时间7点10分运行，对应北京时间下午3点10分
   workflow_dispatch: # 允许手动触发工作流
 jobs:
   run-ts-script:
