@@ -368,6 +368,7 @@ export class SfacgClient extends SfacgHttp {
   // 签到
   async newSign() {
     console.log(this.getNowFormatDate());
+    
     try {
       const res = await this.put<newSign>("/user/newSignInfo", {
         signDate: this.getNowFormatDate(),

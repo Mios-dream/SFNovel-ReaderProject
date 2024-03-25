@@ -42,9 +42,11 @@ export class SfacgHttp {
 
   protected getNowFormatDate(): string {
     const date = new Date();
-    const year = date.getFullYear();
-    const month = (date.getMonth() + 1).toString().padStart(2, "0");
-    const day = date.getDate().toString().padStart(2, "0");
+    const utc8Offset = 8 * 60;
+    const now = new Date(date.getTime() + utc8Offset * 60 * 1000);
+    const year = now.getUTCFullYear();
+    const month = (now.getUTCMonth() + 1).toString().padStart(2, "0");
+    const day = now.getUTCDate().toString().padStart(2, "0");
     return `${year}-${month}-${day}`;
   }
 

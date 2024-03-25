@@ -144,24 +144,22 @@ export class Sfacg {
                 if (task.status == 0)
                     await anonClient.claimTask(task.taskId)
             })
-            const Fav = await anonClient.NewAccountFavBonus()
-            Fav && console.log("新号收藏任务完成")
-            const Follow = await anonClient.NewAccountFollowBonus()
-            Follow && console.log("新号关注任务完成")
             const signInfo = await anonClient.newSign() // 签到
-            signInfo && console.log(`用户${account.userName}签到成功`);
-            await anonClient.readTime(120)// 阅读时长
-            await anonClient.share(account.accountId) // 每日分享
+            signInfo ? console.log(`用户${account.userName}签到成功`) : console.log(`用户${account.userName}签到失败`);
+            const readInfo = await anonClient.readTime(120)// 阅读时长
+            readInfo ? console.log(`用户${account.userName}阅读成功`) : console.log(`用户${account.userName}阅读失败`);
+            const shareInfo = await anonClient.share(account.accountId) // 每日分享
+            shareInfo && console.log(`用户${account.userName}分享成功`) || console.log(`用户${account.userName}分享失败`);
             const PendingRewards = await anonClient.getTasks() // 查看已做待领取任务
             PendingRewards && PendingRewards.map(async (task: tasks) => {
                 if (task.status == 1 && task.name !== "每日签到") {
                     const staus = await anonClient.taskBonus(task.taskId)
-                    staus && console.log(`任务${task.name}已完成`);
+                    staus && console.log(`任务${task.name}领取奖励成功`);
                 }
             })
             const { taskId, requireNum, completeNum } = await anonClient.adBonusNum() as IadBonusNum // 广告基础信息
             await anonClient.claimTask(taskId) // 接受广告任务
-            console.log(`需要观看广告的次数：${requireNum - completeNum} `)
+            console.log(`用户${account.userName}需要观看广告的次数：${requireNum - completeNum} `)
             for (let i = 0; i < requireNum - completeNum; i++) {
                 const adBonusInfo = await anonClient.adBonus(taskId)// 广告奖励
                 await anonClient.taskBonus(taskId)// 这个不知道有没有用

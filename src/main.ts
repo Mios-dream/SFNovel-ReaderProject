@@ -1,10 +1,15 @@
 
+import { SfacgClient } from "./client/Sfacg/client";
 import { Sfacg } from "./client/Sfacg/index";
 // import crypto from "crypto"
 // import axios from "axios";
 // import { v4 as uuidv4 } from "uuid";
-const a = new Sfacg()
-a.init()
+(async () => {
+    const a = new Sfacg()
+    a.init()
+
+})()
+
 
 
 
