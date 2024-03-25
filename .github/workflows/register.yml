@@ -1,8 +1,8 @@
-﻿name: "菠萝包轻小说自动签到"
+﻿name: "菠萝包轻小说注册"
 run-name: "OP要喝OP果奶"
 on:
   schedule:
-    - cron: "0 10 * * *" # 每天UTC时间10点运行，对应北京时间下午6点
+    - cron: "55 1,9 * * *" # 北京时间上午 9:55 AM，下午 5:55 PM 运行，注册一个号
   workflow_dispatch: # 允许手动触发工作流
 jobs:
   run-ts-script:
@@ -29,7 +29,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           REGIST_PASSWORD: ${{ secrets.REGIST_PASSWORD }}
-        run: npm run checkin
+        run: npm run register
 
       # # 其他可能的优化步骤
       # - name: Cache node modules

@@ -10,7 +10,6 @@ export interface IaccountInfo {
   vipLevel?: number; // vip等级
   fireMoneyRemain?: number; // 未使用的火币
   couponsRemain?: number; // 未使用的代币
-  lastCheckIn?: string; //上次签到时间\
   cookie?: string // 用户凭证 
 }
 
@@ -40,6 +39,7 @@ export interface InovelInfo {
 
 // 卷列表
 export interface IvolumeInfos {
+  novelId: number; // 小说ID
   volumeId: number; // 卷ID
   title: string; // 标题
   chapterList: Ichapter[]; // 章节列表
@@ -53,6 +53,7 @@ export interface Ichapter {
   isVip: boolean; // 是否为VIP章节
   ntitle: string; // 新标题
   content?: string //内容
+  volumeId: number; // 卷ID
 }
 
 export interface IadBonusNum {

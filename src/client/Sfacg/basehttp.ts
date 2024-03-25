@@ -14,7 +14,7 @@ export class SfacgHttp {
   cookie: string | undefined
 
 
-  async get<T, E = any>(url: string, query?: E): Promise<T> {
+  protected async get<T, E = any>(url: string, query?: E): Promise<T> {
     let response: AxiosResponse;
     response = await axios.get<T>(url, this._client(query));
     return url.startsWith("/sessions")
@@ -22,25 +22,25 @@ export class SfacgHttp {
       : response.data.data;
   }
 
-  async get_rss<E>(url: string): Promise<E> {
+  protected async get_rss<E>(url: string): Promise<E> {
     let response: AxiosResponse;
     response = await axios.get(url);
     return response.data;
   }
 
-  async post<T, E = any>(url: string, data: E): Promise<T> {
+  protected async post<T, E = any>(url: string, data: E): Promise<T> {
     let response: any;
     response = await axios.post<T>(url, data, this._client());
     return url.startsWith("/session") ? response : response.data;
   }
 
-  async put<T, E = any>(url: string, data: E): Promise<T> {
+  protected async put<T, E = any>(url: string, data: E): Promise<T> {
     let response: any;
     response = await axios.put<T>(url, data, this._client());
     return response.data;
   }
 
-  getNowFormatDate(): string {
+  protected getNowFormatDate(): string {
     const date = new Date();
     const year = date.getFullYear();
     const month = (date.getMonth() + 1).toString().padStart(2, "0");

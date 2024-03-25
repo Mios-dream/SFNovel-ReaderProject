@@ -5,6 +5,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
+    "register": "ts-node ./src/test/register.ts",
     "checkin": "ts-node ./src/test/checkIn.ts",
     "build": "webpack  --mode production --config ./webpack.config.js",
     "start": "node ./dist/index.js",
