@@ -173,7 +173,6 @@ export class Sfacg {
 
 
     async updateUserInfo(acconutInfo: IaccountInfo, firstLogin: boolean = false) {
-        console.log("进入UserInfo");
         const { userName, passWord } = acconutInfo
         if (firstLogin) {
             await this.client.login(userName as string, passWord as string)
