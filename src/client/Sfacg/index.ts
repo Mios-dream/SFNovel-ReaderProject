@@ -5,7 +5,8 @@ import readline from "readline"
 import { SfacgRegister } from "./register";
 import { sid, sms, smsAction } from "../../utils/sms";
 import { tasks } from "./types/Types";
-import { promises } from "fs-extra";
+import Table from "cli-table3";
+import { RandomName, Secret, colorize } from "../../utils/tools";
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -65,20 +66,16 @@ export class Sfacg {
 
 
     async Once() {
-        const userName = await question("输入账号：");
-        const passWord = await question("输入密码：");
-        this.client.login(userName as string, passWord as string);
         console.log("[1]直接搜书");
         console.log("[2]书架选书");
         const option = await question("请选择一个操作：");
-
         switch (option) {
             case "1":
                 const bookName = await question("请输入书名：");
                 const books = await this.client.searchInfos(bookName as string);
                 const id = books ? await this.selectBookFromList(books) : null;
                 if (id) {
-                    await this.client.volumeInfos(id);
+                    console.log(id);
                 }
                 break;
             case "2":
@@ -88,7 +85,11 @@ export class Sfacg {
                 console.log("输入的选项不正确。");
                 await this.Once();
                 break;
+
         }
+        const userName = await question("输入账号：");
+        const passWord = await question("输入密码：");
+        this.client.login(userName as string, passWord as string);
 
         rl.close();
     }
@@ -123,7 +124,7 @@ export class Sfacg {
         const name = await this.GetAvalibleName()
         console.log(`获取到的昵称：${name}，获取到的手机号：${phone}`);
         if (phone) {
-            const code = await this.waitForCode(sid.Sfacg, phone)
+            const code = await this.sms.waitForCode(sid.Sfacg, phone)
             const verify = code && await this.register.codeverify(phone, code)
             const AcountId = verify && await this.register.regist(process.env.REGIST_PASSWORD ?? "dddd1111", name, phone, code)
             if (AcountId) {
@@ -175,18 +176,35 @@ export class Sfacg {
     }
 
     async downLoadBook(bookId: number) {
-        const volunms = await this.client.volumeInfos(bookId);
-        volunms && volunms
+        const _novelInfo = await this.client.novelInfo(bookId)
+        _novelInfo && await this.SfacgCache.UpsertNovelInfo(_novelInfo)
+        const _volunms = await this.client.volumeInfos(bookId);
+        _volunms && _volunms.map(async (volunm) => {
+            await this.SfacgCache.UpsertVolumeInfo(volunm)
+        })
+        // 接下来我要判断数据库中该novelId的所有chapter中有哪些content为空，返回对应chapId和needFireMoney
     }
 
-    async selectBookFromList(books: IsearchInfos[]): Promise<number> {
-        // 显示书籍列表
+
+    private async selectBookFromList(books: IsearchInfos[]): Promise<number> {
+        const table = new Table({
+            head: [colorize('序号', "blue"), colorize('书籍名称', "yellow"), colorize('作者', "green"), colorize('书籍ID', "purple")],  // 表头
+        })
+        // 向表格中添加行数据
         books.forEach((book, index) => {
-            console.log(`[${index + 1}] ${book.novelName} - ${book.authorId}`);
-        });
-        const bookIndex = await question("请输入书序号选择：");
-        const index = bookIndex as number - 1;
-        return books[index].novelId;
+            table.push([
+                colorize(`${index + 1}`, "blue"),
+                colorize(`${book.novelName}`, "yellow"),
+                colorize(`${book.authorName}`, "green"),
+                colorize(`${book.novelId}`, "purple"),
+            ]);
+        })
+        console.log(table.toString());
+        const index = await question(`请输入${colorize("[1]", "blue")}~${colorize(`[${books.length}]`, "blue")}序号：`);
+        return books[index as number - 1].novelId
+        return 1
+        // 输出表格
+
     }
 
 
@@ -213,7 +231,7 @@ export class Sfacg {
     }
 
     // 接收账号信息和要做的，测试ck可用性，返回函数的返回内容和可用的线程
-    async initClient(acconutInfo: IaccountInfo, todo: "getTasks" | "userInfo") {
+    private async initClient(acconutInfo: IaccountInfo, todo: "getTasks" | "userInfo") {
         // console.log("进入初始线程");
         const anonClient = new SfacgClient()
         const { userName, passWord, cookie } = acconutInfo
@@ -221,12 +239,12 @@ export class Sfacg {
         if (cookie) {
             anonClient.cookie = cookie
             result = (todo == "getTasks") ? await anonClient.getTasks() : await anonClient.userInfo()
-            result && console.log(`${this.Secret(acconutInfo.userName as string)}原ck可用`);
+            result && console.log(`${Secret(acconutInfo.userName as string)}原ck可用`);
         }
         if ((!cookie || !result) && userName && passWord) {
             const a = await anonClient.login(userName, passWord)
             if (a) {
-                console.log(`${this.Secret(acconutInfo.userName as string)}ck重置`);
+                console.log(`${Secret(acconutInfo.userName as string)}ck重置`);
                 result = (todo == "getTasks") ? await anonClient.getTasks() : await anonClient.userInfo()
             }
             else {
@@ -236,34 +254,9 @@ export class Sfacg {
         return { result, anonClient }
     }
 
-    private Secret(phoneNumber: string) {
-        return phoneNumber.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
-    }
-
-    private RandomName() {
-        // 生成随机六位汉字+字母+数字组合的代码
-        const random = (min: number, max: number) => Math.floor(Math.random() * (max - min) + min);
-        const randomChar = (length: number) => {
-            const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-            let result = '';
-            for (let i = 0; i < length; i++) {
-                result += chars[random(0, chars.length)];
-            }
-            return result;
-        };
-        const randomChinese = (length: number) => {
-            let result = '';
-            for (let i = 0; i < length; i++) {
-                result += String.fromCharCode(random(0x4e00, 0x9fa5));
-            }
-            return result;
-        };
-        const randomName = randomChinese(2) + randomChar(4);
-        return randomName;
-    }
 
     private async GetAvalibleName(): Promise<string> {
-        const name = this.RandomName()
+        const name = RandomName()
         const res = await this.register.avalibleNmae(name);
         console.log(`获取到的昵称：${name}`);
         return res ? name : await this.GetAvalibleName()
@@ -279,21 +272,11 @@ export class Sfacg {
     }
 
 
-    async waitForCode(sid: sid, phone: string): Promise<number> {
-        return new Promise(resolve => {
-            const checkCode = async () => {
-                const code = await this.sms.receive(sid, phone);
-                if (code) {
-                    resolve(code); // 完成Promise，并返回code值
-                } else {
-                    // 如果code为空，5秒后再次检查
-                    setTimeout(checkCode, 5000);
-                }
-            };
-            checkCode();
-        });
-    }
 }
 
+
+
+const a = new Sfacg()
+a.init()
 
 

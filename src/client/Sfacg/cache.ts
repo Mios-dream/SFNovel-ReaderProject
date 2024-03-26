@@ -1,6 +1,7 @@
 
 import { IaccountInfo, Ichapter, InovelInfo, IvolumeInfos } from "./types/ITypes";
 import { Server } from "../../utils/db";
+import { colorize } from "../../utils/tools";
 
 export class SfacgCache {
 
@@ -19,10 +20,10 @@ export class SfacgCache {
                 tags: novel.tags
             });
         if (error) {
-            console.log('Error UpsertNovelInfo: ', error);
+            console.log(`Error UpsertNovelInfo:${colorize(`${novel.novelId}`, "purple")} `, error);
             return null;
         }
-        console.log('UpsertNovelInfo successfully');
+        console.log(`UpsertAccount UpsertNovelInfo ${colorize(`${novel.novelId}`, "green")}`);
     }
 
     async UpsertVolumeInfo(volume: IvolumeInfos) {
@@ -33,17 +34,21 @@ export class SfacgCache {
                 volumeId: volume.volumeId,
                 title: volume.title,
             });
-        for (const chapter of volume.chapterList) {
-            this.UpsertChapterInfo(chapter)
-        }
+        volume.chapterList.map(async (chapter: Ichapter) => {
+            await this.UpsertChapterInfo(chapter)
+        })
         if (error) {
-            console.log('Error UpsertVolumeInfo: ', error);
+            console.log(`Error UpsertVolumeInfo:${colorize(`${volume.volumeId}`, "purple")} `, error);
             return null;
         }
-        console.log('UpsertVolumeInfo successfully');
+        console.log(`UpsertVolumeInfo successfully ${colorize(`${volume.volumeId}`, "green")}`);
     }
 
-    async UpsertChapterInfo(chapter: Ichapter) {
+    async UpdateChapterContent() {
+
+    }
+
+    private async UpsertChapterInfo(chapter: Ichapter) {
         const { data, error } = await Server
             .from('Sfacg-chapter')
             .upsert({
@@ -51,14 +56,14 @@ export class SfacgCache {
                 needFireMoney: chapter.needFireMoney,
                 isVip: chapter.isVip,
                 ntitle: chapter.ntitle,
-                content: chapter.content,
-                volumeId: chapter.volumeId
+                volumeId: chapter.volumeId,
+                chapOrder: chapter.chapOrder,
             });
         if (error) {
-            console.log('Error UpsertVolumeInfo: ', error);
+            console.log(`Error UpsertChapterInfo: ${colorize(`${chapter.chapId}`, "purple")} `, error);
             return null;
         }
-        console.log('UpsertVolumeInfo successfully');
+        console.log(`UpsertChapterInfo successfully ${colorize(`${chapter.chapId}`, "green")}`);
     }
 
     async UpsertAccount(accountInfo: IaccountInfo) {
@@ -76,10 +81,10 @@ export class SfacgCache {
                 cookie: accountInfo.cookie
             })
         if (error) {
-            console.log('Error UpsertAccount: ', error);
+            console.log(`Error UpsertAccount: ${colorize(`${accountInfo.userName}`, "purple")} `, error);
             return null;
         }
-        console.log('UpsertAccount successfully');
+        console.log(`UpsertAccount successfully ${colorize(`${accountInfo.userName}`, "green")}`);
     }
 
 
@@ -90,10 +95,10 @@ export class SfacgCache {
             .eq('userName', userName);
 
         if (error) {
-            console.error('Error removeAccount: ', error);
+            console.log(`Error removeAccount: ${colorize(`${userName}`, "purple")} `, error);
             return null;
         }
-        console.log('removeAccount successfully', data);
+        console.log(`removeAccount successfully ${colorize(`${userName}`, "green")}`);
     }
 
 

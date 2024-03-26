@@ -40,7 +40,20 @@ export class sms {
     }
   }
 
-
+  async waitForCode(sid: sid, phone: string): Promise<number> {
+    return new Promise(resolve => {
+      const checkCode = async () => {
+        const code = await this.receive(sid, phone);
+        if (code) {
+          resolve(code); // 完成Promise，并返回code值
+        } else {
+          // 如果code为空，5秒后再次检查
+          setTimeout(checkCode, 5000);
+        }
+      };
+      checkCode();
+    });
+  }
 
   // 登录
   async login(retries = 3) {
@@ -82,7 +95,7 @@ export class sms {
     }
 
   }
-  async receive(sid: sid, phone: string): Promise<number | false> {
+  private async receive(sid: sid, phone: string): Promise<number | false> {
     try {
       const res = await axios.get("http://api.haozhuma.com/sms", {
         headers, params: {

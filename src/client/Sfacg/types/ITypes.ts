@@ -52,8 +52,9 @@ export interface Ichapter {
   needFireMoney: number; // 所需火币
   isVip: boolean; // 是否为VIP章节
   ntitle: string; // 新标题
-  content?: string //内容
+  chapOrder: number,// 该卷中此章节的序号
   volumeId: number; // 卷ID
+  content?: string //内容
 }
 
 export interface IadBonusNum {
@@ -72,7 +73,7 @@ export interface IbookshelfInfos {
 [];
 
 export interface IsearchInfos {
-  authorId: number; // 作者ID
+  authorName: string; // 作者名称
   lastUpdateTime: string; // 最后更新时间
   novelCover: string; // 小说封面URL
   novelId: number; // 小说ID

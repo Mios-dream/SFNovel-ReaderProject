@@ -29,6 +29,7 @@ import {
   IbookshelfInfos,
   IsearchInfos,
 } from "./types/ITypes";
+import { getNowFormatDate } from "../../utils/tools";
 
 
 
@@ -138,6 +139,7 @@ export class SfacgClient extends SfacgHttp {
               needFireMoney: chapter.needFireMoney,
               isVip: chapter.isVip,
               ntitle: chapter.ntitle,
+              chapOrder: chapter.chapOrder
             };
           }),
         };
@@ -188,8 +190,8 @@ export class SfacgClient extends SfacgHttp {
   // 搜索小说
   async searchInfos(
     novelName: string,
-    page: number = 1,
-    size: number = 1
+    page: number = 0,
+    size: number = 12
   ): Promise<IsearchInfos[] | false> {
     try {
       const res = await this.get<searchInfos>("/search/novels/result/new", {
@@ -200,7 +202,7 @@ export class SfacgClient extends SfacgHttp {
       });
       const searchInfos = res.novels.map((novel) => {
         return {
-          authorId: novel.authorId, // 作者ID
+          authorName: novel.authorName,
           lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
           novelCover: novel.novelCover, // 小说封面URL
           novelId: novel.novelId, // 小说ID
@@ -367,11 +369,11 @@ export class SfacgClient extends SfacgHttp {
 
   // 签到
   async newSign() {
-    console.log(this.getNowFormatDate());
-    
+    console.log(getNowFormatDate());
+
     try {
       const res = await this.put<newSign>("/user/newSignInfo", {
-        signDate: this.getNowFormatDate(),
+        signDate: getNowFormatDate(),
       });
       return res.status.httpCode == 200
     } catch (err: any) {
@@ -433,7 +435,7 @@ export class SfacgClient extends SfacgHttp {
         entityType: 2,
         chapterId: 477385,
         entityId: 368037,
-        readingDate: this.getNowFormatDate()
+        readingDate: getNowFormatDate()
       })
       return res.status.httpCode == 200
     } catch (err: any) {
@@ -508,6 +510,13 @@ export class SfacgClient extends SfacgHttp {
       );
       return false;
     }
-
   }
 }
+
+
+// (async () => {
+//   const a = new SfacgClient()
+//   const b = await a.searchInfos("屠龙失败")
+//   console.log(b);
+// })()
+

@@ -32,6 +32,7 @@
     "axios": "^1.6.7",
     "axios-cookiejar-support": "^5.0.0",
     "bufferutil": "^4.0.8",
+    "cli-table3": "^0.6.4",
     "deasync": "^0.1.29",
     "debug": "^4.3.4",
     "dotenv": "^16.4.5",

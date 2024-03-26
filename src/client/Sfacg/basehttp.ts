@@ -40,15 +40,7 @@ export class SfacgHttp {
     return response.data;
   }
 
-  protected getNowFormatDate(): string {
-    const date = new Date();
-    const utc8Offset = 8 * 60;
-    const now = new Date(date.getTime() + utc8Offset * 60 * 1000);
-    const year = now.getUTCFullYear();
-    const month = (now.getUTCMonth() + 1).toString().padStart(2, "0");
-    const day = now.getUTCDate().toString().padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
+
 
   private _client(query?: any): axios.AxiosRequestConfig {
     // 初始化axios实例
