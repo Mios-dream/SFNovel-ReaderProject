@@ -139,6 +139,8 @@ export class Sfacg {
         const accounts = await this.SfacgCache.allCookiesGet()
         accounts?.map(async (account) => {
             const { result, anonClient } = await this.initClient(account, "getTasks")// 初始化客户端，判断ck是否有效，返回可用线程
+            const deviceUpload = await anonClient.androiddeviceinfos(account.accountId) // 上传设备信息,防止签到失败
+            deviceUpload && console.log(`用户${account.userName}上传设备信息成功`);
             account.cookie = anonClient.cookie
             result.map(async (task: tasks) => {
                 if (task.status == 0)
@@ -275,7 +277,5 @@ export class Sfacg {
 
 
 
-const a = new Sfacg()
-a.init()
 
 

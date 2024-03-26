@@ -40,7 +40,11 @@ export class SfacgHttp {
     return response.data;
   }
 
-
+  protected async head<T>(url: string): Promise<T> {
+    let response: any;
+    response = await axios.head<T>(url, this._client());
+    return response.data;
+  }
 
   private _client(query?: any): axios.AxiosRequestConfig {
     // 初始化axios实例

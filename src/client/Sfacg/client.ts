@@ -2,6 +2,7 @@ import { SfacgHttp } from "./basehttp";
 import {
   adBonus,
   adBonusNum,
+  androiddeviceinfos,
   bookshelfInfos,
   claimTask,
   contentInfos,
@@ -30,6 +31,7 @@ import {
   IsearchInfos,
 } from "./types/ITypes";
 import { getNowFormatDate } from "../../utils/tools";
+import axios from "axios";
 
 
 
@@ -49,6 +51,28 @@ export class SfacgClient extends SfacgHttp {
       return cookie.split(';')[0];
     }).join('; ');
     return res.status == 200
+  }
+
+
+  // 签到时，新号如果不加就会提示：您的账号存在安全风险
+  async androiddeviceinfos(accountId: number) {
+    try {
+      const res = await this.post<androiddeviceinfos>("/user/androiddeviceinfos", {
+        "accountId": accountId,
+        "package": "com.sfacg",
+        "abi": "arm64-v8a",
+        "deviceId": SfacgHttp.DEVICE_TOKEN.toLowerCase(),
+        "version": "4.8.22",
+        "deviceToken": "7b2a42976f97d470"
+      })
+      return res.status.httpCode == 201
+    } catch (err: any) {
+      const errMsg = err.response.data.status.msg
+      console.error(
+        `POST NewAccountFavBonus failed: ${JSON.stringify(errMsg)}`
+      );
+      return false;
+    }
   }
 
   /**
@@ -513,10 +537,18 @@ export class SfacgClient extends SfacgHttp {
   }
 }
 
+(async () => {
+  const a = new SfacgClient()
+  await a.login("17170515189", "Opooo1830")
+  const acc = await a.userInfo()
+  const id = acc && acc.accountId
+  console.log(id);
 
-// (async () => {
-//   const a = new SfacgClient()
-//   const b = await a.searchInfos("屠龙失败")
-//   console.log(b);
-// })()
+  if (id) {
+    const info = await a.androiddeviceinfos(id)
+    console.log(info);
+  }
+  const b = await a.newSign()
+  console.log(b);
+})()
 

@@ -333,6 +333,7 @@ export interface taskBonus {
 export type sendCode = Response;
 export type NewAccountFollowBonus = Response;
 export type NewAccountFavBonus = Response;
+export type androiddeviceinfos = Response;
 //{"status":{"httpCode":200,"errorCode":200,"msgType":0,"msg":null},"data":null}
 //{"status":{"httpCode":422,"errorCode":727,"msgType":0,"msg":"手机验证码错误"},"data":null}
 export type codeverify = Response
