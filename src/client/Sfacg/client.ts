@@ -31,7 +31,7 @@ import {
   IsearchInfos,
 } from "./types/ITypes";
 import { getNowFormatDate } from "../../utils/tools";
-import axios from "axios";
+
 
 
 
@@ -69,7 +69,7 @@ export class SfacgClient extends SfacgHttp {
     } catch (err: any) {
       const errMsg = err.response.data.status.msg
       console.error(
-        `POST NewAccountFavBonus failed: ${JSON.stringify(errMsg)}`
+        `POST androiddeviceinfos failed: ${JSON.stringify(errMsg)}`
       );
       return false;
     }
@@ -393,8 +393,6 @@ export class SfacgClient extends SfacgHttp {
 
   // 签到
   async newSign() {
-    console.log(getNowFormatDate());
-
     try {
       const res = await this.put<newSign>("/user/newSignInfo", {
         signDate: getNowFormatDate(),
@@ -550,5 +548,5 @@ export class SfacgClient extends SfacgHttp {
 //   }
 //   const b = await a.newSign()
 //   console.log(b);
-// })()
+// })();
 

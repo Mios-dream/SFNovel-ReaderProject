@@ -107,7 +107,7 @@ export class Sfacg {
                 break;
             case "2":
                 const a = await question("输入账号：");
-                this.SfacgCache.removeAccount(a as string)
+                this.SfacgCache.RemoveAccount(a as string)
                 break;
             default:
                 console.log("输入的选项不正确。");
@@ -136,7 +136,7 @@ export class Sfacg {
 
     async Bonus() {
         rl.close();
-        const accounts = await this.SfacgCache.allCookiesGet()
+        const accounts = await this.SfacgCache.GetallCookies()
         accounts?.map(async (account) => {
             const { result, anonClient } = await this.initClient(account, "getTasks")// 初始化客户端，判断ck是否有效，返回可用线程
             const deviceUpload = await anonClient.androiddeviceinfos(account.accountId) // 上传设备信息,防止签到失败
@@ -176,14 +176,13 @@ export class Sfacg {
 
     }
 
-    async downLoadBook(novelId: number) {
+    async UpdateNovelInfo(novelId: number) {
         const _novelInfo = await this.client.novelInfo(novelId)
         _novelInfo && await this.SfacgCache.UpsertNovelInfo(_novelInfo)
         const _volunms = await this.client.volumeInfos(novelId);
         _volunms && _volunms.map(async (volunm) => {
             await this.SfacgCache.UpsertVolumeInfo(volunm)
         })
-        // 接下来我要判断数据库中该novelId的所有chapter中有哪些content为空，返回对应chapId和needFireMoney
     }
 
 
@@ -203,9 +202,6 @@ export class Sfacg {
         console.log(table.toString());
         const index = await question(`请输入${colorize("[1]", "blue")}~${colorize(`[${books.length}]`, "blue")}序号：`);
         return books[index as number - 1].novelId
-        return 1
-        // 输出表格
-
     }
 
 
@@ -275,5 +271,8 @@ export class Sfacg {
 
 
 
-
+// (async () => {
+//     const a = new Sfacg()
+//     await a.UpdateNovelInfo(567122)
+// })()
 
