@@ -149,7 +149,7 @@ export class Sfacg {
             const readInfo = await anonClient.readTime(120)// 阅读时长
             readInfo ? console.log(`用户${account.userName}阅读成功`) : console.log(`用户${account.userName}阅读失败`);
             const shareInfo = await anonClient.share(account.accountId) // 每日分享
-            shareInfo && console.log(`用户${account.userName}分享成功`) || console.log(`用户${account.userName}分享失败`);
+            shareInfo ? console.log(`用户${account.userName}分享成功`) : console.log(`用户${account.userName}分享失败`);
             const PendingRewards = await anonClient.getTasks() // 查看已做待领取任务
             PendingRewards && PendingRewards.map(async (task: tasks) => {
                 if (task.status == 1 && task.name !== "每日签到") {
@@ -167,7 +167,6 @@ export class Sfacg {
             }
             await this.updateUserInfo(account) // 账号信息更新
         })
-
     }
 
     async Multi() {
@@ -175,10 +174,10 @@ export class Sfacg {
 
     }
 
-    async downLoadBook(bookId: number) {
-        const _novelInfo = await this.client.novelInfo(bookId)
+    async downLoadBook(novelId: number) {
+        const _novelInfo = await this.client.novelInfo(novelId)
         _novelInfo && await this.SfacgCache.UpsertNovelInfo(_novelInfo)
-        const _volunms = await this.client.volumeInfos(bookId);
+        const _volunms = await this.client.volumeInfos(novelId);
         _volunms && _volunms.map(async (volunm) => {
             await this.SfacgCache.UpsertVolumeInfo(volunm)
         })

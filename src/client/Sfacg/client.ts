@@ -471,10 +471,10 @@ export class SfacgClient extends SfacgHttp {
       const res = await this.put<taskBonus>(`/user/tasks/${id}`, {})
       return res.status.httpCode == 200
     } catch (err: any) {
-      const errMsg = err.response.data.status.msg
+      const errMsg = err.response.data
       if (id == 21) { return false }
       console.error(
-        `PUT taskBonus${id} failed: ${JSON.stringify(errMsg)}`
+        `PUT taskBonus${id} failed:\n ${JSON.stringify(errMsg)}`
       );
       return false;
     }
