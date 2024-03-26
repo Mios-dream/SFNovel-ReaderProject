@@ -271,8 +271,6 @@ export class Sfacg {
         !status && this.sms.getPhone(sid.Sfacg, smsAction.cacel)
         return status ? phone : await this.GetAvaliblePhone()
     }
-
-
 }
 
 

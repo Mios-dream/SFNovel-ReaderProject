@@ -537,18 +537,18 @@ export class SfacgClient extends SfacgHttp {
   }
 }
 
-(async () => {
-  const a = new SfacgClient()
-  await a.login("17170515189", "Opooo1830")
-  const acc = await a.userInfo()
-  const id = acc && acc.accountId
-  console.log(id);
+// (async () => {
+//   const a = new SfacgClient()
+//   await a.login("17170515189", "Opooo1830")
+//   const acc = await a.userInfo()
+//   const id = acc && acc.accountId
+//   console.log(id);
 
-  if (id) {
-    const info = await a.androiddeviceinfos(id)
-    console.log(info);
-  }
-  const b = await a.newSign()
-  console.log(b);
-})()
+//   if (id) {
+//     const info = await a.androiddeviceinfos(id)
+//     console.log(info);
+//   }
+//   const b = await a.newSign()
+//   console.log(b);
+// })()
 
