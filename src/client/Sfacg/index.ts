@@ -22,13 +22,11 @@ function question(query: any) {
 }
 export class Sfacg {
     client: SfacgClient;
-    SfacgCache: SfacgCache;
     register: SfacgRegister;
     sms: sms;
 
     constructor() {
-        this.client = new SfacgClient();
-        this.SfacgCache = new SfacgCache();
+        this.client = new SfacgClient()
         this.register = new SfacgRegister();
         this.sms = new sms();
     }
@@ -107,7 +105,7 @@ export class Sfacg {
                 break;
             case "2":
                 const a = await question("输入账号：");
-                this.SfacgCache.RemoveAccount(a as string)
+                SfacgCache.RemoveAccount(a as string)
                 break;
             default:
                 console.log("输入的选项不正确。");
@@ -136,18 +134,17 @@ export class Sfacg {
 
     async Bonus() {
         rl.close();
-        const accounts = await this.SfacgCache.GetallCookies()
+        const accounts = await SfacgCache.GetallCookies()
         accounts?.map(async (account) => {
             const { result, anonClient } = await this.initClient(account, "getTasks")// 初始化客户端，判断ck是否有效，返回可用线程
-            const deviceUpload = await anonClient.androiddeviceinfos(account.accountId) // 上传设备信息,防止签到失败
-            deviceUpload && console.log(`用户${account.userName}上传设备信息成功`);
             account.cookie = anonClient.cookie
             result.map(async (task: tasks) => {
                 if (task.status == 0)
                     await anonClient.claimTask(task.taskId)
             })
+            await anonClient.androiddeviceinfos(account.accountId)
             const signInfo = await anonClient.newSign() // 签到
-            signInfo ? console.log(`用户${account.userName}签到成功`) : console.log(`用户${account.userName}签到失败`);
+            signInfo && console.log("签到成功");
             const readInfo = await anonClient.readTime(120)// 阅读时长
             readInfo ? console.log(`用户${account.userName}阅读成功`) : console.log(`用户${account.userName}阅读失败`);
             const shareInfo = await anonClient.share(account.accountId) // 每日分享
@@ -178,10 +175,10 @@ export class Sfacg {
 
     async UpdateNovelInfo(novelId: number) {
         const _novelInfo = await this.client.novelInfo(novelId)
-        _novelInfo && await this.SfacgCache.UpsertNovelInfo(_novelInfo)
+        _novelInfo && await SfacgCache.UpsertNovelInfo(_novelInfo)
         const _volunms = await this.client.volumeInfos(novelId);
         _volunms && _volunms.map(async (volunm) => {
-            await this.SfacgCache.UpsertVolumeInfo(volunm)
+            await SfacgCache.UpsertVolumeInfo(volunm)
         })
     }
 
@@ -223,7 +220,7 @@ export class Sfacg {
             ...result,
             ...money,
         };
-        (result && money) ? this.SfacgCache.UpsertAccount(accountInfo as IaccountInfo) : console.log("账号信息获取失败，请检查账号密码")
+        (result && money) ? SfacgCache.UpsertAccount(accountInfo as IaccountInfo) : console.log("账号信息获取失败，请检查账号密码")
 
     }
 
@@ -271,8 +268,8 @@ export class Sfacg {
 
 
 
-// (async () => {
-//     const a = new Sfacg()
-//     await a.UpdateNovelInfo(567122)
-// })()
+(async () => {
+    const a = new Sfacg()
+    await a.Bonus()
+})()
 

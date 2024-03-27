@@ -65,7 +65,7 @@ export class SfacgClient extends SfacgHttp {
         "version": "4.8.22",
         "deviceToken": "7b2a42976f97d470"
       })
-      return res.status.httpCode == 201
+      return res.status.httpCode == 200 || 201
     } catch (err: any) {
       const errMsg = err.response.data.status.msg
       console.error(

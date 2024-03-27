@@ -5,7 +5,7 @@ import { colorize } from "../../utils/tools";
 
 export class SfacgCache {
 
-    async GetNovelInfo(novelId: number) {
+    static async GetNovelInfo(novelId: number) {
         const { data, error } = await Server
             .from('Sfacg-novelInfos')
             .select('*')
@@ -18,7 +18,7 @@ export class SfacgCache {
         return data
     }
 
-    async UpsertNovelInfo(novel: InovelInfo) {
+    static async UpsertNovelInfo(novel: InovelInfo) {
         const { data, error } = await Server
             .from('Sfacg-novelInfos')
             .upsert({
@@ -39,7 +39,7 @@ export class SfacgCache {
         console.log(`UpsertAccount UpsertNovelInfo ${colorize(`${novel.novelId}`, "green")}`);
     }
 
-    async GetVolumInfo(volumeId: number) {
+    static async GetVolumInfo(volumeId: number) {
         const { data, error } = await Server
             .from('Sfacg-volumeInfos')
             .select('*')
@@ -52,7 +52,7 @@ export class SfacgCache {
         return data
     }
 
-    async UpsertVolumeInfo(volume: IvolumeInfos) {
+    static async UpsertVolumeInfo(volume: IvolumeInfos) {
         const { data, error } = await Server
             .from('Sfacg-volumeInfos')
             .upsert({
@@ -74,7 +74,7 @@ export class SfacgCache {
     }
 
 
-    private async UpsertChapterInfo(chapter: Ichapter) {
+    static async UpsertChapterInfo(chapter: Ichapter) {
         const { data, error } = await Server
             .from('Sfacg-chapter')
             .upsert({
@@ -93,7 +93,7 @@ export class SfacgCache {
         return true
     }
 
-    async UpsertAccount(accountInfo: IaccountInfo) {
+    static async UpsertAccount(accountInfo: IaccountInfo) {
         const { data, error } = await Server
             .from('Sfacg-Accounts')
             .upsert({
@@ -115,7 +115,7 @@ export class SfacgCache {
     }
 
 
-    async RemoveAccount(userName: string) {
+    static async RemoveAccount(userName: string) {
         const { data, error } = await Server
             .from('Sfacg-Accounts')
             .delete()
@@ -130,7 +130,7 @@ export class SfacgCache {
 
 
     // 返回一个包含账号密码cookie对象的列表
-    async GetallCookies() {
+    static async GetallCookies() {
         const { data, error } = await Server
             .from('Sfacg-Accounts')
             .select('userName, passWord, cookie,accountId')
@@ -142,10 +142,11 @@ export class SfacgCache {
         return data
     }
 
-    async GetAccountMoney() {
+    static async GetAccountMoney() {
         const { data, error } = await Server
             .from('Sfacg-Accounts')
-            .select('userName, passWord, cookie,couponsRemain');
+            .select('userName, passWord, cookie,couponsRemain')
+            .order('couponsRemain')
         if (error) {
             console.error('Error fetching cookie:', error)
             return null
@@ -153,7 +154,7 @@ export class SfacgCache {
         return data
     }
 
-    async GetAccountList() {
+    static async GetAccountList() {
         const { data, error } = await Server
             .from('Sfacg-Accounts')
             .select('*');
@@ -192,7 +193,7 @@ export class SfacgCache {
         return data
     }
 
-    async GetChapterNoContent(novelId: number) {
+    static async GetChapterNoContent(novelId: number) {
         // 首先，从Sfacg-volumeInfos表获取所有匹配novelId的volumeId
         const volumeResponse = await Server
             .from('Sfacg-volumeInfos')
@@ -213,6 +214,7 @@ export class SfacgCache {
             .select('chapId, needFireMoney')
             .is('content', null)
             .in('volumeId', volumeIds)
+            .order("chapId")
 
         if (error) {
             console.error('Error fetching chapters:', error)
@@ -228,8 +230,13 @@ export class SfacgCache {
 
 
 // (async () => {
-//     const a = new SfacgCache()
-//     const data = await a.GetAccountMoney()
+
+//     const b = await SfacgCache.GetChapterNoContent(567122)
+//     const data = await SfacgCache.GetAccountMoney()
 //     console.log(data);
+//     console.log(b);
+
 // })()
 
+// 按降序对数组中的数字进行排序
+// 数组中的第一项 (points[0]) 现在是最高值
