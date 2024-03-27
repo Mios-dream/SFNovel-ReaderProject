@@ -1,12 +1,13 @@
 import { IaccountInfo, IadBonusNum, IsearchInfos } from "./types/ITypes";
-import { SfacgCache } from "./cache";
-import { SfacgClient } from "./client";
+import { SfacgCache } from "./api/cache";
+import { SfacgClient } from "./api/client";
 import readline from "readline"
-import { SfacgRegister } from "./register";
+import { SfacgRegister } from "./api/registe";
 import { sid, sms, smsAction } from "../../utils/sms";
 import { tasks } from "./types/Types";
 import Table from "cli-table3";
 import { RandomName, Secret, colorize } from "../../utils/tools";
+import { Tasker } from "./handler/tasker";
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -136,35 +137,12 @@ export class Sfacg {
         rl.close();
         const accounts = await SfacgCache.GetallCookies()
         accounts?.map(async (account) => {
-            const { result, anonClient } = await this.initClient(account, "getTasks")// 初始化客户端，判断ck是否有效，返回可用线程
+            const { result, anonClient } = await Sfacg.initClient(account, "getTasks")// 初始化客户端
+            const tasker = new Tasker(anonClient)
+            await tasker.TaskAll(result, account.userName, account.accountId)
+            // 更新账号
             account.cookie = anonClient.cookie
-            result.map(async (task: tasks) => {
-                if (task.status == 0)
-                    await anonClient.claimTask(task.taskId)
-            })
-            await anonClient.androiddeviceinfos(account.accountId)
-            const signInfo = await anonClient.newSign() // 签到
-            signInfo && console.log("签到成功");
-            const readInfo = await anonClient.readTime(120)// 阅读时长
-            readInfo ? console.log(`用户${account.userName}阅读成功`) : console.log(`用户${account.userName}阅读失败`);
-            const shareInfo = await anonClient.share(account.accountId) // 每日分享
-            shareInfo ? console.log(`用户${account.userName}分享成功`) : console.log(`用户${account.userName}分享失败`);
-            const PendingRewards = await anonClient.getTasks() // 查看已做待领取任务
-            PendingRewards && PendingRewards.map(async (task: tasks) => {
-                if (task.status == 1 && task.name !== "每日签到") {
-                    const staus = await anonClient.taskBonus(task.taskId)
-                    staus && console.log(`任务${task.name}领取奖励成功`);
-                }
-            })
-            const { taskId, requireNum, completeNum } = await anonClient.adBonusNum() as IadBonusNum // 广告基础信息
-            await anonClient.claimTask(taskId) // 接受广告任务
-            console.log(`用户${account.userName}需要观看广告的次数：${requireNum - completeNum} `)
-            for (let i = 0; i < requireNum - completeNum; i++) {
-                const adBonusInfo = await anonClient.adBonus(taskId)// 广告奖励
-                await anonClient.taskBonus(taskId)// 这个不知道有没有用
-                adBonusInfo && console.log(`用户${account.userName}完成了第${i}次广告`);
-            }
-            await this.updateUserInfo(account) // 账号信息更新
+            await this.updateUserInfo(account)
         })
     }
 
@@ -173,7 +151,9 @@ export class Sfacg {
 
     }
 
-    async UpdateNovelInfo(novelId: number) {
+
+
+    private async UpdateNovelInfo(novelId: number) {
         const _novelInfo = await this.client.novelInfo(novelId)
         _novelInfo && await SfacgCache.UpsertNovelInfo(_novelInfo)
         const _volunms = await this.client.volumeInfos(novelId);
@@ -203,9 +183,9 @@ export class Sfacg {
 
 
     // 更新用户账号信息
-    async updateUserInfo(acconutInfo: IaccountInfo, newAccount: boolean = false) {
+    private async updateUserInfo(acconutInfo: IaccountInfo, newAccount: boolean = false) {
         const { userName, passWord } = acconutInfo
-        const { result, anonClient } = await this.initClient(acconutInfo, "userInfo")
+        const { result, anonClient } = await Sfacg.initClient(acconutInfo, "userInfo")
         if (newAccount) {
             const Fav = await anonClient.NewAccountFavBonus()
             Fav && console.log("新号收藏任务完成")
@@ -224,8 +204,24 @@ export class Sfacg {
 
     }
 
+    private async GetAvalibleName(): Promise<string> {
+        const name = RandomName()
+        const res = await this.register.avalibleNmae(name);
+        console.log(`获取到的昵称：${name}`);
+        return res ? name : await this.GetAvalibleName()
+    }
+
+    private async GetAvaliblePhone(): Promise<string> {
+        await this.sms.login()
+        const phone = await this.sms.getPhone(sid.Sfacg)
+        console.log(`获取到的手机号：${phone}`);
+        const status = phone && this.register.sendCode(phone)
+        !status && this.sms.getPhone(sid.Sfacg, smsAction.cacel)
+        return status ? phone : await this.GetAvaliblePhone()
+    }
+
     // 接收账号信息和要做的，测试ck可用性，返回函数的返回内容和可用的线程
-    private async initClient(acconutInfo: IaccountInfo, todo: "getTasks" | "userInfo") {
+    static async initClient(acconutInfo: IaccountInfo, todo: "getTasks" | "userInfo") {
         // console.log("进入初始线程");
         const anonClient = new SfacgClient()
         const { userName, passWord, cookie } = acconutInfo
@@ -247,29 +243,12 @@ export class Sfacg {
         }
         return { result, anonClient }
     }
-
-
-    private async GetAvalibleName(): Promise<string> {
-        const name = RandomName()
-        const res = await this.register.avalibleNmae(name);
-        console.log(`获取到的昵称：${name}`);
-        return res ? name : await this.GetAvalibleName()
-    }
-
-    private async GetAvaliblePhone(): Promise<string> {
-        await this.sms.login()
-        const phone = await this.sms.getPhone(sid.Sfacg)
-        console.log(`获取到的手机号：${phone}`);
-        const status = phone && this.register.sendCode(phone)
-        !status && this.sms.getPhone(sid.Sfacg, smsAction.cacel)
-        return status ? phone : await this.GetAvaliblePhone()
-    }
 }
 
 
 
-(async () => {
-    const a = new Sfacg()
-    await a.Bonus()
-})()
+// (async () => {
+//     const a = new Sfacg()
+//     await a.Bonus()
+// })()
 

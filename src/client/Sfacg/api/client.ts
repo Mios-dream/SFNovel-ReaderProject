@@ -20,7 +20,7 @@ import {
   userInfo,
   userMoney,
   volumeInfos,
-} from "./types/Types";
+} from "../types/Types";
 import {
   Itag,
   InovelInfo,
@@ -29,8 +29,8 @@ import {
   IadBonusNum,
   IbookshelfInfos,
   IsearchInfos,
-} from "./types/ITypes";
-import { getNowFormatDate } from "../../utils/tools";
+} from "../types/ITypes";
+import { getNowFormatDate } from "../../../utils/tools";
 
 
 
@@ -43,14 +43,22 @@ export class SfacgClient extends SfacgHttp {
     userName: string,
     passWord: string,
   ): Promise<boolean> {
-    const res = await this.post<any>("/sessions", {
-      userName: userName,
-      passWord: passWord,
-    });
-    this.cookie = res.status == 200 && res.headers["set-cookie"].map((cookie: any) => {
-      return cookie.split(';')[0];
-    }).join('; ');
-    return res.status == 200
+    try {
+      const res = await this.post<any>("/sessions", {
+        userName: userName,
+        passWord: passWord,
+      });
+      this.cookie = res.status == 200 && res.headers["set-cookie"].map((cookie: any) => {
+        return cookie.split(';')[0];
+      }).join('; ');
+      return res.status == 200
+    } catch (err: any) {
+      const errMsg = err.response.data.status.msg
+      console.error(
+        `POST login failed: ${JSON.stringify(errMsg)}`
+      );
+      return false;
+    }
   }
 
 
@@ -491,12 +499,14 @@ export class SfacgClient extends SfacgHttp {
   async taskBonus(id: number) {
     try {
       const res = await this.put<taskBonus>(`/user/tasks/${id}`, {})
+      console.log(res);
+
       return res.status.httpCode == 200
     } catch (err: any) {
-      const errMsg = err.response.data
       if (id == 21) { return false }
+      const errMsg = err.response.data
       console.error(
-        `PUT taskBonus${id} failed:\n ${JSON.stringify(errMsg)}`
+        `PUT taskBonus${id} failed: ${JSON.stringify(errMsg)}`
       );
       return false;
     }
@@ -537,7 +547,8 @@ export class SfacgClient extends SfacgHttp {
 
 // (async () => {
 //   const a = new SfacgClient()
-//   await a.login("17170515189", "Opooo1830")
+//   await a.login("13696458853", "dddd1111")
+
 //   const acc = await a.userInfo()
 //   const id = acc && acc.accountId
 //   console.log(id);

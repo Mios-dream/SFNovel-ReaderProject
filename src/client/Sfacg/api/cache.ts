@@ -1,7 +1,7 @@
 
-import { IaccountInfo, Ichapter, InovelInfo, IvolumeInfos } from "./types/ITypes";
-import { Server } from "../../utils/db";
-import { colorize } from "../../utils/tools";
+import { IaccountInfo, Ichapter, InovelInfo, IvolumeInfos } from "../types/ITypes";
+import { Server } from "../../../utils/db";
+import { colorize } from "../../../utils/tools";
 
 export class SfacgCache {
 
@@ -168,7 +168,7 @@ export class SfacgCache {
 
 
 
-    async GetNovelList() {
+    static async GetNovelList() {
         const { data, error } = await Server
             .from('Sfacg-novelInfos')
             .select('*')
@@ -180,7 +180,7 @@ export class SfacgCache {
         return data
     }
 
-    async GetVolumeList(novelId: number) {
+    static async GetVolumeList(novelId: number) {
         const { data, error } = await Server
             .from('Sfacg-volumeInfos')
             .select('*')

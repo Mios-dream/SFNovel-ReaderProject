@@ -1,5 +1,5 @@
 
-import { SfacgClient } from "./client/Sfacg/client";
+import { SfacgClient } from "./client/Sfacg/api/client";
 import { Sfacg } from "./client/Sfacg/index";
 // import crypto from "crypto"
 // import axios from "axios";
