@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from "axios";
+import axios, { AxiosResponse } from "axios";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto"
 
@@ -22,9 +22,9 @@ export class SfacgHttp {
       : response.data.data;
   }
 
-  protected async get_rss<E>(url: string): Promise<E> {
+  protected static async get_rss<E>(url: string): Promise<E> {
     let response: AxiosResponse;
-    response = await axios.get(url);
+    response = await axios.get(url, this._clientRss());
     return response.data;
   }
 
@@ -67,6 +67,17 @@ export class SfacgHttp {
   }
 
 
+  private static _clientRss(): axios.AxiosRequestConfig {
+    return {
+      responseType: "arraybuffer",
+      baseURL: SfacgHttp.HOST,
+      headers: {
+        "User-Agent": SfacgHttp.USER_AGENT_RSS,
+        Accept: "image/webp,image/*,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+      }
+    }
+  }
   private sfSecurity(): string {
     const uuid = uuidv4().toUpperCase();
     const timestamp = Math.floor(Date.now() / 1000);

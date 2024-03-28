@@ -63,14 +63,7 @@ export interface IadBonusNum {
   completeNum: number // 已完成看广告领奖次数
 }
 
-export interface IbookshelfInfos {
-  authorId: number; // 作者ID
-  lastUpdateTime: string; // 最后更新时间
-  novelCover: string; // 小说封面URL
-  novelId: number; // 小说ID
-  novelName: string; // 小说名称
-}
-[];
+export type IbookshelfInfos= IsearchInfos
 
 export interface IsearchInfos {
   authorName: string; // 作者名称

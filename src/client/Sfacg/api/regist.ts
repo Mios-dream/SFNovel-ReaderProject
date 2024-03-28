@@ -2,8 +2,7 @@ import { sms } from "../../../utils/sms";
 import { SfacgHttp } from "./basehttp";
 import { nameAvalible, sendCode, codeverify, regist } from "../types/Types";
 
-export class SfacgRegister extends SfacgHttp {
-
+export class SfacgRegist extends SfacgHttp {
 
     // 名称可用性检测
     async avalibleNmae(name: string): Promise<boolean> {
@@ -19,8 +18,8 @@ export class SfacgRegister extends SfacgHttp {
             );
             return false;
         }
-
     }
+
     // 发出验证码
     async sendCode(phone: string) {
         try {

@@ -7,7 +7,6 @@ import { Sfacg } from "./client/Sfacg/index";
 (async () => {
     const a = new Sfacg()
     a.init()
-
 })()
 
 

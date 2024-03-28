@@ -1,3 +1,19 @@
+import readline from "readline"
+
+export function question(query: any) {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    return new Promise((resolve) => {
+        rl.question(query, (answer) => {
+            rl.close();
+            resolve(answer);
+        });
+
+    });
+
+}
 
 // 返回带颜色的字
 export function colorize(text: string, color: "blue" | "green" | "purple" | "yellow") {

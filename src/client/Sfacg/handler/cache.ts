@@ -2,21 +2,83 @@
 import { IaccountInfo, Ichapter, InovelInfo, IvolumeInfos } from "../types/ITypes";
 import { Server } from "../../../utils/db";
 import { colorize } from "../../../utils/tools";
+import { SfacgClient } from "../api/client";
 
-export class SfacgCache {
 
-    static async GetNovelInfo(novelId: number) {
+
+
+
+export class _SfacgCache {
+
+
+
+
+    static async GetChapterFromVolumeId(volumeId: number) {
         const { data, error } = await Server
-            .from('Sfacg-novelInfos')
+            .from('Sfacg-chapter')
             .select('*')
-            .eq('novelId', novelId)
-
+            .eq('volumeId', volumeId)
+            .order('chapId');
         if (error) {
-            console.error('Error fetching novelInfo:', error)
-            return null
+            console.log(`Error GetChapterFromVolumeId:`, error);
+            return null;
         }
         return data
     }
+
+    static async GetChaptersWithContent() {
+
+    }
+
+    static async UpdatechapterContent(chapId: number, content: string) {
+        const { data, error } = await Server
+            .from('Sfacg-chapter')
+            .update({ content: content })
+            .eq("chapId", chapId)
+        if (error) {
+            console.log(`Error UpsertchapterContent:${colorize(`${chapId}`, "purple")} `, error);
+            return null;
+        }
+        console.log(` UpsertchapterContent successfully ${colorize(`${chapId}`, "green")}`);
+    }
+
+    /**
+     * 更新小说除正文外所有内容
+     * @param novelId 
+     */
+    static async UpdateNovelInfo(novelId: number) {
+        const client = new SfacgClient()
+        const _novelInfo = await client.novelInfo(novelId)
+        _novelInfo && await _SfacgCache.UpsertNovelInfo(_novelInfo)
+        const _volunms = await client.volumeInfos(novelId);
+        _volunms && _volunms.map(async (volunm) => {
+            await _SfacgCache.UpsertVolumeInfo(volunm)
+        })
+    }
+
+    // 更新用户账号信息
+    static async UpdateAccount(acconutInfo: IaccountInfo, newAccount: boolean = false) {
+        const { userName, passWord } = acconutInfo
+        const { result, anonClient } = await SfacgClient.initClient(acconutInfo, "userInfo")
+        if (newAccount) {
+            const Fav = await anonClient.NewAccountFavBonus()
+            Fav && console.log("新号收藏任务完成")
+            const Follow = await anonClient.NewAccountFollowBonus()
+            Follow && console.log("新号关注任务完成")
+        }
+        const money = await anonClient.userMoney()
+        const accountInfo = {
+            userName: userName,
+            passWord: passWord,
+            cookie: anonClient.cookie,
+            ...result,
+            ...money,
+        };
+        (result && money) ? this.UpsertAccount(accountInfo as IaccountInfo) : console.log("账号信息获取失败，请检查账号密码")
+    }
+
+
+ 
 
     static async UpsertNovelInfo(novel: InovelInfo) {
         const { data, error } = await Server
@@ -36,23 +98,12 @@ export class SfacgCache {
             console.log(`Error UpsertNovelInfo:${colorize(`${novel.novelId}`, "purple")} `, error);
             return null;
         }
-        console.log(`UpsertAccount UpsertNovelInfo ${colorize(`${novel.novelId}`, "green")}`);
+        console.log(` UpsertNovelInfo successfully ${colorize(`${novel.novelId}`, "green")}`);
     }
 
-    static async GetVolumInfo(volumeId: number) {
-        const { data, error } = await Server
-            .from('Sfacg-volumeInfos')
-            .select('*')
-            .eq('volumeId', volumeId)
+ 
 
-        if (error) {
-            console.error('Error fetching volumeInfo:', error)
-            return null
-        }
-        return data
-    }
-
-    static async UpsertVolumeInfo(volume: IvolumeInfos) {
+    private static async UpsertVolumeInfo(volume: IvolumeInfos) {
         const { data, error } = await Server
             .from('Sfacg-volumeInfos')
             .upsert({
@@ -74,7 +125,7 @@ export class SfacgCache {
     }
 
 
-    static async UpsertChapterInfo(chapter: Ichapter) {
+    private static async UpsertChapterInfo(chapter: Ichapter) {
         const { data, error } = await Server
             .from('Sfacg-chapter')
             .upsert({
@@ -93,7 +144,7 @@ export class SfacgCache {
         return true
     }
 
-    static async UpsertAccount(accountInfo: IaccountInfo) {
+    private static async UpsertAccount(accountInfo: IaccountInfo) {
         const { data, error } = await Server
             .from('Sfacg-Accounts')
             .upsert({
@@ -163,7 +214,7 @@ export class SfacgCache {
             console.error('Error getAccountList:', error)
             return null
         }
-        return data
+        return data as IaccountInfo[]
     }
 
 
@@ -177,7 +228,7 @@ export class SfacgCache {
             console.error('Error fetching novelList:', error)
             return null
         }
-        return data
+        return data as InovelInfo[]
     }
 
     static async GetVolumeList(novelId: number) {
@@ -190,7 +241,7 @@ export class SfacgCache {
             console.error('Error fetching volumeList:', error)
             return null
         }
-        return data
+        return data as IvolumeInfos[]
     }
 
     static async GetChapterNoContent(novelId: number) {
@@ -224,19 +275,13 @@ export class SfacgCache {
         return data
     }
 
-
 }
 
 
 
 // (async () => {
-
-//     const b = await SfacgCache.GetChapterNoContent(567122)
-//     const data = await SfacgCache.GetAccountMoney()
-//     console.log(data);
-//     console.log(b);
+//     await _SfacgCache.DownLoad(567122)
 
 // })()
 
-// 按降序对数组中的数字进行排序
-// 数组中的第一项 (points[0]) 现在是最高值
+

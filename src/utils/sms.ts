@@ -7,7 +7,7 @@ export enum sid {
   Ciweimao = 22439
 }
 export enum smsAction {
-  cacel = "cancelRecv",
+  cancel = "cancelRecv",
   get = "getPhone"
 }
 
@@ -57,7 +57,7 @@ export class sms {
 
   // 登录
   async login(retries = 3) {
-    while (retries > 0) {
+    if (retries > 0) {
       try {
         const res = await axios.post<smsLogin>("http://h5.haozhuma.com/login.php", {
           username: this.userName,
@@ -73,7 +73,6 @@ export class sms {
           await this.login(retries)
         } else {
           console.log(err.response.data)
-          break
         }
       }
     }

@@ -29,14 +29,38 @@ import {
   IadBonusNum,
   IbookshelfInfos,
   IsearchInfos,
+  IaccountInfo,
 } from "../types/ITypes";
-import { getNowFormatDate } from "../../../utils/tools";
+import { getNowFormatDate, Secret } from "../../../utils/tools";
 
-
-
+import fs from "fs-extra"
 
 
 export class SfacgClient extends SfacgHttp {
+  // 接收账号信息和要做的，测试ck可用性，返回函数的返回内容和可用的线程
+  static async initClient(acconutInfo: IaccountInfo, todo: "getTasks" | "userInfo") {
+    // console.log("进入初始线程");
+    const anonClient = new SfacgClient()
+    const { userName, passWord, cookie } = acconutInfo
+    let result: any
+    if (cookie) {
+      anonClient.cookie = cookie
+      result = (todo == "getTasks") ? await anonClient.getTasks() : await anonClient.userInfo()
+      result && console.log(`${Secret(acconutInfo.userName as string)}原ck可用`);
+    }
+    if ((!cookie || !result) && userName && passWord) {
+      const a = await anonClient.login(userName, passWord)
+      if (a) {
+        console.log(`${Secret(acconutInfo.userName as string)}ck重置`);
+        result = (todo == "getTasks") ? await anonClient.getTasks() : await anonClient.userInfo()
+      }
+      else {
+        console.log("重新获取ck失败")
+      }
+    }
+    return { result, anonClient }
+  }
+
 
   // 登录
   async login(
@@ -206,9 +230,9 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
-  async image(url: string): Promise<any> {
+  static async image(url: string): Promise<any> {
     try {
-      const response: Buffer = await this.get_rss(url);
+      const response: Buffer = await SfacgHttp.get_rss(url);
       return Buffer.from(response);
     } catch (err: any) {
       const errMsg = err.response.data.status.msg
@@ -263,7 +287,7 @@ export class SfacgClient extends SfacgHttp {
       if (novels) {
         novels.forEach((novel) => {
           bookshelfInfos.push({
-            authorId: novel.authorId, // 作者ID
+            authorName: novel.authorName, // 作者名字
             lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
             novelCover: novel.novelCover, // 小说封面URL
             novelId: novel.novelId, // 小说ID
@@ -349,9 +373,6 @@ export class SfacgClient extends SfacgHttp {
    * @param chapId 
    * @returns 
    */
-
-
-
 
   // 广告奖励次数
   async adBonusNum(): Promise<IadBonusNum | false> {
@@ -499,8 +520,6 @@ export class SfacgClient extends SfacgHttp {
   async taskBonus(id: number) {
     try {
       const res = await this.put<taskBonus>(`/user/tasks/${id}`, {})
-      console.log(res);
-
       return res.status.httpCode == 200
     } catch (err: any) {
       if (id == 21) { return false }
