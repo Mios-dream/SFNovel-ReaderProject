@@ -562,21 +562,25 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
+  async test() {
+    const res = await this.get("https://api.sfacg.com/albums/137/chaps?expand=needFireMoney%2CoriginNeedFireMoney", { "expand": "needFireMoney,originNeedFireMoney" })
+    fs.outputJSONSync("1.json",res )
+  }
 }
 
-// (async () => {
-//   const a = new SfacgClient()
-//   await a.login("13696458853", "dddd1111")
+(async () => {
+  const a = new SfacgClient()
+  // await a.login("13696458853", "dddd1111")
+  await a.test()
+  // const acc = await a.userInfo()
+  // const id = acc && acc.accountId
+  // console.log(id);
 
-//   const acc = await a.userInfo()
-//   const id = acc && acc.accountId
-//   console.log(id);
-
-//   if (id) {
-//     const info = await a.androiddeviceinfos(id)
-//     console.log(info);
-//   }
-//   const b = await a.newSign()
-//   console.log(b);
-// })();
+  // if (id) {
+  //   const info = await a.androiddeviceinfos(id)
+  //   console.log(info);
+  // }
+  // const b = await a.newSign()
+  // console.log(b);
+})();
 

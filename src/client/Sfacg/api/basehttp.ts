@@ -90,3 +90,4 @@ export class SfacgHttp {
     return `nonce=${uuid}&timestamp=${timestamp}&devicetoken=${SfacgHttp.DEVICE_TOKEN}&sign=${hash}`;
   }
 }
+

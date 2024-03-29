@@ -10,10 +10,16 @@ export function question(query: any) {
             rl.close();
             resolve(answer);
         });
-
     });
-
 }
+
+export async function questionAccount() {
+    const userName = await question("输入账号：");
+    const passWord = await question("输入密码：");
+    return { userName, passWord }
+}
+
+
 
 // 返回带颜色的字
 export function colorize(text: string, color: "blue" | "green" | "purple" | "yellow") {

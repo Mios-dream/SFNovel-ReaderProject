@@ -11,9 +11,7 @@ import { SfacgClient } from "../api/client";
 export class _SfacgCache {
 
 
-
-
-    static async GetChapterFromVolumeId(volumeId: number) {
+    static async GetChapterWithContentByVolumeId(volumeId: number) {
         const { data, error } = await Server
             .from('Sfacg-chapter')
             .select('*')
@@ -78,9 +76,9 @@ export class _SfacgCache {
     }
 
 
- 
 
-    static async UpsertNovelInfo(novel: InovelInfo) {
+
+    private static async UpsertNovelInfo(novel: InovelInfo) {
         const { data, error } = await Server
             .from('Sfacg-novelInfos')
             .upsert({
@@ -101,7 +99,7 @@ export class _SfacgCache {
         console.log(` UpsertNovelInfo successfully ${colorize(`${novel.novelId}`, "green")}`);
     }
 
- 
+
 
     private static async UpsertVolumeInfo(volume: IvolumeInfos) {
         const { data, error } = await Server
@@ -231,18 +229,6 @@ export class _SfacgCache {
         return data as InovelInfo[]
     }
 
-    static async GetVolumeList(novelId: number) {
-        const { data, error } = await Server
-            .from('Sfacg-volumeInfos')
-            .select('*')
-            .eq('novelId', novelId)
-
-        if (error) {
-            console.error('Error fetching volumeList:', error)
-            return null
-        }
-        return data as IvolumeInfos[]
-    }
 
     static async GetChapterNoContent(novelId: number) {
         // 首先，从Sfacg-volumeInfos表获取所有匹配novelId的volumeId

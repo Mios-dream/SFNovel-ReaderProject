@@ -1,6 +1,6 @@
 import { IsearchInfos } from "./types/ITypes";
 import { SfacgClient } from "./api/client";
-import { colorize, question } from "../../utils/tools";
+import { colorize, question, questionAccount } from "../../utils/tools";
 import { _SfacgTasker } from "./handler/tasker";
 import { _SfacgCache } from "./handler/cache";
 import { _SfacgRegister } from "./handler/register";
@@ -44,17 +44,15 @@ export class Sfacg {
 
 
     async Once() {
-        console.log("[1]直接搜书");
-        console.log("[2]书架选书");
-        const client = new SfacgClient()
-        let userName: any, passWord: any, books: any, novelId: any
+        console.log("[1]书架选书");
+        console.log("[2]直接搜书");
         const option = await question("请选择一个操作：");
         switch (option) {
             case "1":
 
                 break;
             case "2":
-                
+
                 break;
             default:
                 console.log("输入的选项不正确。");
@@ -63,8 +61,8 @@ export class Sfacg {
         }
 
         const save = await question("[1]更新：\n[2]不更新\n是否更新数据库中目录信息: ")
-        save == 1 && await _SfacgCache.UpdateNovelInfo(novelId)
-     
+
+
 
     }
 
@@ -74,8 +72,7 @@ export class Sfacg {
         const option = await question("选择一个选项:");
         switch (option) {
             case "1":
-                const userName = await question("输入账号：");
-                const passWord = await question("输入密码：");
+                const { userName, passWord } = await questionAccount()
                 await _SfacgCache.UpdateAccount({ userName: userName as string, passWord: passWord as string });
                 break;
             case "2":
@@ -105,7 +102,7 @@ export class Sfacg {
 
 
 
- 
+
 }
 
 
