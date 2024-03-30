@@ -1,13 +1,14 @@
 
-import { SfacgClient } from "./client/Sfacg/api/client";
-import { Sfacg } from "./client/Sfacg/index";
-// import crypto from "crypto"
-// import axios from "axios";
-// import { v4 as uuidv4 } from "uuid";
-(async () => {
-    const a = new Sfacg()
-    a.init()
-})()
+// import { SfacgClient } from "./client/Sfacg/api/client";
+// import { Sfacg } from "./client/Sfacg/index";
+import crypto from "crypto"
+import axios from 'axios';
+import { ParseKsy } from "./utils/aes";
+// // import { v4 as uuidv4 } from "uuid";
+// (async () => {
+//     const a = new Sfacg()
+//     a.init()
+// })()
 
 
 
@@ -69,6 +70,54 @@ import { Sfacg } from "./client/Sfacg/index";
 
 //     // 打印出用于请求头的cookie字符串
 //     console.log(cookies);
-        
+
 // }
 // )()
+
+
+
+// (async () => {
+//     const parse = new ParseKsy()
+
+
+//     function _data() {
+//         const account = "书客2708546"
+//         const time = Date.now()
+       
+//         const hash = crypto
+//             .createHash("md5")
+//             .update(parse.encrypt(account + time))
+//             .digest("hex")
+
+//         return {
+//             "verify_type": "4",
+//             "hashvalue": hash,
+//             "app_version": "2.9.317",
+//             "device_token": "ciweimao_",
+//             "phone_num": "1-13696458853",
+//             "login_token": "cefb000d04584c20330cb47f0dbcde4b",
+//             "account": account,
+//             "timestamp": time
+//         }
+//     }
+
+//     const headers = {
+//         "User-Agent": "Android  com.kuangxiangciweimao.novel  2.9.317,HONOR, TEL-AN10, 29, 10",
+//         "Content-Type": "application/x-www-form-urlencoded",
+//         "Content-Length": "226",
+//         "Host": "app.hbooker.com",
+//         "Connection": "Keep-Alive",
+//         "Accept-Encoding": "gzip"
+//     };
+
+//     const url = "https://app.hbooker.com/signup/send_verify_code";
+//     console.log(_data());
+
+//     const res = await axios.post(url, _data(), { headers })
+//     console.log(parse.decrypt(res.data));
+
+// })()
+
+
+
+

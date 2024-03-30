@@ -5,6 +5,7 @@ import { _SfacgTasker } from "./handler/tasker";
 import { _SfacgCache } from "./handler/cache";
 import { _SfacgRegister } from "./handler/register";
 import Table from "cli-table3";
+import { _SfacgDownloader } from "./handler/download";
 
 
 
@@ -49,21 +50,16 @@ export class Sfacg {
         const option = await question("请选择一个操作：");
         switch (option) {
             case "1":
-
+                await _SfacgDownloader.Once(true)
                 break;
             case "2":
-
+                await _SfacgDownloader.Once()
                 break;
             default:
                 console.log("输入的选项不正确。");
                 await this.Once();
                 break;
         }
-
-        const save = await question("[1]更新：\n[2]不更新\n是否更新数据库中目录信息: ")
-
-
-
     }
 
     async Account() {

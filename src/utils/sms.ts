@@ -78,6 +78,7 @@ export class sms {
     }
   }
 
+  // 获取一个有效号码
   async getPhone(sid: sid, api: smsAction = smsAction.get) {
     try {
       const res = await axios.post<smsGetPhone>("http://api.haozhuma.com/sms/", {

@@ -63,7 +63,7 @@ export interface IadBonusNum {
   completeNum: number // 已完成看广告领奖次数
 }
 
-export type IbookshelfInfos= IsearchInfos
+export type IbookshelfInfos = IsearchInfos
 
 export interface IsearchInfos {
   authorName: string; // 作者名称
@@ -83,6 +83,20 @@ export interface IregistInfo {
   smsAuthCode: string;
   shuMeiId: string;
 }
+
+export interface _dbChapters {
+  volumeId: number,
+  chapId: number,
+  ntitle: string,
+  novelId: number,
+  content: string
+}[]
+
+export interface _dbNovels {
+  novelId: number,
+  novelName: string,
+  authorName: string,
+}[]
 
 
 

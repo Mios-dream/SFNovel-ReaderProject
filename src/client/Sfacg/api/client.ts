@@ -33,7 +33,7 @@ import {
 } from "../types/ITypes";
 import { getNowFormatDate, Secret } from "../../../utils/tools";
 
-import fs from "fs-extra"
+// import fs from "fs-extra"
 
 
 export class SfacgClient extends SfacgHttp {
@@ -45,14 +45,14 @@ export class SfacgClient extends SfacgHttp {
     let result: any
     if (cookie) {
       anonClient.cookie = cookie
-      result = (todo == "getTasks") ? await anonClient.getTasks() : await anonClient.userInfo()
+      result = anonClient[todo]()
       result && console.log(`${Secret(acconutInfo.userName as string)}原ck可用`);
     }
     if ((!cookie || !result) && userName && passWord) {
       const a = await anonClient.login(userName, passWord)
       if (a) {
         console.log(`${Secret(acconutInfo.userName as string)}ck重置`);
-        result = (todo == "getTasks") ? await anonClient.getTasks() : await anonClient.userInfo()
+        result = anonClient[todo]()
       }
       else {
         console.log("重新获取ck失败")
@@ -81,7 +81,7 @@ export class SfacgClient extends SfacgHttp {
       console.error(
         `POST login failed: ${JSON.stringify(errMsg)}`
       );
-      return false;
+      return false
     }
   }
 
@@ -278,25 +278,34 @@ export class SfacgClient extends SfacgHttp {
 
   // 书架默认信息
   async bookshelfInfos(): Promise<IbookshelfInfos[] | false> {
-    const res = await this.get<bookshelfInfos[]>("/user/Pockets", {
-      expand: "novels,albums,comics",
-    });
-    let bookshelfInfos: IbookshelfInfos[] = [];
-    res.map((bookshelf) => {
-      let novels = bookshelf.expand.novels;
-      if (novels) {
-        novels.forEach((novel) => {
-          bookshelfInfos.push({
-            authorName: novel.authorName, // 作者名字
-            lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
-            novelCover: novel.novelCover, // 小说封面URL
-            novelId: novel.novelId, // 小说ID
-            novelName: novel.novelName, // 小说名称
+    try {
+      const res = await this.get<bookshelfInfos[]>("/user/Pockets", {
+        expand: "novels,albums,comics",
+      });
+      let bookshelfInfos: IbookshelfInfos[] = [];
+      res.map((bookshelf) => {
+        let novels = bookshelf.expand.novels;
+        if (novels) {
+          novels.forEach((novel) => {
+            bookshelfInfos.push({
+              authorName: novel.authorName, // 作者名字
+              lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
+              novelCover: novel.novelCover, // 小说封面URL
+              novelId: novel.novelId, // 小说ID
+              novelName: novel.novelName, // 小说名称
+            });
           });
-        });
-      }
-    });
-    return bookshelfInfos;
+        }
+      });
+      return bookshelfInfos;
+    } catch (err: any) {
+      const errMsg = err.response.data.status.msg
+      console.error(
+        `GET bookshelfInfos failed: ${JSON.stringify(errMsg)}`
+      );
+      throw err;
+    }
+
   }
 
   // 筛选分类信息
@@ -353,7 +362,7 @@ export class SfacgClient extends SfacgHttp {
         orderAll: false,
         novelId: novelId,
         autoOrder: false,
-        chapIds: [chapId],
+        chapIds: chapId,
       });
       return res;
     } catch (err: any) {
@@ -562,10 +571,10 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
-  async test() {
-    const res = await this.get("https://api.sfacg.com/albums/137/chaps?expand=needFireMoney%2CoriginNeedFireMoney", { "expand": "needFireMoney,originNeedFireMoney" })
-    fs.outputJSONSync("1.json",res )
-  }
+  // async test() {
+  //   const res = await this.get("https://api.sfacg.com/albums/137/chaps?expand=needFireMoney%2CoriginNeedFireMoney", { "expand": "needFireMoney,originNeedFireMoney" })
+  //   fs.outputJSONSync("1.json",res )
+  // }
 }
 
 // (async () => {
