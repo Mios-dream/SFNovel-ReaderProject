@@ -45,22 +45,9 @@ export class Sfacg {
 
 
     async Once() {
-        console.log("[1]书架选书");
-        console.log("[2]直接搜书");
-        const option = await question("请选择一个操作：");
-        switch (option) {
-            case "1":
-                await _SfacgDownloader.Once(true)
-                break;
-            case "2":
-                await _SfacgDownloader.Once()
-                break;
-            default:
-                console.log("输入的选项不正确。");
-                await this.Once();
-                break;
-        }
+        await _SfacgDownloader.Once()
     }
+
 
     async Account() {
         console.log("[1]添加账号");
@@ -103,8 +90,8 @@ export class Sfacg {
 
 
 
-// (async () => {
-//     const a = new Sfacg()
-//     await a.init()
-// })()
+(async () => {
+    const a = new Sfacg()
+    await a.init()
+})()
 

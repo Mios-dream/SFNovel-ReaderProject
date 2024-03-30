@@ -1,5 +1,21 @@
 import readline from "readline"
+import { exec } from 'child_process';
 
+export function epubMaker(outputDir: string, mdFilePath: string, epubFilePath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const pandocCommand = `cd ${outputDir}&&pandoc ${mdFilePath} -o ${epubFilePath}`;
+        exec(pandocCommand, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`执行的错误: ${error}`);
+                reject(error);
+                return;
+            }
+            console.log(`stdout: ${stdout}`);
+            console.error(`stderr: ${stderr}`);
+            resolve();
+        });
+    });
+}
 export function question(query: any) {
     const rl = readline.createInterface({
         input: process.stdin,
@@ -18,7 +34,6 @@ export async function questionAccount() {
     const passWord = await question("输入密码：");
     return { userName, passWord }
 }
-
 
 
 // 返回带颜色的字

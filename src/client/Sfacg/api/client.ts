@@ -32,6 +32,7 @@ import {
   IaccountInfo,
 } from "../types/ITypes";
 import { getNowFormatDate, Secret } from "../../../utils/tools";
+import { AuthWeakPasswordError } from "@supabase/supabase-js";
 
 // import fs from "fs-extra"
 
@@ -45,14 +46,14 @@ export class SfacgClient extends SfacgHttp {
     let result: any
     if (cookie) {
       anonClient.cookie = cookie
-      result = anonClient[todo]()
+      result = await anonClient[todo]()
       result && console.log(`${Secret(acconutInfo.userName as string)}原ck可用`);
     }
     if ((!cookie || !result) && userName && passWord) {
       const a = await anonClient.login(userName, passWord)
       if (a) {
         console.log(`${Secret(acconutInfo.userName as string)}ck重置`);
-        result = anonClient[todo]()
+        result = await anonClient[todo]()
       }
       else {
         console.log("重新获取ck失败")
@@ -303,7 +304,7 @@ export class SfacgClient extends SfacgHttp {
       console.error(
         `GET bookshelfInfos failed: ${JSON.stringify(errMsg)}`
       );
-      throw err;
+      return false
     }
 
   }

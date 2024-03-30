@@ -16,10 +16,10 @@ const headers = {
   "Accept-Language": "zh-CN,zh;q=0.9",
   "Cache-Control": "no-cache",
   "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-  "Origin": "http://h5.haozhuma.com",
+  "Origin": "https://h5.haozhuma.com",
   "Pragma": "no-cache",
   "Proxy-Connection": "keep-alive",
-  "Referer": "http://h5.haozhuma.com/login.php",
+  "Referer": "https://h5.haozhuma.com/login.php",
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
   "X-Requested-With": "XMLHttpRequest"
 }
@@ -59,7 +59,7 @@ export class sms {
   async login(retries = 3) {
     if (retries > 0) {
       try {
-        const res = await axios.post<smsLogin>("http://h5.haozhuma.com/login.php", {
+        const res = await axios.post<smsLogin>("https://h5.haozhuma.com/login.php", {
           username: this.userName,
           password: this.passWord,
         }, { headers, timeout: 5000 });
@@ -81,7 +81,7 @@ export class sms {
   // 获取一个有效号码
   async getPhone(sid: sid, api: smsAction = smsAction.get) {
     try {
-      const res = await axios.post<smsGetPhone>("http://api.haozhuma.com/sms/", {
+      const res = await axios.post<smsGetPhone>("https://api.haozhuma.com/sms/", {
         api: api,
         token: this.token,
         sid: sid,
@@ -97,7 +97,7 @@ export class sms {
   }
   private async receive(sid: sid, phone: string): Promise<number | false> {
     try {
-      const res = await axios.get("http://api.haozhuma.com/sms", {
+      const res = await axios.get("https://api.haozhuma.com/sms", {
         headers, params: {
           api: "getMessage",
           token: this.token,

@@ -165,6 +165,20 @@ export class _SfacgCache {
         const Ids = data.map(item => item.chapId);
         return Ids as number[]
     }
+    static async GetChapterIdsByNovelId(novelId: number) {
+        const { data, error } = await Server
+            .from('Sfacg-chapter')
+            .select('chapId')
+            .eq('novelId', novelId)
+            .order('chapId')
+        if (error) {
+            console.log(`Error GetChapterIdsBynovelId: ${colorize(`${novelId}`, "purple")} `, error);
+            return null
+        }
+        const Ids = data.map(item => item.chapId);
+        return Ids as number[]
+    }
+
 
     static async GetChapterContent(chapId: number) {
         const { data, error } = await Server

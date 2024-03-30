@@ -49,7 +49,7 @@ export class _SfacgRegister {
         console.log(`获取到的手机号：${phone}`);
         const status = phone && this.regist.sendCode(phone)
         !status && this.sms.getPhone(sid.Sfacg, smsAction.cancel)
-        return status ? phone : await this.GetAvaliblePhone()
+        return phone ? phone : ""
     }
 }
 

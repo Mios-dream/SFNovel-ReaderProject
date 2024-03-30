@@ -46,7 +46,7 @@ export class _SfacgTasker {
             await this.Client.readTime(120)// 阅读时长
             await this.Client.share(accountID) // 每日分享
             await this.Client.androiddeviceinfos(accountID)// 上报设备信息
-            const signInfo = await this.Client.newSign() // 签到
+            const signInfo = await this.Client.newSign() // 签到 
             retry--
             signInfo ? this.success.push("签到成功") : await this.performRituals(accountID, retry)
         }
@@ -86,3 +86,6 @@ export class _SfacgTasker {
     }
 
 }
+// (async () => {
+//     await _SfacgTasker.TaskAll()
+// })()
