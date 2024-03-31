@@ -13,6 +13,14 @@ export interface IaccountInfo {
   cookie?: string // 用户凭证 
 }
 
+
+export interface IexpiredInfo {
+  has: number, // 拥有的未过期的代币
+  expireDate: string // 过期时间
+  isExpired: boolean; // 是否已过期
+  cookie?: string // 方便使用
+}[]
+
 export interface Itag {
   id: number; // 标签序号
   name: string; // 标签名

@@ -91,6 +91,17 @@ export interface userMoney {
   couponsRemain: number; // 未使用的代币 
 }
 
+// 代币过期时间信息
+export interface expireInfo {
+  coupon: number; // 代币
+  usedCoupon: number; // 已使用的代币
+  getDate: string; // 获取时间
+  expireDate: string; // 过期时间
+  source: string; // 来源
+  isExpired: boolean; // 是否已过期
+}[]
+
+
 // 小说目录详情
 export interface volumeInfos {
   novelId: number; // 小说ID

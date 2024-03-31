@@ -1,6 +1,8 @@
 import { SfacgClient } from "../api/client";
 import {
+    IaccountInfo,
     Ichapter,
+    IexpiredInfo,
     InovelInfo,
     IsearchInfos,
     IvolumeInfos,
@@ -17,11 +19,39 @@ export class _SfacgDownloader {
     imagesDir: string = ""
     cookie: string = ""
 
-
     static async Once() {
         const download = new _SfacgDownloader()
         await download._Once()
     }
+
+
+    async Multy(novelId: number, toOrderd: number[]) {
+        const have = await _SfacgCache.GetChapterIdsByNovelId(novelId)
+        const _tobuy = toOrderd.filter(a => !have?.includes(a))
+        const _sortedUsers = await this.userToUse()
+
+    }
+
+    // 返回按照过期日期进行排序的代币数目和ck，从第一个开始用
+    async userToUse() {
+        const _users = await _SfacgCache.GetallCookies()
+        const userExpiredInfos = await Promise.all((_users ?? []).map(async user => {
+            const { result, anonClient } = await SfacgClient.initClient(user as IaccountInfo, "expireInfo")
+            const expiredInfos = (result as IexpiredInfo[])
+            let validInfos = expiredInfos.filter(info => !info.isExpired && info.has > 0);
+            return validInfos.map(info => {
+                return {
+                    cookie: anonClient.cookie, // 可用ck
+                    has: info.has, // 拥有代币
+                    expireDate: info.expireDate // 过期日期
+                };
+            });
+        }));
+        let allInfos = Array.prototype.concat(...userExpiredInfos);
+        let sortedInfos = allInfos.sort((a, b) => new Date(a.expireDate).getTime() - new Date(b.expireDate).getTime());
+        return sortedInfos as IexpiredInfo[]
+    }
+
 
     async _Once() {
         const client = new SfacgClient();
@@ -101,7 +131,6 @@ export class _SfacgDownloader {
             // 等待所有章节内容下载完成
             const volumesContent = await Promise.all(downloadPromises);
             content += volumesContent.join("\r\n\n");
-            content = content.replaceAll("\n\n\n\n", "\n\n")
             // 写入文件
             await fse.outputFile(novelPath, head + content);
             await epubMaker(novelDir, novelPath, epubPath)
