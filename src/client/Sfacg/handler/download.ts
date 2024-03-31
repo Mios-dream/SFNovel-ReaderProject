@@ -18,8 +18,12 @@ export class _SfacgDownloader {
     cookie: string = ""
 
 
+    static async Once() {
+        const download = new _SfacgDownloader()
+        await download._Once()
+    }
 
-    async Once() {
+    async _Once() {
         const client = new SfacgClient();
         let books: any;
         const { userName, passWord } = await questionAccount();
@@ -96,7 +100,8 @@ export class _SfacgDownloader {
             });
             // 等待所有章节内容下载完成
             const volumesContent = await Promise.all(downloadPromises);
-            content += volumesContent.join("\r\n");
+            content += volumesContent.join("\n\n");
+            content = content.replaceAll("\n\n\n\n", "\n\n")
             // 写入文件
             await fse.outputFile(novelPath, head + content);
             await epubMaker(novelDir, novelPath, epubPath)
@@ -108,14 +113,14 @@ export class _SfacgDownloader {
     ): Promise<string> {
         const _client = new SfacgClient();
         _client.cookie = this.cookie;
-        let content: string = "# " + volumeInfo.title + "\r\n"
+        let content: string = "# " + volumeInfo.title + "\n\n"
         // 创建一个Promise数组来处理每一章的下载
         const chapterDownloadPromises = volumeInfo.chapterList.map(async (_chapter: Ichapter) => {
             // 仅下载已购买的章节
             if (_chapter.needFireMoney === 0) {
                 const chapterContent = await _client.contentInfos(_chapter.chapId);
                 if (chapterContent) {
-                    let formattedContent = "## " + _chapter.ntitle + "\r\n";
+                    let formattedContent = "## " + _chapter.ntitle
                     formattedContent += await this.ParseImg(chapterContent, _chapter.chapId);
                     return formattedContent;
                 }
@@ -126,20 +131,20 @@ export class _SfacgDownloader {
         const chaptersContent = await Promise.all(chapterDownloadPromises);
 
         // 拼接所有章节内容
-        content += chaptersContent.filter(Boolean).join("\r\n");
+        content += chaptersContent.filter(Boolean).join("\n\n");
         return content;
     }
 
     async ServerDownload(volumeInfo: IvolumeInfos) {
         const _ids = await _SfacgCache.GetChapterIdsByVolumeId(volumeInfo.volumeId);
-        let content: string = "# " + volumeInfo.title + "\r\n"
+        let content: string = "# " + volumeInfo.title + "\n\n"
         if (_ids) {
             // 使用map和Promise.all来处理每一章的下载
             const chapterDownloadPromises = _ids.map(async (_id) => {
                 const _chapter = await _SfacgCache.GetChapterContent(_id);
                 if (_chapter) {
                     console.log("正在下载" + _chapter.ntitle);
-                    let chapterContent = "## " + _chapter.ntitle + "\r\n";
+                    let chapterContent = "## " + _chapter.ntitle
                     chapterContent += await this.ParseImg(_chapter.content, _id);
                     return chapterContent;
                 } else {
@@ -148,7 +153,7 @@ export class _SfacgDownloader {
             })
             const chapterContents = await Promise.all(chapterDownloadPromises)
             // 拼接所有章节的内容
-            content += chapterContents.join("\r\n");
+            content += chapterContents.join("\n\n");
         }
         return content;
     }
@@ -165,15 +170,17 @@ export class _SfacgDownloader {
             let url = match[1];
             if (url) {
                 await this.imgDownload(String(chapId), url);
-                content = content.replace(match[0], `![](
-                    imgs/${chapId}.webp)`);
+                content = content
+                    .replace(match[0], `![](imgs/${chapId}.jpeg)`)
+
             }
         }
-        return content;
+        return content.replaceAll("\n", "\n\n")
+
     }
 
     private async imgDownload(name: string, url: string) {
-        const imgPath = path.join(this.imagesDir, `${name}.webp`);
+        const imgPath = path.join(this.imagesDir, `${name}.jpeg`);
         const data = await SfacgClient.image(url);
         await fse.outputFile(imgPath, data);
     }
@@ -219,14 +226,14 @@ author: '${novelInfo.authorName}'
 lang: 'zh-Hans'
 description: |-
 ${formattedIntro}
-cover-image: 'imgs/cover.webp'
-...\r\n`;
+cover-image: 'imgs/cover.jpeg'
+...\n\n`;
     }
 }
 
 
-(async () => {
+// (async () => {
 
-    const a = new _SfacgDownloader()
-    await a.Once()
-})()
+//     const a = new _SfacgDownloader()
+//     await a.Once()
+// })()
