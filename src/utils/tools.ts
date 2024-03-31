@@ -3,7 +3,7 @@ import { exec } from 'child_process';
 
 export function epubMaker(outputDir: string, mdFilePath: string, epubFilePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
-        const pandocCommand = `cd ${outputDir}&&pandoc ${mdFilePath} -o ${epubFilePath}`;
+        const pandocCommand = `cd ${outputDir}&&pandoc  ${mdFilePath}  -o ${epubFilePath} --from=commonmark+yaml_metadata_block --to=epub3 --split-level=2 --epub-title-page=false `;
         exec(pandocCommand, (error, stdout, stderr) => {
             if (error) {
                 console.error(`执行的错误: ${error}`);

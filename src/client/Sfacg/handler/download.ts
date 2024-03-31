@@ -100,7 +100,7 @@ export class _SfacgDownloader {
             });
             // 等待所有章节内容下载完成
             const volumesContent = await Promise.all(downloadPromises);
-            content += volumesContent.join("\n\n");
+            content += volumesContent.join("\r\n\n");
             content = content.replaceAll("\n\n\n\n", "\n\n")
             // 写入文件
             await fse.outputFile(novelPath, head + content);
@@ -131,7 +131,7 @@ export class _SfacgDownloader {
         const chaptersContent = await Promise.all(chapterDownloadPromises);
 
         // 拼接所有章节内容
-        content += chaptersContent.filter(Boolean).join("\n\n");
+        content += chaptersContent.filter(Boolean).join("\r\n\n");
         return content;
     }
 
@@ -153,7 +153,7 @@ export class _SfacgDownloader {
             })
             const chapterContents = await Promise.all(chapterDownloadPromises)
             // 拼接所有章节的内容
-            content += chapterContents.join("\n\n");
+            content += chapterContents.join("\r\n\n");
         }
         return content;
     }
@@ -232,8 +232,8 @@ cover-image: 'imgs/cover.jpeg'
 }
 
 
-// (async () => {
+(async () => {
 
-//     const a = new _SfacgDownloader()
-//     await a.Once()
-// })()
+    const a = new _SfacgDownloader()
+    await a._Once()
+})()
