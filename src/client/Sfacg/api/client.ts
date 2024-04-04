@@ -11,6 +11,7 @@ import {
   NewAccountFollowBonus,
   newSign,
   novelInfo,
+  novels,
   readTime,
   searchInfos,
   share,
@@ -363,7 +364,7 @@ export class SfacgClient extends SfacgHttp {
 
   // 获取分类主页
   async novels(page: number): Promise<any> {
-    const res = await this.get(`/novels/0/sysTags/novels`, {
+    const res = await this.get<novels[]>(`/novels/0/sysTags/novels`, {
       "page": page,
       "updatedays": "-1",
       "size": "20",
@@ -374,8 +375,16 @@ export class SfacgClient extends SfacgHttp {
       "isfinish": "both",
       "charcountend": "0"
     });
-    console.log(res)
-    return res ?? false;
+    const novels = res.map((novel) => {
+      return {
+        authorName: novel.authorName,
+        lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
+        novelCover: novel.novelCover, // 小说封面URL
+        novelId: novel.novelId, // 小说ID
+        novelName: novel.novelName, // 小说名称
+      };
+    });
+    return res as IsearchInfos[] ?? false;
   }
 
   // 购买章节
@@ -585,8 +594,8 @@ export class SfacgClient extends SfacgHttp {
 
 (async () => {
   const a = new SfacgClient()
-  await a.login("13696458853", "dddd1111")
-  await a.novels(1)
+  // await a.login("13696458853", "dddd1111")
+  await a.novels(0)
   // const b = await a.expireInfo()
   // fs.writeJSONSync("./TESTDATA/expireInfo.json",b)
 

@@ -54,6 +54,28 @@ export interface novelInfo {
   expand: novelInfo_Expand; // 扩展信息
 }
 
+export interface novels {
+  authorId: number;
+  lastUpdateTime: string;
+  markCount: number;
+  novelCover: string;
+  bgBanner: string;
+  novelId: number;
+  novelName: string;
+  point: number;
+  isFinish: boolean;
+  authorName: string;
+  charCount: number;
+  viewTimes: number;
+  typeId: number;
+  allowDown: boolean;
+  addTime: string;
+  isSensitive: boolean;
+  signStatus: string;
+  categoryId: number;
+}[]
+
+
 // 小说信息的扩展信息
 export interface novelInfo_Expand {
   intro: string; // 简介
