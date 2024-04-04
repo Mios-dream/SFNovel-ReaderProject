@@ -62,6 +62,7 @@ export interface Ichapter {
   ntitle: string; // 新标题
   chapOrder: number,// 该卷中此章节的序号
   volumeId: number; // 卷ID
+  has:boolean // 是否已经拥有
   content?: string //内容
 }
 

@@ -30,8 +30,10 @@ export function question(query: any) {
 }
 
 export async function questionAccount() {
-    const userName = await question("输入账号：");
-    const passWord = await question("输入密码：");
+    const userName = await question(colorize("输入账号："
+        , "purple"));
+    const passWord = await question(colorize("输入密码："
+        , "purple"));
     return { userName, passWord }
 }
 

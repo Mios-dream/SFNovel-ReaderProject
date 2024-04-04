@@ -34,7 +34,7 @@ import {
   IexpiredInfo,
 } from "../types/ITypes";
 import { getNowFormatDate, Secret } from "../../../utils/tools";
-import { AuthWeakPasswordError } from "@supabase/supabase-js";
+
 
 import fs from "fs-extra";
 
@@ -164,7 +164,7 @@ export class SfacgClient extends SfacgHttp {
         return {
           has: info.coupon - info.usedCoupon,
           expireDate: info.expireDate,
-          isExpired: info.isExpired 
+          isExpired: info.isExpired
         };
       });
       return expire as IexpiredInfo[];
@@ -217,6 +217,7 @@ export class SfacgClient extends SfacgHttp {
               isVip: chapter.isVip,
               ntitle: chapter.ntitle,
               chapOrder: chapter.chapOrder,
+              has: chapter.isVip
             };
           }),
         };
@@ -360,11 +361,22 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
-  // // 获取分类主页,一堆参数没卵用，懒得写了
-  // async novels(option: any): Promise<any> {
-  //   const res = await this.get(`/novels/${option}/sysTags/novels`);
-  //   return res ?? false;
-  // }
+  // 获取分类主页
+  async novels(page: number): Promise<any> {
+    const res = await this.get(`/novels/0/sysTags/novels`, {
+      "page": page,
+      "updatedays": "-1",
+      "size": "20",
+      "isfree": "both",
+      "charcountbegin": "0",
+      "systagids": "",
+      "sort": "viewtimes",
+      "isfinish": "both",
+      "charcountend": "0"
+    });
+    console.log(res)
+    return res ?? false;
+  }
 
   // 购买章节
   async orderChap(novelId: string, chapId: number[]): Promise<any> {
@@ -571,20 +583,21 @@ export class SfacgClient extends SfacgHttp {
   // }
 }
 
-// (async () => {
-//   const a = new SfacgClient()
-//   await a.login("13696458853", "dddd1111")
-//   const b = await a.expireInfo()
-//   fs.writeJSONSync("./TESTDATA/expireInfo.json",b)
+(async () => {
+  const a = new SfacgClient()
+  await a.login("13696458853", "dddd1111")
+  await a.novels(1)
+  // const b = await a.expireInfo()
+  // fs.writeJSONSync("./TESTDATA/expireInfo.json",b)
 
-// const acc = await a.userInfo()
-// const id = acc && acc.accountId
-// console.log(id);
+  // const acc = await a.userInfo()
+  // const id = acc && acc.accountId
+  // console.log(id);
 
-// if (id) {
-//   const info = await a.androiddeviceinfos(id)
-//   console.log(info);
-// }
-// const b = await a.newSign()
-// console.log(b);
-// })();
+  // if (id) {
+  //   const info = await a.androiddeviceinfos(id)
+  //   console.log(info);
+  // }
+  // const b = await a.newSign()
+  // console.log(b);
+})();

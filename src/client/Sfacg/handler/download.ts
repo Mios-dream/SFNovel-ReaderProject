@@ -26,10 +26,19 @@ export class _SfacgDownloader {
 
 
     async Multy(novelId: number, toOrderd: number[]) {
+        const client = new SfacgClient()
+        const volumeInfos = await client.volumeInfos(novelId)
+        volumeInfos
         const have = await _SfacgCache.GetChapterIdsByNovelId(novelId)
         const _tobuy = toOrderd.filter(a => !have?.includes(a))
         const _sortedUsers = await this.userToUse()
 
+    }
+
+    async VolumesToBuy(novelId: number) {
+        const client = new SfacgClient()
+        const volumes = await client.volumeInfos(novelId)
+        
     }
 
     // 返回按照过期日期进行排序的代币数目和ck，从第一个开始用

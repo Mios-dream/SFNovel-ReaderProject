@@ -8,7 +8,7 @@ export class SfacgHttp {
     "SFReader/4.9.76 (iPhone; iOS 16.6; Scale/3.00)";
   static readonly USERNAME = "androiduser";
   static readonly PASSWORD = "1a#$51-yt69;*Acv@qxq";
-  static readonly SALT = "FMLxgOdsfxmN!Dt4";
+  static readonly SALT = "FN_Q29XHVmfV3mYX"; // new Salt for Sfacg 5.0 Upper
   static readonly DEVICE_TOKEN = uuidv4().toUpperCase();
 
   cookie: string | undefined
@@ -59,7 +59,7 @@ export class SfacgHttp {
         cookie: this.cookie,
         Accept: "application/vnd.sfacg.api+json;version=1",
         "Accept-Language": "zh-Hans-CN;q=1",
-        "User-Agent": `boluobao/4.9.98(android;34)/H5/${SfacgHttp.DEVICE_TOKEN}/H5`,
+        "User-Agent": `boluobao/5.0.36(android;34)/H5/${SfacgHttp.DEVICE_TOKEN}/H5`,
         SFSecurity: this.sfSecurity(),
       },
       params: query,
