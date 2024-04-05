@@ -10,7 +10,7 @@ import { SfacgClient } from "../api/client";
 
 export class _SfacgCache {
 
-    private static async UpsertNovelInfo(novel: InovelInfo) {
+     static async UpsertNovelInfo(novel: InovelInfo) {
         const { data, error } = await Server
             .from('Sfacg-novelInfos')
             .upsert({

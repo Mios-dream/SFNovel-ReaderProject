@@ -345,6 +345,7 @@ export type adBonus = Response;
 export type claimTask = Response;
 export type readTime = Response;
 export type share = Response
+export type order = Response
 
 export interface taskBonus {
   status: { httpCode: number; errorCode: number; msgType: number; msg: object };

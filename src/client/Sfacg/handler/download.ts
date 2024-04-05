@@ -1,8 +1,6 @@
 import { SfacgClient } from "../api/client";
 import {
-    IaccountInfo,
     Ichapter,
-    IexpiredInfo,
     InovelInfo,
     IsearchInfos,
     IvolumeInfos,
@@ -21,48 +19,10 @@ export class _SfacgDownloader {
 
     static async Once() {
         const download = new _SfacgDownloader()
-        await download._Once()
+        await download._Init()
     }
 
-
-    async Multy(novelId: number, toOrderd: number[]) {
-        const client = new SfacgClient()
-        const volumeInfos = await client.volumeInfos(novelId)
-        volumeInfos
-        const have = await _SfacgCache.GetChapterIdsByNovelId(novelId)
-        const _tobuy = toOrderd.filter(a => !have?.includes(a))
-        const _sortedUsers = await this.userToUse()
-
-    }
-
-    async VolumesToBuy(novelId: number) {
-        const client = new SfacgClient()
-        const volumes = await client.volumeInfos(novelId)
-        
-    }
-
-    // 返回按照过期日期进行排序的代币数目和ck，从第一个开始用
-    async userToUse() {
-        const _users = await _SfacgCache.GetallCookies()
-        const userExpiredInfos = await Promise.all((_users ?? []).map(async user => {
-            const { result, anonClient } = await SfacgClient.initClient(user as IaccountInfo, "expireInfo")
-            const expiredInfos = (result as IexpiredInfo[])
-            let validInfos = expiredInfos.filter(info => !info.isExpired && info.has > 0);
-            return validInfos.map(info => {
-                return {
-                    cookie: anonClient.cookie, // 可用ck
-                    has: info.has, // 拥有代币
-                    expireDate: info.expireDate // 过期日期
-                };
-            });
-        }));
-        let allInfos = Array.prototype.concat(...userExpiredInfos);
-        let sortedInfos = allInfos.sort((a, b) => new Date(a.expireDate).getTime() - new Date(b.expireDate).getTime());
-        return sortedInfos as IexpiredInfo[]
-    }
-
-
-    async _Once() {
+    async _Init() {
         const client = new SfacgClient();
         let books: any;
         const { userName, passWord } = await questionAccount();
@@ -73,7 +33,7 @@ export class _SfacgDownloader {
         const _save = await question("[1]是(默认)\n[2]否\n是否上传数据库：");
         if (_save !== "2") {
             // 数据库上传&&从数据库下载
-            await this.UploadDB(novelId);
+            await this.UserUploadDB(novelId);
             await this.DownLoad("db", novelId)
         } else {
             // 用户直接下载
@@ -85,10 +45,11 @@ export class _SfacgDownloader {
      * 将小说上传至数据库
      * @param novelId  小说ID
      * @param cookie  用户凭证
-     * @param exclude  排除的章节数组
      */
-    private async UploadDB(novelId: number) {
+    private async UserUploadDB(novelId: number) {
         const client = new SfacgClient();
+        const novelInfo = await client.novelInfo(novelId)
+        novelInfo && _SfacgCache.UpsertNovelInfo(novelInfo)
         // 设置ck,拿已购章节
         client.cookie = this.cookie;
         const exclude = await _SfacgCache.GetChapterIdsByNovelId(novelId)
@@ -273,5 +234,5 @@ cover-image: 'imgs/cover.jpeg'
 // (async () => {
 
 //     const a = new _SfacgDownloader()
-//     await a._Once()
+//     await _SfacgDownloader.Once()
 // })()

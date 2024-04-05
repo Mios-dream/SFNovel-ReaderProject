@@ -86,6 +86,6 @@ export class _SfacgTasker {
     }
 
 }
-// (async () => {
-//     await _SfacgTasker.TaskAll()
-// })()
+(async () => {
+    await _SfacgTasker.TaskAll()
+})()

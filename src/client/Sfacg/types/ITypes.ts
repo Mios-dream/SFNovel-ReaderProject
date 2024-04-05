@@ -93,6 +93,9 @@ export interface IregistInfo {
   shuMeiId: string;
 }
 
+
+
+
 export interface _dbChapters {
   volumeId: number,
   chapId: number,
@@ -101,11 +104,14 @@ export interface _dbChapters {
   content: string
 }[]
 
+export interface _selectChapters extends Omit<_dbChapters, 'content'> {}[]
+
 export interface _dbNovels {
   novelId: number,
   novelName: string,
   authorName: string,
 }[]
+
 
 
 

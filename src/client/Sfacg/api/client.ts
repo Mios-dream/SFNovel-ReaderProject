@@ -12,6 +12,7 @@ import {
   newSign,
   novelInfo,
   novels,
+  order,
   readTime,
   searchInfos,
   share,
@@ -388,18 +389,17 @@ export class SfacgClient extends SfacgHttp {
   }
 
   // 购买章节
-  async orderChap(novelId: string, chapId: number[]): Promise<any> {
+  async orderChap(novelId: number, chapId: number[]){
     try {
-      const res = await this.get(`/novels/${chapId}/orderedchaps`, {
+      const res = await this.post<order>(`/novels/${novelId}/orderedchaps`, {
         orderType: "readOrder",
         orderAll: false,
-        novelId: novelId,
         autoOrder: false,
         chapIds: chapId,
       });
-      return res;
+      return res.status.httpCode == 201;
     } catch (err: any) {
-      const errMsg = err.response.data.status.msg;
+      const errMsg = err.response.data.status.msg
       console.error(`orderChap failed: ${JSON.stringify(errMsg)}`);
       return false;
     }
@@ -592,10 +592,10 @@ export class SfacgClient extends SfacgHttp {
   // }
 }
 
-(async () => {
-  const a = new SfacgClient()
-  // await a.login("13696458853", "dddd1111")
-  await a.novels(0)
+// (async () => {
+//   const a = new SfacgClient()
+//   await a.login("13696458853", "dddd1111")
+//   await a.orderChap(567122, [6981672, 6984421])
   // const b = await a.expireInfo()
   // fs.writeJSONSync("./TESTDATA/expireInfo.json",b)
 
@@ -609,4 +609,4 @@ export class SfacgClient extends SfacgHttp {
   // }
   // const b = await a.newSign()
   // console.log(b);
-})();
+// })();
