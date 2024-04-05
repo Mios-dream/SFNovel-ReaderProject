@@ -123,8 +123,8 @@ export class Multi {
 
 }
 
-(async () => {
-  const mu = new Multi();
-  await mu.MultiBuy(567122);
+// (async () => {
+//   const mu = new Multi();
+//   await mu.MultiBuy(567122);
 
-})();
+// })();
