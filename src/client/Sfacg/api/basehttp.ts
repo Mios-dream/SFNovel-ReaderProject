@@ -46,7 +46,7 @@ export class SfacgHttp {
     return response.data;
   }
 
-  private _client(query?: any): axios.AxiosRequestConfig {
+  private _client(query?: any): any {
     // 初始化axios实例
     return {
       withCredentials: true,
@@ -67,7 +67,7 @@ export class SfacgHttp {
   }
 
 
-  private static _clientRss(): axios.AxiosRequestConfig {
+  private static _clientRss(): any {
     return {
       responseType: "arraybuffer",
       baseURL: SfacgHttp.HOST,
