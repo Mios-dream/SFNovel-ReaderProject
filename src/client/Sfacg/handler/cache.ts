@@ -1,7 +1,7 @@
 
 import { IaccountInfo, _dbChapters, _dbNovels } from "../types/ITypes";
-import { Server } from "../../../utils/db";
-import { colorize } from "../../../utils/tools";
+import { Server } from "../../utils//db";
+import { colorize } from "../../utils//tools";
 import { SfacgClient } from "../api/client";
 import { novelInfo } from "../types/Types";
 
@@ -180,14 +180,14 @@ export class _SfacgCache {
     static async GetChapterContent(chapId: number) {
         const { data, error } = await Server
             .from('Sfacg-chapter')
-            .select('ntitle,content')
+            .select('content')
             .eq('chapId', chapId)
             .single()
         if (error) {
             console.log(`Error GetChapterContent: ${colorize(`${chapId}`, "purple")} `, error);
             return null
         }
-        return data as _dbChapters
+        return data.content
     }
 }
 

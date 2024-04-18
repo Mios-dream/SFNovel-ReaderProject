@@ -1,4 +1,4 @@
-import { Secret, colorize } from "../../../utils/tools";
+import { Secret, colorize } from "../../utils//tools";
 import { SfacgClient } from "../api/client";
 import { IadBonusNum } from "../types/ITypes";
 import { tasks } from "../types/Types";

@@ -1,5 +1,5 @@
-import { sid, sms, smsAction } from "../../../utils/sms";
-import { RandomName } from "../../../utils/tools";
+import { sid, sms, smsAction } from "../../utils//sms";
+import { RandomName } from "../../utils//tools";
 import { SfacgRegist } from "../api/regist";
 import { IaccountInfo } from "../types/ITypes";
 import { _SfacgCache } from "./cache";

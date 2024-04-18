@@ -8,14 +8,14 @@ import { _SfacgCache } from "./cache";
 import fse from "fs-extra";
 import path from "path";
 import Table from "cli-table3";
-import { colorize, epubMaker, question, questionAccount } from "../../../utils/tools";
+import { colorize, epubMaker, question, questionAccount } from "../../utils//tools";
 import { novelInfo } from "../types/Types";
 
 const outputDir = path.join(process.cwd(), "output", "菠萝包轻小说");
 
 export class _SfacgDownloader {
     imagesDir: string = ""
-    cookie: string = ""
+
 
     static async Once() {
         const download = new _SfacgDownloader()
@@ -27,17 +27,17 @@ export class _SfacgDownloader {
         let books: any;
         const { userName, passWord } = await questionAccount();
         await client.login(userName as string, passWord as string);
-        this.cookie = client.GetCookie()!
+        const cookie = client.GetCookie()!
         books = await client.bookshelfInfos();
         const novelId = books && (await this.selectBookFromList(books));
         const _save = await question("[1]是(默认)\n[2]否\n是否上传数据库：");
         if (_save !== "2") {
             // 数据库上传&&从数据库下载
-            await this.UserUploadDB(novelId);
-            await this.DownLoad("db", novelId)
+            await this.UserUploadDB(novelId, cookie);
+            await this.DownLoad("db", novelId, cookie)
         } else {
             // 用户直接下载
-            client.GetCookie() && await this.DownLoad("user", novelId)
+            client.GetCookie() && await this.DownLoad("user", novelId, cookie)
         }
     }
     static async Search() {
@@ -59,12 +59,12 @@ export class _SfacgDownloader {
      * @param novelId  小说ID
      * @param cookie  用户凭证
      */
-    private async UserUploadDB(novelId: number) {
+    private async UserUploadDB(novelId: number, cookie: string) {
         const client = new SfacgClient();
         const novelInfo = await client.novelInfo(novelId)
         novelInfo && _SfacgCache.UpsertNovelInfo(novelInfo)
         // 设置ck,拿已购章节
-        client.SetCookie(this.cookie)
+        client.SetCookie(cookie)
         const exclude = await _SfacgCache.GetChapterIdsByNovelId(novelId)
         const volumeInfos = await client.volumeInfos(novelId);
         volumeInfos &&
@@ -88,11 +88,11 @@ export class _SfacgDownloader {
     * @param novelId 小说ID
     * @param cookie sf 用户凭证
     */
-    async DownLoad(from: "user" | "db", novelId: number) {
+    async DownLoad(from: "user" | "db", novelId: number, cookie?: string) {
         let content: string = "";
         const _client = new SfacgClient();
         const _novelInfo = await _client.novelInfo(novelId);
-        _client.SetCookie(this.cookie)
+        _client.SetCookie(cookie!)
         const _volumeInfos = await _client.volumeInfos(novelId);
 
         if (_novelInfo && _volumeInfos) {
@@ -107,7 +107,7 @@ export class _SfacgDownloader {
             // 使用 Promise.all 来等待所有下载的完成
             const downloadPromises = _volumeInfos.map(async _volumeInfo => {
                 return from == "user"
-                    ? await this.UserDownload(_volumeInfo)
+                    ? await this.UserDownload(_volumeInfo, cookie!)
                     : await this.ServerDownload(_volumeInfo)
 
             });
@@ -121,23 +121,19 @@ export class _SfacgDownloader {
     }
 
     private async UserDownload(
-        volumeInfo: IvolumeInfos
+        volumeInfo: IvolumeInfos, cookie: string
     ): Promise<string> {
         const _client = new SfacgClient();
-        _client.SetCookie(this.cookie)
+        _client.SetCookie(cookie)
         let content: string = "# " + volumeInfo.title + "\n\n"
         // 创建一个Promise数组来处理每一章的下载
         const chapterDownloadPromises = volumeInfo.chapterList.map(async (_chapter: Ichapter) => {
             // 仅下载已购买的章节
             if (_chapter.needFireMoney === 0) {
+                console.log("正在下载已购章节" + _chapter.ntitle);
                 const chapterContent = await _client.contentInfos(_chapter.chapId);
-                if (chapterContent) {
-                    let formattedContent = "## " + _chapter.ntitle
-                    formattedContent += await this.ParseImg(chapterContent, _chapter.chapId);
-                    return formattedContent;
-                }
+                return await this.ParseChapter(chapterContent, _chapter)
             }
-
         });
 
         const chaptersContent = await Promise.all(chapterDownloadPromises);
@@ -148,29 +144,34 @@ export class _SfacgDownloader {
     }
 
     async ServerDownload(volumeInfo: IvolumeInfos) {
+        const _client = new SfacgClient();
         const _ids = await _SfacgCache.GetChapterIdsByVolumeId(volumeInfo.volumeId);
         let content: string = "# " + volumeInfo.title + "\n\n"
-        if (_ids) {
-            // 使用map和Promise.all来处理每一章的下载
-            const chapterDownloadPromises = _ids.map(async (_id) => {
-                const _chapter = await _SfacgCache.GetChapterContent(_id);
-                if (_chapter) {
-                    console.log("正在下载" + _chapter.ntitle);
-                    let chapterContent = "## " + _chapter.ntitle
-                    chapterContent += await this.ParseImg(_chapter.content, _id);
-                    return chapterContent;
-                } else {
-                    return "";
-                }
-            })
-            const chapterContents = await Promise.all(chapterDownloadPromises)
-            // 拼接所有章节的内容
-            content += chapterContents.join("\r\n\n");
-        }
+        const chapterDownloadPromises = volumeInfo.chapterList.map(async (_chapter: Ichapter) => {
+            if (_ids?.includes(_chapter.chapId)) {
+                console.log("正在从数据库下载" + _chapter.ntitle);
+                const chapterContent = await _SfacgCache.GetChapterContent(_chapter.chapId)
+                return await this.ParseChapter(chapterContent, _chapter)
+            }
+            // 下载免费章节
+            if (_chapter.needFireMoney === 0) {
+                console.log("正在下载免费章节" + _chapter.ntitle);
+                const chapterContent = await _client.contentInfos(_chapter.chapId);
+                return await this.ParseChapter(chapterContent, _chapter)
+            }
+        });
+        const chaptersContent = await Promise.all(chapterDownloadPromises);
+        content += chaptersContent.filter(Boolean).join("\r\n\n");
         return content;
     }
 
-
+    private async ParseChapter(content: string | false, chapter: Ichapter) {
+        if (content) {
+            let formattedContent = "## " + chapter.ntitle
+            formattedContent += await this.ParseImg(content, chapter.chapId);
+            return formattedContent;
+        }
+    }
 
     private async ParseImg(
         content: string,
@@ -229,6 +230,7 @@ export class _SfacgDownloader {
         return books[(index as number) - 1].novelId;
     }
 
+
     private async markdownHead(novelInfo: novelInfo) {
         // Split the intro into lines and prepend each line with a space
         const formattedIntro = novelInfo.expand.intro.split('\n').map(line => '  ' + line).join('\n');
@@ -244,8 +246,8 @@ cover-image: 'imgs/cover.jpeg'
 }
 
 
-// (async () => {
+(async () => {
 
-//     const a = new _SfacgDownloader()
-//     await _SfacgDownloader.Once()
-// })()
+    const a = new _SfacgDownloader()
+    await _SfacgDownloader.Once()
+})()

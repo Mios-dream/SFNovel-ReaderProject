@@ -82,7 +82,7 @@ export class Multi {
 
   }
 
- // 排序出需要购买的章节，如果传入值为空，则默认全本
+  // 排序出需要购买的章节，如果传入值为空，则默认全本
   async NeedBuy(
     novelId: number,
     chapIds?: number[]
@@ -102,20 +102,8 @@ export class Multi {
       for (const volume of volumes) {
         // 在卷中遍历每个章节
         for (const chapter of volume.chapterList) {
-          if (!have?.includes(chapter.chapId)) {
-            if (!chapter.isVip) {
-              const content = await client.contentInfos(chapter.chapId)
-              if (content) {
-                console.log("免费章节" + chapter.ntitle + "上传成功");
-                await _SfacgCache.UpsertChapterInfo({
-                  volumeId: volume.volumeId,
-                  chapId: chapter.chapId,
-                  ntitle: chapter.ntitle,
-                  novelId: volume.novelId,
-                  content: content
-                })
-              }
-            }
+          // 如果未拥有，且是vip章节
+          if (!have?.includes(chapter.chapId) && chapter.isVip) {
             // 如果章节ID在我们的chapIds数组中，收集信息
             if (!chapIds || chapIds.includes(chapter.chapId)) {
               chaptersInfo.push({
