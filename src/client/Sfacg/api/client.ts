@@ -202,6 +202,19 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
+  async authorBooks(authorId: number) {
+    try {
+      const res = await this.get<IsearchInfos>(`/authors/${authorId}/novels`);
+      return res
+    }
+    catch (err: any) {
+      const errMsg = err.response.data.status.msg;
+      console.error(`GET authorBooks failed: ${JSON.stringify(errMsg)}`);
+      return false;
+    }
+  }
+
+
   // 目录内容
   async volumeInfos(novelId: number): Promise<IvolumeInfos[] | false> {
     try {
@@ -389,7 +402,7 @@ export class SfacgClient extends SfacgHttp {
   }
 
   // 购买章节
-  async orderChap(novelId: number, chapId: number[]){
+  async orderChap(novelId: number, chapId: number[]) {
     try {
       const res = await this.post<order>(`/novels/${novelId}/orderedchaps`, {
         orderType: "readOrder",

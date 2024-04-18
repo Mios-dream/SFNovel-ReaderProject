@@ -41,14 +41,9 @@ export class Multi {
     return sortedInfos as IexpiredInfo[];
   }
 
-  async NeedBuy(novelId: number, toOrderd: _selectChapters[]) {
-    const have = await _SfacgCache.GetChapterIdsByNovelId(novelId);
-    return toOrderd
-      .filter((a) => !have?.includes(a.chapId))
-      .sort((a, b) => a.chapId - b.chapId);
-  }
-  async Buy(novelId: number, toOrderd: _selectChapters[]) {
-    const _buy = await this.NeedBuy(novelId, toOrderd)
+
+  async Buy(novelId: number, chapIds?: number[]) {
+    const _buy = await this.NeedBuy(novelId, chapIds)
     if (_buy.length === 0) {
       console.log("无未购买的章节啦！");
       return
@@ -89,42 +84,63 @@ export class Multi {
   }
 
   // 方便手动
-  async getselectChapters(
+  async NeedBuy(
     novelId: number,
     chapIds?: number[]
   ): Promise<_selectChapters[]> {
     const client = new SfacgClient();
     const volumes = await client.volumeInfos(novelId);
+    const have = await _SfacgCache.GetChapterIdsByNovelId(novelId);
     const chaptersInfo: _selectChapters[] = [];
+    if (!have || have.length === 0) {
+      console.log("小说信息初始化");
+      const client = new SfacgClient()
+      const _novelInfo = await client.novelInfo(novelId)
+      _novelInfo && await _SfacgCache.UpsertNovelInfo(_novelInfo)
+    }
     if (volumes)
       // 遍历每个卷的信息
       for (const volume of volumes) {
         // 在卷中遍历每个章节
         for (const chapter of volume.chapterList) {
-          // 如果章节ID在我们的chapIds数组中，收集信息
-          if (!chapIds || chapIds.includes(chapter.chapId)) {
-            chaptersInfo.push({
-              volumeId: volume.volumeId,
-              chapId: chapter.chapId,
-              ntitle: chapter.ntitle,
-              novelId: volume.novelId,
-            });
+          if (!have?.includes(chapter.chapId)) {
+            if (!chapter.isVip) {
+              const content = await client.contentInfos(chapter.chapId)
+              if (content) {
+                console.log("免费章节" + chapter.ntitle + "上传成功");
+                await _SfacgCache.UpsertChapterInfo({
+                  volumeId: volume.volumeId,
+                  chapId: chapter.chapId,
+                  ntitle: chapter.ntitle,
+                  novelId: volume.novelId,
+                  content: content
+                })
+              }
+            }
+            // 如果章节ID在我们的chapIds数组中，收集信息
+            if (!chapIds || chapIds.includes(chapter.chapId)) {
+              chaptersInfo.push({
+                volumeId: volume.volumeId,
+                chapId: chapter.chapId,
+                ntitle: chapter.ntitle,
+                novelId: volume.novelId,
+              });
+            }
           }
         }
       }
-    return chaptersInfo;
+    return chaptersInfo.sort((a, b) => a.chapId - b.chapId);;
   }
   async MultiBuy(
     novelId: number,
     chapIds?: number[]) {
-    const chaptersInfo = await this.getselectChapters(novelId, chapIds)
-    await this.Buy(novelId, chaptersInfo)
+    await this.Buy(novelId, chapIds)
   }
 
 }
 
-// (async () => {
-//   const mu = new Multi();
-//   await mu.MultiBuy(567122);
+(async () => {
+  const mu = new Multi();
+  await mu.MultiBuy(681052);
 
-// })();
+})();

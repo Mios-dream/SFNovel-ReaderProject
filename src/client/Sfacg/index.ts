@@ -12,6 +12,7 @@ export class Sfacg {
         console.log(colorize("3. 账号管理", "blue"));
         console.log(colorize("4. 多账号提书", "blue"));
         console.log(colorize("5. 注册机启动！", "blue"));
+        console.log(colorize("6. 数据库中下载", "blue"));
         const option = await question(colorize("请输入选项的数字："
             , "green"));
         switch (option) {
@@ -29,6 +30,9 @@ export class Sfacg {
                 break;
             case "5":
                 this.Regist();
+                break;
+            case "6":
+                this.ServerDownload();
                 break;
             default:
                 console.log(colorize("输入的选项不正确，请重新输入。"
@@ -79,6 +83,10 @@ export class Sfacg {
     }
 
     async Multi() { }
+
+    async ServerDownload() {
+        await _SfacgDownloader.Search()
+    }
 }
 
 (async () => {

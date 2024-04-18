@@ -19,10 +19,24 @@ export class _SfacgDownloader {
 
     static async Once() {
         const download = new _SfacgDownloader()
-        await download._Init()
+        await download._Once()
     }
 
-    async _Init() {
+    static async Search() {
+        const download = new _SfacgDownloader()
+        await download._Search()
+    }
+
+    async _Search() {
+        let books: any;
+        const _name = await question("请输入书名");
+        const client = new SfacgClient();
+        books = await client.searchInfos(_name as string)
+        const novelId = books && (await this.selectBookFromList(books));
+        await this.DownLoad("db", novelId)
+    }
+
+    async _Once() {
         const client = new SfacgClient();
         let books: any;
         const { userName, passWord } = await questionAccount();
