@@ -70,7 +70,7 @@ export class _SfacgDownloader {
         volumeInfos &&
             await Promise.all(volumeInfos.map((volumes) => {
                 volumes.chapterList.map(async (chapter) => {
-                    if (chapter.needFireMoney == 0 && (!exclude || !exclude.includes(chapter.chapId))) {
+                    if (chapter.needFireMoney == 0 && chapter.isVip && (!exclude || !exclude.includes(chapter.chapId))) {
                         const content = await client.contentInfos(chapter.chapId);
                         content && (await _SfacgCache.UpsertChapterInfo({
                             chapId: chapter.chapId,
