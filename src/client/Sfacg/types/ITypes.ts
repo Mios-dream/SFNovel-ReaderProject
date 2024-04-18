@@ -10,6 +10,7 @@ export interface IaccountInfo {
   vipLevel?: number; // vip等级
   fireMoneyRemain?: number; // 未使用的火币
   couponsRemain?: number; // 未使用的代币
+  welfareCoin?: number // 
   cookie?: string // 用户凭证 
 }
 
@@ -32,18 +33,6 @@ export interface IcontentInfos {
   content: string | Buffer; // 内容
 }
 
-export interface InovelInfo {
-  novelId: number; // 小说ID
-  lastUpdateTime: string; // 最后更新时间
-  novelCover: string; // 小说封面
-  novelName: string; // 小说名称
-  isFinish: boolean; // 是否已完结
-  authorName: string; // 作者名称
-  charCount: number; // 字符数
-  intro: string; // 简介
-  tags: string[]; //标签
-}
-
 
 // 卷列表
 export interface IvolumeInfos {
@@ -62,7 +51,7 @@ export interface Ichapter {
   ntitle: string; // 新标题
   chapOrder: number,// 该卷中此章节的序号
   volumeId: number; // 卷ID
-  has:boolean // 是否已经拥有
+  has: boolean // 是否已经拥有
   content?: string //内容
 }
 
@@ -104,7 +93,7 @@ export interface _dbChapters {
   content: string
 }[]
 
-export interface _selectChapters extends Omit<_dbChapters, 'content'> {}[]
+export interface _selectChapters extends Omit<_dbChapters, 'content'> { }[]
 
 export interface _dbNovels {
   novelId: number,

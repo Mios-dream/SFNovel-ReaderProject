@@ -1,7 +1,6 @@
 import { SfacgClient } from "../api/client";
 import {
     Ichapter,
-    InovelInfo,
     IsearchInfos,
     IvolumeInfos,
 } from "../types/ITypes";
@@ -10,6 +9,7 @@ import fse from "fs-extra";
 import path from "path";
 import Table from "cli-table3";
 import { colorize, epubMaker, question, questionAccount } from "../../../utils/tools";
+import { novelInfo } from "../types/Types";
 
 const outputDir = path.join(process.cwd(), "output", "菠萝包轻小说");
 
@@ -22,6 +22,24 @@ export class _SfacgDownloader {
         await download._Once()
     }
 
+    async _Once() {
+        const client = new SfacgClient();
+        let books: any;
+        const { userName, passWord } = await questionAccount();
+        await client.login(userName as string, passWord as string);
+        this.cookie = client.GetCookie()!
+        books = await client.bookshelfInfos();
+        const novelId = books && (await this.selectBookFromList(books));
+        const _save = await question("[1]是(默认)\n[2]否\n是否上传数据库：");
+        if (_save !== "2") {
+            // 数据库上传&&从数据库下载
+            await this.UserUploadDB(novelId);
+            await this.DownLoad("db", novelId)
+        } else {
+            // 用户直接下载
+            client.GetCookie() && await this.DownLoad("user", novelId)
+        }
+    }
     static async Search() {
         const download = new _SfacgDownloader()
         await download._Search()
@@ -36,25 +54,6 @@ export class _SfacgDownloader {
         await this.DownLoad("db", novelId)
     }
 
-    async _Once() {
-        const client = new SfacgClient();
-        let books: any;
-        const { userName, passWord } = await questionAccount();
-        await client.login(userName as string, passWord as string);
-        this.cookie = client.cookie ?? ""
-        books = await client.bookshelfInfos();
-        const novelId = books && (await this.selectBookFromList(books));
-        const _save = await question("[1]是(默认)\n[2]否\n是否上传数据库：");
-        if (_save !== "2") {
-            // 数据库上传&&从数据库下载
-            await this.UserUploadDB(novelId);
-            await this.DownLoad("db", novelId)
-        } else {
-            // 用户直接下载
-            client.cookie && await this.DownLoad("user", novelId)
-        }
-    }
-
     /**### 待添加数据库重复提示
      * 将小说上传至数据库
      * @param novelId  小说ID
@@ -65,7 +64,7 @@ export class _SfacgDownloader {
         const novelInfo = await client.novelInfo(novelId)
         novelInfo && _SfacgCache.UpsertNovelInfo(novelInfo)
         // 设置ck,拿已购章节
-        client.cookie = this.cookie;
+        client.SetCookie(this.cookie)
         const exclude = await _SfacgCache.GetChapterIdsByNovelId(novelId)
         const volumeInfos = await client.volumeInfos(novelId);
         volumeInfos &&
@@ -93,7 +92,7 @@ export class _SfacgDownloader {
         let content: string = "";
         const _client = new SfacgClient();
         const _novelInfo = await _client.novelInfo(novelId);
-        _client.cookie = this.cookie;
+        _client.SetCookie(this.cookie)
         const _volumeInfos = await _client.volumeInfos(novelId);
 
         if (_novelInfo && _volumeInfos) {
@@ -125,7 +124,7 @@ export class _SfacgDownloader {
         volumeInfo: IvolumeInfos
     ): Promise<string> {
         const _client = new SfacgClient();
-        _client.cookie = this.cookie;
+        _client.SetCookie(this.cookie)
         let content: string = "# " + volumeInfo.title + "\n\n"
         // 创建一个Promise数组来处理每一章的下载
         const chapterDownloadPromises = volumeInfo.chapterList.map(async (_chapter: Ichapter) => {
@@ -230,9 +229,9 @@ export class _SfacgDownloader {
         return books[(index as number) - 1].novelId;
     }
 
-    private async markdownHead(novelInfo: InovelInfo) {
+    private async markdownHead(novelInfo: novelInfo) {
         // Split the intro into lines and prepend each line with a space
-        const formattedIntro = novelInfo.intro.split('\n').map(line => '  ' + line).join('\n');
+        const formattedIntro = novelInfo.expand.intro.split('\n').map(line => '  ' + line).join('\n');
         return `---
 title: '${novelInfo.novelName}'
 author: '${novelInfo.authorName}'

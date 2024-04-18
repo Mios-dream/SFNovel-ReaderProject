@@ -1,16 +1,13 @@
 
-import { IaccountInfo, Ichapter, InovelInfo, IvolumeInfos, _dbChapters, _dbNovels } from "../types/ITypes";
+import { IaccountInfo, _dbChapters, _dbNovels } from "../types/ITypes";
 import { Server } from "../../../utils/db";
 import { colorize } from "../../../utils/tools";
 import { SfacgClient } from "../api/client";
-
-
-
-
+import { novelInfo } from "../types/Types";
 
 export class _SfacgCache {
 
-     static async UpsertNovelInfo(novel: InovelInfo) {
+    static async UpsertNovelInfo(novel: novelInfo) {
         const { data, error } = await Server
             .from('Sfacg-novelInfos')
             .upsert({
@@ -78,7 +75,7 @@ export class _SfacgCache {
         const accountInfo = {
             userName: userName,
             passWord: passWord,
-            cookie: anonClient.cookie,
+            cookie: anonClient.GetCookie(),
             ...result,
             ...money,
         };

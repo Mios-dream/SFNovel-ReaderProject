@@ -1,4 +1,4 @@
-import { sms } from "../../../utils/sms";
+
 import { SfacgHttp } from "./basehttp";
 import { nameAvalible, sendCode, codeverify, regist } from "../types/Types";
 

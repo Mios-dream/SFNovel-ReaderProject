@@ -3,6 +3,7 @@ import {
   adBonus,
   adBonusNum,
   androiddeviceinfos,
+  AuthorInfo,
   bookshelfInfos,
   claimTask,
   contentInfos,
@@ -23,10 +24,10 @@ import {
   userInfo,
   userMoney,
   volumeInfos,
+  welfare,
 } from "../types/Types";
 import {
   Itag,
-  InovelInfo,
   IvolumeInfos,
   Ichapter,
   IadBonusNum,
@@ -51,7 +52,7 @@ export class SfacgClient extends SfacgHttp {
     const { userName, passWord, cookie } = acconutInfo;
     let result: any;
     if (cookie) {
-      anonClient.cookie = cookie;
+      anonClient.SetCookie(cookie);
       result = await anonClient[todo]();
       result &&
         console.log(`${Secret(acconutInfo.userName as string)}原ck可用`);
@@ -75,13 +76,12 @@ export class SfacgClient extends SfacgHttp {
         userName: userName,
         passWord: passWord,
       });
-      this.cookie =
-        res.status == 200 &&
+      this.SetCookie(res.status == 200 &&
         res.headers["set-cookie"]
           .map((cookie: any) => {
             return cookie.split(";")[0];
           })
-          .join("; ");
+          .join("; "))
       return res.status == 200;
     } catch (err: any) {
       const errMsg = err.response.data.status.msg;
@@ -114,15 +114,20 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
+
+
   /**
    * 仅当自提时执行
    * @returns 用户信息
    */
   async userInfo() {
     try {
-      const res = await this.get<userInfo>("/user");
+      const res = await this.get<userInfo>("/user", {
+        expend: "welfareCoin"
+      });
       // 补充用户基础信息
       const baseinfo = {
+        welfare: res.expend.welfareCoin,
         nickName: res.nickName,
         avatar: res.avatar,
         accountId: res.accountId,
@@ -178,23 +183,13 @@ export class SfacgClient extends SfacgHttp {
   }
 
   // Infos for this Novel
-  async novelInfo(novelId: number): Promise<InovelInfo | false> {
+  async novelInfo(novelId: number) {
     try {
       const res = await this.get<novelInfo>(`/novels/${novelId}`, {
-        expand: "intro,typeName,sysTags",
+        expand: "chapterCount,bigBgBanner,bigNovelCover,typeName,intro,fav,ticket,pointCount,sysTags,totalNeedFireMoney,latestchapter",
       });
-      const novelInfo = {
-        novelId: res.novelId,
-        lastUpdateTime: res.lastUpdateTime,
-        novelCover: res.novelCover,
-        novelName: res.novelName,
-        isFinish: res.isFinish,
-        authorName: res.authorName,
-        charCount: res.charCount,
-        intro: res.expand.intro,
-        tags: res.expand.sysTags.map((tag) => tag.tagName),
-      };
-      return novelInfo;
+
+      return res;
     } catch (err: any) {
       const errMsg = err.response.data.status.msg;
       console.error(`GET novelInfo failed: ${JSON.stringify(errMsg)}`);
@@ -202,9 +197,28 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
+  async authorInfo(authorId: number) {
+    try {
+      let res = await this.get<AuthorInfo>("/authors", {
+        "authorId": authorId,
+        "expand": "youfollow,fansNum"
+      });
+
+      return res;
+      // 待添加
+    } catch (err: any) {
+      console.error(
+        `GET authorInfos failed: ${JSON.stringify(
+          err.response.data.status.msg
+        )}`
+      );
+      return false;
+    }
+  }
+  // 作者小说集
   async authorBooks(authorId: number) {
     try {
-      const res = await this.get<IsearchInfos>(`/authors/${authorId}/novels`);
+      const res = await this.get<IsearchInfos[]>(`/authors/${authorId}/novels`);
       return res
     }
     catch (err: any) {
@@ -213,7 +227,6 @@ export class SfacgClient extends SfacgHttp {
       return false;
     }
   }
-
 
   // 目录内容
   async volumeInfos(novelId: number): Promise<IvolumeInfos[] | false> {
@@ -357,6 +370,7 @@ export class SfacgClient extends SfacgHttp {
     try {
       const res = await this.get<tags[]>("/novels/0/sysTags");
       const tags: Itag[] = [
+        // 被删手动补
         {
           id: 74,
           name: "百合",
@@ -591,6 +605,19 @@ export class SfacgClient extends SfacgHttp {
         categoryId: 0,
       });
       return res.status.httpCode == 201;
+    } catch (err: any) {
+      const errMsg = err.response.data.status.msg;
+      console.error(
+        `POST NewAccountFavBonus failed: ${JSON.stringify(errMsg)}`
+      );
+      return false;
+    }
+  }
+  async welfare(recordId: number = 26) {
+    try {
+      const res = await this.post<welfare>(`/user/welfare/storeitemrecords/${recordId}`, {
+      });
+      return res.status.httpCode == 200;
     } catch (err: any) {
       const errMsg = err.response.data.status.msg;
       console.error(

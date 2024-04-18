@@ -10,10 +10,15 @@ export class SfacgHttp {
   static readonly PASSWORD = "1a#$51-yt69;*Acv@qxq";
   static readonly SALT = "FN_Q29XHVmfV3mYX"; // new Salt for Sfacg 5.0 Upper
   static readonly DEVICE_TOKEN = uuidv4().toUpperCase();
+  private cookie: string | undefined
 
-  cookie: string | undefined
+   SetCookie(cookie: string) {
+    this.cookie = cookie
+  }
 
-
+   GetCookie() {
+    return this.cookie
+  }
   protected async get<T, E = any>(url: string, query?: E): Promise<T> {
     let response: AxiosResponse;
     response = await axios.get<T>(url, this._client(query));

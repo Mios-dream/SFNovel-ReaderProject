@@ -10,7 +10,6 @@ import { _SfacgCache } from "./cache";
 // 账号排序和购买规则
 export class Multi {
 
-
   // 返回按照过期日期进行排序的代币数目和ck
   async SortedInfos() {
     const _users = await _SfacgCache.GetallCookies();
@@ -26,7 +25,7 @@ export class Multi {
         );
         return validInfos.map((info) => {
           return {
-            cookie: anonClient.cookie, // 可用ck
+            cookie: anonClient.GetCookie(), // 可用ck
             has: info.has, // 快要过期的代币数量
             expireDate: info.expireDate, // 过期日期
           };
@@ -56,7 +55,7 @@ export class Multi {
       // 如果没有更多章节可购买，则退出循环
       if (info.cookie && !exclude.includes(info.cookie)) {
         const client = new SfacgClient();
-        client.cookie = info.cookie;
+        client.SetCookie(info.cookie);
         try {
           const status = await client.orderChap(novelId, [_buy[0].chapId]);
           if (status) {
@@ -83,7 +82,7 @@ export class Multi {
 
   }
 
-  // 方便手动
+ // 排序出需要购买的章节，如果传入值为空，则默认全本
   async NeedBuy(
     novelId: number,
     chapIds?: number[]
@@ -139,8 +138,8 @@ export class Multi {
 
 }
 
-(async () => {
-  const mu = new Multi();
-  await mu.MultiBuy(681052);
+// (async () => {
+//   const mu = new Multi();
+//   await mu.MultiBuy(681052);
 
-})();
+// })();

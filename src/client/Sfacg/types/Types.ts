@@ -31,6 +31,7 @@ export interface contentInfos_Expand {
   isBranch: boolean; // 是否为分支章节
 }
 
+
 // 小说信息
 export interface novelInfo {
   authorId: number; // 作者ID
@@ -48,7 +49,7 @@ export interface novelInfo {
   typeId: number; // 类型ID
   allowDown: boolean; // 是否允许下载
   addTime: string; // 添加时间
-  isSensitive: boolean; // 是否敏感
+  isSensitive: boolean; // 是否敏感 
   signStatus: string; // 签名状态
   categoryId: number; // 类别ID
   expand: novelInfo_Expand; // 扩展信息
@@ -78,10 +79,34 @@ export interface novels {
 
 // 小说信息的扩展信息
 export interface novelInfo_Expand {
-  intro: string; // 简介
-  typeName: string; // 类型名称
-  sysTags: SysTags[]; // 系统标签
+  chapterCount: number;
+  bigBgBanner: string;
+  bigNovelCover: string;
+  typeName: string;
+  intro: string;
+  fav: number;
+  ticket: number;
+  pointCount: number;
+  sysTags: { sysTagId: number; tagName: string }[];
+  totalNeedFireMoney: number;
+  latestChapter: { title: string; chapId: number; addTime: string };
 }
+
+export interface AuthorInfo {
+  authorId: number;
+  accountId: number;
+  authorName: string;
+  introduce: string;
+  avatar: string;
+  userInfo: {
+    accountId: number;
+    userName: string;
+    nickName: string;
+    expand: { youfollow: boolean; fansNum: number };
+  };
+};
+
+
 
 // 系统标签
 export interface SysTags {
@@ -102,6 +127,7 @@ export interface userInfo {
   isAuthor: boolean; // 是否作者
   phoneNum: string; // 电话号码
   registerDate: string; // 注册日期
+  expend: { welfareCoin: number } // 金币
 }
 
 // 用户余额
@@ -367,6 +393,7 @@ export interface taskBonus {
 export type sendCode = Response;
 export type NewAccountFollowBonus = Response;
 export type NewAccountFavBonus = Response;
+export type welfare = Response;
 export type androiddeviceinfos = Response;
 //{"status":{"httpCode":200,"errorCode":200,"msgType":0,"msg":null},"data":null}
 //{"status":{"httpCode":422,"errorCode":727,"msgType":0,"msg":"手机验证码错误"},"data":null}

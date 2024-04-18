@@ -12,7 +12,6 @@ export class _SfacgTasker {
     constructor(Client: SfacgClient) {
         this.Client = Client;
     }
-
     /**
      * 
      * 静态方法供外部调用
@@ -28,7 +27,7 @@ export class _SfacgTasker {
             await tasker.handleAdRewards()
             await tasker.BonusLog(account.userName)
             // 更新账号
-            account.cookie = anonClient.cookie
+            account.cookie = anonClient.GetCookie()
             await _SfacgCache.UpdateAccount(account)
         })
     }
