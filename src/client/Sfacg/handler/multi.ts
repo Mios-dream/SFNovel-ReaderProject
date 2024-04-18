@@ -82,7 +82,7 @@ export class Multi {
 
   }
 
-  // 排序出需要购买的章节，如果传入值为空，则默认全本
+  // 排序出需要购买的章节，如果传入值为空，则为默认全本（除了免费）
   async NeedBuy(
     novelId: number,
     chapIds?: number[]
@@ -118,6 +118,8 @@ export class Multi {
       }
     return chaptersInfo.sort((a, b) => a.chapId - b.chapId);;
   }
+
+  
   async MultiBuy(
     novelId: number,
     chapIds?: number[]) {
