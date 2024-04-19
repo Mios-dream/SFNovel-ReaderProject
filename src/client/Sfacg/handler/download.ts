@@ -246,8 +246,8 @@ cover-image: 'imgs/cover.jpeg'
 }
 
 
-(async () => {
+// (async () => {
 
-    const a = new _SfacgDownloader()
-    await _SfacgDownloader.Once()
-})()
+//     const a = new _SfacgDownloader()
+//     await _SfacgDownloader.Once()
+// })()

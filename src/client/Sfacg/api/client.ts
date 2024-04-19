@@ -123,11 +123,11 @@ export class SfacgClient extends SfacgHttp {
   async userInfo() {
     try {
       const res = await this.get<userInfo>("/user", {
-        expend: "welfareCoin"
+        expand: "welfareCoin"
       });
       // 补充用户基础信息
       const baseinfo = {
-        welfare: res.expend.welfareCoin,
+        welfare: res.expand.welfareCoin,
         nickName: res.nickName,
         avatar: res.avatar,
         accountId: res.accountId,

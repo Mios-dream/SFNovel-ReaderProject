@@ -127,7 +127,7 @@ export interface userInfo {
   isAuthor: boolean; // 是否作者
   phoneNum: string; // 电话号码
   registerDate: string; // 注册日期
-  expend: { welfareCoin: number } // 金币
+  expand: { welfareCoin: number } // 金币
 }
 
 // 用户余额
