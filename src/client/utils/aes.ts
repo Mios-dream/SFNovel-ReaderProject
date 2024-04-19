@@ -30,3 +30,7 @@ export class ParseKsy {
     }
 }
 
+const p = new ParseKsy()
+const str = p.decrypt("IT+LcNazRBcK54/p1lMtc0mmJfVXWov795i6hcYtKO5ErwCHAPA0q9JARQ3vINB4lLjMGr+i3MaO04n9wBzP6f/sHi88t4orAnnfMj966H2ZFp4nPFZjDkMy4qgsGNXkFu6qOaj4VnCOFOIykp1iig==")
+console.log(str);
+
