@@ -147,33 +147,42 @@ export class _SfacgCache {
         }
         return data as _dbNovels[]
     }
+    static async GetChapterIdsByField(fieldName: "novelId" | "volumeId", fieldValue: number) {
+        let startIndex = 0;
+        const pageSize = 1000; // 每次查询的行数
+        let Ids: number[] = [];
 
-    static async GetChapterIdsByVolumeId(volumeId: number) {
-        const { data, error } = await Server
-            .from('Sfacg-chapter')
-            .select('chapId')
-            .eq('volumeId', volumeId)
-            .order('chapId')
-        if (error) {
-            console.log(`Error GetChapterIdsByvolumeId: ${colorize(`${volumeId}`, "purple")} `, error);
-            return null
+        while (true) {
+            const { data, error } = await Server
+                .from('Sfacg-chapter')
+                .select('chapId')
+                .eq(fieldName, fieldValue)
+                .order('chapId')
+                .range(startIndex, startIndex + pageSize - 1);
+
+            if (error) {
+                console.error(`Error GetChapterIdsByField: ${fieldName}=${fieldValue}`, error);
+                return null;
+            }
+
+            if (!data || data.length === 0) {
+                // 如果没有更多数据，退出循环
+                break;
+            }
+
+            // 添加当前批次的 IDs 至结果数组
+            Ids = Ids.concat(data.map(item => item.chapId));
+
+            // 如果返回的数据少于 pageSize，说明已经到了最后一页
+            if (data.length < pageSize) {
+                break;
+            }
+
+            // 更新 startIndex 以获取下一个数据批次
+            startIndex += pageSize;
         }
 
-        const Ids = data.map(item => item.chapId);
-        return Ids as number[]
-    }
-    static async GetChapterIdsByNovelId(novelId: number) {
-        const { data, error } = await Server
-            .from('Sfacg-chapter')
-            .select('chapId')
-            .eq('novelId', novelId)
-            .order('chapId')
-        if (error) {
-            console.log(`Error GetChapterIdsBynovelId: ${colorize(`${novelId}`, "purple")} `, error);
-            return null
-        }
-        const Ids = data.map(item => item.chapId);
-        return Ids as number[]
+        return Ids;
     }
 
 

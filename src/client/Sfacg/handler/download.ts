@@ -65,7 +65,7 @@ export class _SfacgDownloader {
         novelInfo && _SfacgCache.UpsertNovelInfo(novelInfo)
         // 设置ck,拿已购章节
         client.SetCookie(cookie)
-        const exclude = await _SfacgCache.GetChapterIdsByNovelId(novelId)
+        const exclude = await _SfacgCache.GetChapterIdsByField("novelId", novelId)
         const volumeInfos = await client.volumeInfos(novelId);
         volumeInfos &&
             await Promise.all(volumeInfos.map((volumes) => {
@@ -145,7 +145,7 @@ export class _SfacgDownloader {
 
     async ServerDownload(volumeInfo: IvolumeInfos) {
         const _client = new SfacgClient();
-        const _ids = await _SfacgCache.GetChapterIdsByVolumeId(volumeInfo.volumeId);
+        const _ids = await _SfacgCache.GetChapterIdsByField("volumeId", volumeInfo.volumeId);
         let content: string = "# " + volumeInfo.title + "\n\n"
         const chapterDownloadPromises = volumeInfo.chapterList.map(async (_chapter: Ichapter) => {
             if (_ids?.includes(_chapter.chapId)) {

@@ -7,6 +7,7 @@ import {
 } from "../types/ITypes";
 import { _SfacgCache } from "./cache";
 
+
 // 账号排序和购买规则
 export class Multi {
 
@@ -43,6 +44,7 @@ export class Multi {
 
   async Buy(novelId: number, chapIds?: number[]) {
     const _buy = await this.NeedBuy(novelId, chapIds)
+    console.log("需要购买章节总数", _buy.length)
     if (_buy.length === 0) {
       console.log("无未购买的章节啦！");
       return
@@ -50,6 +52,7 @@ export class Multi {
     const _sortedInfos = await this.SortedInfos();
     // 排除ck列表
     let exclude: string[] = [];
+    let count: number = 0
     for (const info of _sortedInfos) {
       if (_buy.length === 0) break
       // 如果没有更多章节可购买，则退出循环
@@ -65,6 +68,7 @@ export class Multi {
             const content = await client.contentInfos(_buy[0].chapId);
             if (content) {
               await _SfacgCache.UpsertChapterInfo({ ..._buy[0], content });
+              count++
               _buy.shift(); // 删除数组第一个元素
             }
           } else {
@@ -77,6 +81,7 @@ export class Multi {
       }
     }
     const failed = _buy.map(chap => (chap.chapId))
+    console.log("本次成功购买章节数" + count)
     console.log("还未成功购买的ID:\n" + failed.join("\n"));
     console.log("共" + failed.length + "章");
 
@@ -89,7 +94,10 @@ export class Multi {
   ): Promise<_selectChapters[]> {
     const client = new SfacgClient();
     const volumes = await client.volumeInfos(novelId);
-    const have = await _SfacgCache.GetChapterIdsByNovelId(novelId);
+    const have = await _SfacgCache.GetChapterIdsByField("novelId", novelId);
+    console.log("已拥有的章节数：" + have?.length);
+
+    // fs.writeJSONSync("TESTDATA/Have.json",have)
     const chaptersInfo: _selectChapters[] = [];
     if (!have || have.length === 0) {
       console.log("小说信息初始化");
@@ -119,7 +127,7 @@ export class Multi {
     return chaptersInfo.sort((a, b) => a.chapId - b.chapId);;
   }
 
-  
+
   async MultiBuy(
     novelId: number,
     chapIds?: number[]) {
@@ -130,6 +138,6 @@ export class Multi {
 
 // (async () => {
 //   const mu = new Multi();
-//   await mu.MultiBuy(681052);
+//   await mu.MultiBuy(567122);
 
 // })();
