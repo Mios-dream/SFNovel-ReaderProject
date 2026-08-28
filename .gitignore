@@ -17,4 +17,7 @@ logs
 .vscode/
 *.sw*
 
+# 本地受控登录窗口的浏览器配置，其中可能包含 SF 登录会话。
+.sfacg-login-profile/
 
+output/

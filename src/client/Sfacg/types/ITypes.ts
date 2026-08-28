@@ -69,6 +69,9 @@ export interface IsearchInfos {
   novelCover: string; // 小说封面URL
   novelId: number; // 小说ID
   novelName: string; // 小说名称
+  bookshelfName?: string; // 书架分类名称
+  typeId?: number; // 官方小说分类编号
+  categoryName?: string; // 官方小说分类名称
 }
 [];
 

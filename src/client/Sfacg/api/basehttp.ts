@@ -4,6 +4,8 @@ import crypto from "crypto"
 
 export class SfacgHttp {
   static readonly HOST = "https://api.sfacg.com";
+  static readonly USER_AGENT_WEB =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
   static readonly USER_AGENT_RSS =
     "SFReader/4.9.76 (iPhone; iOS 16.6; Scale/3.00)";
   static readonly USERNAME = "androiduser";
@@ -19,9 +21,9 @@ export class SfacgHttp {
    GetCookie() {
     return this.cookie
   }
-  protected async get<T, E = any>(url: string, query?: E): Promise<T> {
+  protected async get<T, E = any>(url: string, query?: E, signal?: AbortSignal): Promise<T> {
     let response: AxiosResponse;
-    response = await axios.get<T>(url, this._client(query));
+    response = await axios.get<T>(url, this._client(query, signal));
     return url.startsWith("/sessions")
       ? response.data.status
       : response.data.data;
@@ -51,7 +53,7 @@ export class SfacgHttp {
     return response.data;
   }
 
-  private _client(query?: any): any {
+  private _client(query?: any, signal?: AbortSignal): any {
     // 初始化axios实例
     return {
       withCredentials: true,
@@ -62,11 +64,14 @@ export class SfacgHttp {
       },
       headers: {
         cookie: this.cookie,
-        Accept: "application/vnd.sfacg.api+json;version=1",
+        Accept: "application/json, text/javascript, */*; q=0.01",
         "Accept-Language": "zh-Hans-CN;q=1",
-        "User-Agent": `boluobao/5.0.36(android;34)/H5/${SfacgHttp.DEVICE_TOKEN}/H5`,
+        "User-Agent": SfacgHttp.USER_AGENT_WEB,
+        "X-Requested-With": "XMLHttpRequest",
+        Referer: "https://i.sfacg.com/consume/book/",
         SFSecurity: this.sfSecurity(),
       },
+      signal,
       params: query,
     }
   }

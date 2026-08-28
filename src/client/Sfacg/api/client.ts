@@ -183,11 +183,11 @@ export class SfacgClient extends SfacgHttp {
   }
 
   // Infos for this Novel
-  async novelInfo(novelId: number) {
+  async novelInfo(novelId: number, signal?: AbortSignal) {
     try {
       const res = await this.get<novelInfo>(`/novels/${novelId}`, {
         expand: "chapterCount,bigBgBanner,bigNovelCover,typeName,intro,fav,ticket,pointCount,sysTags,totalNeedFireMoney,latestchapter",
-      });
+      }, signal);
 
       return res;
     } catch (err: any) {
@@ -229,9 +229,9 @@ export class SfacgClient extends SfacgHttp {
   }
 
   // 目录内容
-  async volumeInfos(novelId: number): Promise<IvolumeInfos[] | false> {
+  async volumeInfos(novelId: number, signal?: AbortSignal): Promise<IvolumeInfos[] | false> {
     try {
-      const res = await this.get<volumeInfos>(`/novels/${novelId}/dirs`);
+      const res = await this.get<volumeInfos>(`/novels/${novelId}/dirs`, undefined, signal);
       const volumeInfos = res.volumeList.map((volume): IvolumeInfos => {
         return {
           novelId: novelId,
@@ -245,7 +245,9 @@ export class SfacgClient extends SfacgHttp {
               isVip: chapter.isVip,
               ntitle: chapter.ntitle,
               chapOrder: chapter.chapOrder,
-              has: chapter.isVip
+              // The catalogue returns this for chapters already owned by the
+              // current session. Some responses only expose a zero price.
+              has: Boolean((chapter as unknown as { has?: boolean }).has) || (chapter.isVip && chapter.needFireMoney === 0)
             };
           }),
         };
@@ -262,11 +264,11 @@ export class SfacgClient extends SfacgHttp {
   }
 
   // 获取小说内容
-  async contentInfos(chapId: number): Promise<string | false> {
+  async contentInfos(chapId: number, signal?: AbortSignal): Promise<string | false> {
     try {
       let res = await this.get<contentInfos>(`/Chaps/${chapId}`, {
         expand: "content",
-      });
+      }, signal);
       const content = res.expand.content;
       return content;
       // 待添加
@@ -330,24 +332,27 @@ export class SfacgClient extends SfacgHttp {
       const res = await this.get<bookshelfInfos[]>("/user/Pockets", {
         expand: "novels,albums,comics",
       });
-      let bookshelfInfos: IbookshelfInfos[] = [];
-      res.map((bookshelf) => {
-        let novels = bookshelf.expand.novels;
+      const bookshelfInfos: IbookshelfInfos[] = [];
+      for (const bookshelf of (Array.isArray(res) ? res : [])) {
+        const directNovel = bookshelf as any;
+        const novels = bookshelf?.expand?.novels || (directNovel?.novelId ? [directNovel] : []);
         if (novels) {
-          novels.forEach((novel) => {
+          novels.forEach((novel: any) => {
             bookshelfInfos.push({
               authorName: novel.authorName, // 作者名字
               lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
               novelCover: novel.novelCover, // 小说封面URL
               novelId: novel.novelId, // 小说ID
               novelName: novel.novelName, // 小说名称
+              bookshelfName: bookshelf?.name || "默认书架",
+              typeId: novel.typeId,
             });
           });
         }
-      });
+      }
       return bookshelfInfos;
     } catch (err: any) {
-      const errMsg = err.response.data.status.msg;
+      const errMsg = err?.response?.data?.status?.msg || err?.response?.data?.message || err?.message || "未知错误";
       console.error(`GET bookshelfInfos failed: ${JSON.stringify(errMsg)}`);
       return false;
     }
