@@ -2,20 +2,36 @@
   <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
     <section class="modal glass chapter-modal">
       <button class="close-button" title="关闭" @click="emit('close')">
-        <X :size="20" /></button
-      ><span class="modal-icon"
-        ><Headphones v-if="mode === 'audio'" :size="22" /><BookOpen
-          v-else
-          :size="22"
-      /></span>
-      <h2>{{ novel?.novelName }}</h2>
-      <p class="chapter-subtitle">
-        {{ novel?.authorName }} · {{ novel?.isFinish ? "已完结" : "连载中" }} ·
-        更新于 {{ novel ? formatDate(novel.lastUpdateTime) : "" }}
-      </p>
-      <p v-if="novel?.description" class="novel-description">
-        {{ novel.description }}
-      </p>
+        <X :size="20" />
+      </button>
+      <header
+        class="chapter-hero"
+        :class="{ 'has-cover': Boolean(novel?.novelCover) }"
+        :style="
+          novel?.novelCover
+            ? { backgroundImage: `url(${novel.novelCover})` }
+            : undefined
+        "
+      >
+        <div class="chapter-hero-content">
+          <span class="modal-icon"
+            ><Headphones v-if="mode === 'audio'" :size="22" /><BookOpen
+              v-else
+              :size="22"
+          /></span>
+          <div>
+            <h2>{{ novel?.novelName }}</h2>
+            <p class="chapter-subtitle">
+              {{ novel?.authorName }} ·
+              {{ novel?.isFinish ? "已完结" : "连载中" }} · 更新于
+              {{ novel ? formatDate(novel.lastUpdateTime) : "" }}
+            </p>
+          </div>
+        </div>
+        <p v-if="novel?.description" class="novel-description">
+          {{ novel.description }}
+        </p>
+      </header>
       <div v-if="loading" class="chapter-loading">
         <LoaderCircle class="spin" :size="24" />正在读取书籍详情
       </div>
@@ -60,8 +76,19 @@
               :key="volume.volumeId"
               class="chapter-volume"
             >
-              <strong>{{ volume.title }}</strong
-              ><label
+              <div class="volume-heading">
+                <strong>{{ volume.title }}</strong>
+                <button
+                  class="volume-select-all"
+                  :disabled="!selectableVolumeIds(volume).length"
+                  @click="toggleVolume(volume)"
+                >
+                  {{ isVolumeSelected(volume) ? "取消全选" : "全选本卷" }}（{{
+                    selectedVolumeCount(volume)
+                  }}/{{ selectableVolumeIds(volume).length }}）
+                </button>
+              </div>
+              <label
                 v-for="chapter in volume.chapters"
                 :key="chapter.chapId"
                 :class="{
@@ -197,6 +224,28 @@ const allSelected = computed(
     selectedCount.value === selectableIds.value.length,
 );
 
+function selectableVolumeIds(volume: ChapterVolume) {
+  return volume.chapters.filter(canDownload).map((chapter) => chapter.chapId);
+}
+
+function selectedVolumeCount(volume: ChapterVolume) {
+  const ids = selectableVolumeIds(volume);
+  return props.selectedIds.filter((id) => ids.includes(id)).length;
+}
+
+function isVolumeSelected(volume: ChapterVolume) {
+  const ids = selectableVolumeIds(volume);
+  return ids.length > 0 && selectedVolumeCount(volume) === ids.length;
+}
+
+function toggleVolume(volume: ChapterVolume) {
+  const ids = selectableVolumeIds(volume);
+  const nextIds = isVolumeSelected(volume)
+    ? props.selectedIds.filter((id) => !ids.includes(id))
+    : [...new Set([...props.selectedIds, ...ids])];
+  emit("update:selectedIds", nextIds);
+}
+
 function toggleChapter(id: number, checked: boolean) {
   emit(
     "update:selectedIds",
@@ -229,8 +278,51 @@ function toggleChapter(id: number, checked: boolean) {
   max-height: calc(100vh - 36px);
   overflow: auto;
 }
+.chapter-hero {
+  position: relative;
+  min-height: 170px;
+  margin: -28px -28px 16px;
+  padding: 24px 21px 21px 28px;
+  overflow: hidden;
+  border-radius: 20px 20px 14px 14px;
+  background: #ffe5d5;
+  background-position: center 36%;
+  background-size: cover;
+}
+.chapter-hero.has-cover::before {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    0deg,
+    rgba(75, 42, 34, 0.7),
+    rgba(89, 51, 41, 0.5)
+  );
+  content: "";
+}
+.chapter-hero-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+}
+.chapter-hero .novel-description {
+  position: relative;
+  z-index: 1;
+  max-height: 72px;
+  /* margin: 16px 0 0 !important; */
+  /* padding: 10px 12px; */
+  overflow: auto;
+  font-size: 14px;
+  /* border: 1px solid rgba(255, 255, 255, 0.72); */
+  /* border-radius: 9px; */
+  color: white;
+  /* background: rgba(255, 249, 245, 0.9); */
+  /* box-shadow: 0 5px 13px rgba(73, 39, 30, 0.12); */
+}
 .modal h2 {
-  margin: 15px 0 5px;
+  margin: 0 0 5px;
   color: #69453d;
   font-family: KaTongFont, "Microsoft YaHei", sans-serif;
   font-size: 23px;
@@ -242,6 +334,7 @@ function toggleChapter(id: number, checked: boolean) {
   line-height: 1.7;
 }
 .modal-icon {
+  flex: 0 0 auto;
   display: grid;
   width: 42px;
   height: 42px;
@@ -273,6 +366,16 @@ function toggleChapter(id: number, checked: boolean) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.chapter-hero.has-cover h2,
+.chapter-hero.has-cover .chapter-subtitle {
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(51, 28, 22, 0.5);
+}
+.chapter-hero.has-cover .modal-icon {
+  color: #fff;
+  background: rgba(255, 246, 241, 0.22);
+  backdrop-filter: blur(5px);
+}
 .chapter-tabs {
   display: flex;
   gap: 7px;
@@ -300,14 +403,6 @@ function toggleChapter(id: number, checked: boolean) {
   color: #fff;
   background: var(--theme-color);
   box-shadow: 0 3px 8px rgba(165, 79, 49, 0.2);
-}
-.novel-description {
-  max-height: 72px;
-  margin-bottom: 10px !important;
-  padding: 9px 10px;
-  overflow: auto;
-  border-radius: 9px;
-  background: rgba(255, 235, 223, 0.5);
 }
 .chapter-loading {
   display: grid;
@@ -350,9 +445,33 @@ function toggleChapter(id: number, checked: boolean) {
   padding: 13px 0;
   border-bottom: 1px solid #efd8ce;
 }
-.chapter-volume > strong {
+.volume-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.volume-heading > strong {
   color: #80594f;
   font-size: 12px;
+}
+.volume-select-all {
+  flex: 0 0 auto;
+  min-height: 27px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  color: #9b6252;
+  background: #fff0e7;
+  font-size: 11px;
+}
+.volume-select-all:hover:not(:disabled) {
+  color: #fff;
+  background: var(--theme-color);
+}
+.volume-select-all:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 .chapter-list label {
   display: flex;
@@ -425,6 +544,10 @@ function toggleChapter(id: number, checked: boolean) {
   .chapter-modal {
     max-height: calc(100vh - 20px);
     padding: 21px;
+  }
+  .chapter-hero {
+    margin: -21px -21px 15px;
+    padding: 20px 55px 18px 21px;
   }
   .chapter-list {
     max-height: calc(100vh - 260px);
