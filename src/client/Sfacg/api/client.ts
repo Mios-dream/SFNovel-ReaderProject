@@ -306,17 +306,33 @@ export class SfacgClient extends SfacgHttp {
         q: novelName,
         size: size,
         sort: "hot",
+        searchType: 0,
       });
-      const searchInfos = res.novels.map((novel) => {
-        return {
+      const novelResults: IsearchInfos[] = (res.novels || []).map((novel) => ({
           authorName: novel.authorName,
           lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
           novelCover: novel.novelCover, // 小说封面URL
           novelId: novel.novelId, // 小说ID
           novelName: novel.novelName, // 小说名称
-        };
-      });
-      return searchInfos;
+          bookshelfType: "novel",
+      }));
+      const audioResults: IsearchInfos[] = (res.albums || []).filter((album) => album.novelId).map((album) => ({
+        authorName: album.authorName || "",
+        lastUpdateTime: album.lastUpdateTime,
+        novelCover: album.coverBig || album.coverMedium || album.coverSmall || "",
+        novelId: album.novelId,
+        novelName: album.name || "未命名有声专辑",
+        bookshelfType: "audio",
+      }));
+      const comicResults: IsearchInfos[] = (res.comics || []).map((comic) => ({
+        authorName: comic.authorName || "",
+        lastUpdateTime: comic.lastUpdateTime,
+        novelCover: comic.comicCover || "",
+        novelId: comic.comicId,
+        novelName: comic.comicName,
+        bookshelfType: "comic",
+      }));
+      return [...novelResults, ...audioResults, ...comicResults];
     } catch (err: any) {
       console.error(
         `GET searchInfos failed: ${JSON.stringify(
@@ -334,27 +350,50 @@ export class SfacgClient extends SfacgHttp {
         expand: "novels,albums,comics",
       });
       const categories: string[] = [];
-      const bookshelfNovels: IbookshelfInfos[] = [];
+      const bookshelfItems: IbookshelfInfos[] = [];
       for (const bookshelf of (Array.isArray(res) ? res : [])) {
         const directNovel = bookshelf as any;
         const bookshelfName = bookshelf?.name || "未分类";
         categories.push(bookshelfName);
         const novelEntries = bookshelf?.expand?.novels || (directNovel?.novelId ? [directNovel] : []);
-        if (novelEntries) {
-          novelEntries.forEach((novel: any) => {
-            bookshelfNovels.push({
-              authorName: novel.authorName, // 作者名字
-              lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
-              novelCover: novel.novelCover, // 小说封面URL
-              novelId: novel.novelId, // 小说ID
-              novelName: novel.novelName, // 小说名称
-              bookshelfName,
-              typeId: novel.typeId,
-            });
+        novelEntries?.forEach((novel: any) => {
+          bookshelfItems.push({
+            authorName: novel.authorName, // 作者名字
+            lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
+            novelCover: novel.novelCover, // 小说封面URL
+            novelId: novel.novelId, // 小说ID
+            novelName: novel.novelName, // 小说名称
+            bookshelfName,
+            bookshelfType: "novel",
+            typeId: novel.typeId,
+          });
+        });
+        for (const album of bookshelf?.expand?.albums || []) {
+          if (!album?.novelId) continue;
+          bookshelfItems.push({
+            authorName: album.authorName || "",
+            lastUpdateTime: album.lastUpdateTime,
+            novelCover: album.coverBig || album.coverMedium || album.coverSmall || "",
+            novelId: album.novelId,
+            novelName: album.name || "未命名有声专辑",
+            bookshelfName,
+            bookshelfType: "audio",
+          });
+        }
+        for (const comic of bookshelf?.expand?.comics || []) {
+          if (!comic?.comicId) continue;
+          bookshelfItems.push({
+            authorName: comic.authorName || "",
+            lastUpdateTime: comic.lastUpdateTime,
+            novelCover: comic.comicCover || comic.coverBig || comic.coverMedium || comic.coverSmall || "",
+            novelId: comic.comicId,
+            novelName: comic.comicName || "未命名漫画",
+            bookshelfName,
+            bookshelfType: "comic",
           });
         }
       }
-      return { categories: [...new Set(categories)], novels: bookshelfNovels };
+      return { categories: [...new Set(categories)], items: bookshelfItems };
     } catch (err: any) {
       const errMsg = err?.response?.data?.status?.msg || err?.response?.data?.message || err?.message || "未知错误";
       console.error(`GET bookshelfCollection failed: ${JSON.stringify(errMsg)}`);
@@ -365,7 +404,7 @@ export class SfacgClient extends SfacgHttp {
   // 保留命令行下载器使用的扁平书架列表。
   async bookshelfInfos(): Promise<IbookshelfInfos[] | false> {
     const collection = await this.bookshelfCollection();
-    return collection ? collection.novels : false;
+    return collection ? collection.items.filter((item) => item.bookshelfType === "novel" || !item.bookshelfType) : false;
   }
 
   // 筛选分类信息

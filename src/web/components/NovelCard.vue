@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Download } from "lucide-vue-next";
+import { Download, Headphones, Image as ImageIcon } from "lucide-vue-next";
 import type { Novel } from "../types";
 
 defineProps<{
@@ -15,17 +15,22 @@ const emit = defineEmits<{ select: [novel: Novel, mode: "text" | "audio"] }>();
     class="novel-card glass clickable-card"
     role="button"
     tabindex="0"
-    @click="emit('select', novel, 'text')"
-    @keydown.enter="emit('select', novel, 'text')"
+    @click="emit('select', novel, novel.bookshelfType === 'audio' ? 'audio' : 'text')"
+    @keydown.enter="emit('select', novel, novel.bookshelfType === 'audio' ? 'audio' : 'text')"
   >
     <img :src="novel.novelCover" :alt="`${novel.novelName} 封面`" />
     <div class="novel-info">
       <p class="novel-name">{{ novel.novelName }}</p>
       <p class="author">{{ novel.authorName }}</p>
+      <p v-if="novel.bookshelfType === 'audio'" class="media-type"><Headphones :size="12" /> 有声</p>
+      <p v-else-if="novel.bookshelfType === 'comic'" class="media-type comic"><ImageIcon :size="12" /> 漫画</p>
       <p class="updated">更新于 {{ formatDate(novel.lastUpdateTime) }}</p>
     </div>
     <div class="novel-actions">
-      <button class="download-button" :title="`选择章节并下载：${novel.novelName}`" @click.stop="emit('select', novel, 'text')"><Download :size="18" /></button>
+      <button v-if="novel.bookshelfType !== 'comic'" class="download-button" :title="novel.bookshelfType === 'audio' ? `选择有声章节并下载：${novel.novelName}` : `选择章节并下载：${novel.novelName}`" @click.stop="emit('select', novel, novel.bookshelfType === 'audio' ? 'audio' : 'text')">
+        <Headphones v-if="novel.bookshelfType === 'audio'" :size="18" /><Download v-else :size="18" />
+      </button>
+      <span v-else class="media-unavailable" title="当前暂不支持漫画章节下载"><ImageIcon :size="18" /></span>
     </div>
   </article>
 </template>
@@ -40,6 +45,9 @@ const emit = defineEmits<{ select: [novel: Novel, mode: "text" | "audio"] }>();
 .novel-name { display: -webkit-box; margin: 0; overflow: hidden; color: #63413b; font-family: KaTongFont, "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 700; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .author { margin: 7px 0; color: #9a7166; font-size: 12px; }
 .updated { margin: 0; color: #bd978a; font-size: 11px; }
+.media-type { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 4px; color: #5c7890; font-size: 11px; }
+.media-type.comic { color: #8b6a9b; }
+.media-unavailable { display: grid; width: 33px; height: 33px; border-radius: 10px; color: #a890aa; background: #eee5f1; place-items: center; }
 .novel-actions { display: grid; gap: 7px; }
 .download-button { display: grid; width: 33px; height: 33px; border: 0; border-radius: 10px; color: var(--theme-color-dark); background: #ffeadf; place-items: center; transition: 0.2s; }
 .download-button.audio { color: #5c7890; background: #e0eff2; }

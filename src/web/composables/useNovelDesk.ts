@@ -11,7 +11,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-type BookshelfResponse = { categories: string[]; novels: Novel[] };
+type BookshelfResponse = { categories: string[]; items: Novel[] };
 
 export function useNovelDesk() {
   const active = ref<ViewName>("discover");
@@ -124,6 +124,10 @@ export function useNovelDesk() {
   }
 
   async function openChapterPicker(novel: Novel, mode: ChapterMode) {
+    if (novel.bookshelfType === "comic") {
+      notify("当前暂不支持漫画章节下载");
+      return;
+    }
     chapterNovel.value = novel;
     chapterMode.value = mode;
     chapterModalOpen.value = true;
@@ -135,7 +139,9 @@ export function useNovelDesk() {
     try {
       const [info, volumes, audio] = await Promise.all([
         request<Partial<Novel>>(`/api/novel/${novel.novelId}`).catch(() => ({})),
-        request<ChapterVolume[]>(`/api/chapters/${novel.novelId}`),
+        mode === "text"
+          ? request<ChapterVolume[]>(`/api/chapters/${novel.novelId}`).catch(() => [])
+          : Promise.resolve([] as ChapterVolume[]),
         auth.value.authenticated ? request<{ chapters: Chapter[] }>(`/api/audio/${novel.novelId}`).catch(() => ({ chapters: [] })) : Promise.resolve({ chapters: [] as Chapter[] }),
       ]);
       chapterNovel.value = { ...novel, ...info };
@@ -228,7 +234,7 @@ export function useNovelDesk() {
     bookshelfLoading.value = true;
     try {
       const response = await request<BookshelfResponse>(`/api/bookshelf${forceRefresh ? "?refresh=1" : ""}`);
-      bookshelf.value = response.novels;
+      bookshelf.value = response.items;
       bookshelfGroupNames.value = response.categories;
       if (!bookshelfCategories.value.includes(bookshelfCategory.value)) bookshelfCategory.value = "全部";
       bookshelfPage.value = 1;

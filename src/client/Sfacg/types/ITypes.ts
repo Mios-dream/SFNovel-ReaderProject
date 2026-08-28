@@ -65,7 +65,7 @@ export type IbookshelfInfos = IsearchInfos
 
 export interface IbookshelfCollection {
   categories: string[];
-  novels: IbookshelfInfos[];
+  items: IbookshelfInfos[];
 }
 
 export interface IsearchInfos {
@@ -75,6 +75,7 @@ export interface IsearchInfos {
   novelId: number; // 小说ID
   novelName: string; // 小说名称
   bookshelfName?: string; // 书架分类名称
+  bookshelfType?: "novel" | "audio" | "comic"; // 内容类型
   typeId?: number; // 官方小说分类编号
   categoryName?: string; // 官方小说分类名称
 }

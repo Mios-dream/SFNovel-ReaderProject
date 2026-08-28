@@ -16,15 +16,15 @@ const emit = defineEmits<{ "update:query": [value: string]; search: []; select: 
 
   <form class="search-box glass" @submit.prevent="emit('search')">
     <Search :size="22" />
-    <input :value="query" autocomplete="off" placeholder="输入书名、作者或关键词" aria-label="搜索小说" @input="emit('update:query', ($event.target as HTMLInputElement).value)" />
+    <input :value="query" autocomplete="off" placeholder="输入书名、作者或关键词" aria-label="搜索作品" @input="emit('update:query', ($event.target as HTMLInputElement).value)" />
     <button class="primary-button" type="submit" :disabled="loading"><LoaderCircle v-if="loading" class="spin" :size="18" /><span>{{ loading ? '搜索中' : '搜索' }}</span></button>
   </form>
 
-  <section class="section-head"><div><p class="eyebrow">SEARCH RESULTS</p><h2>{{ searched ? `找到 ${results.length} 本作品` : '从一部小说开始' }}</h2></div><p v-if="searched && results.length" class="subtle">点击作品即可加入下载队列</p></section>
+  <section class="section-head"><div><p class="eyebrow">SEARCH RESULTS</p><h2>{{ searched ? `找到 ${results.length} 个作品` : '从一部作品开始' }}</h2></div><p v-if="searched && results.length" class="subtle">点击作品查看可用操作</p></section>
   <div v-if="!searched" class="empty-state"><Search :size="28" /><p>输入小说名称，开始搜索</p></div>
   <div v-else-if="!loading && !results.length" class="empty-state"><BookOpen :size="28" /><p>没有找到匹配的作品</p></div>
   <div v-else class="novel-grid">
-    <NovelCard v-for="novel in results" :key="novel.novelId" :novel="novel" :format-date="formatDate" @select="(novel, mode) => emit('select', novel, mode)" />
+    <NovelCard v-for="novel in results" :key="`${novel.novelId}-${novel.bookshelfType || 'novel'}`" :novel="novel" :format-date="formatDate" @select="(novel, mode) => emit('select', novel, mode)" />
   </div>
 </template>
 

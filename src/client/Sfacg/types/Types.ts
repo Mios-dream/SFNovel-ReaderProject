@@ -204,6 +204,7 @@ export interface bookshelfInfos {
 export interface bookshelfInfos_Expand {
   novels?: _novel[];
   albums?: _album[]; // 专辑数组
+  comics?: _comic[]; // 漫画数组
 }
 
 // 小说信息
@@ -236,6 +237,7 @@ interface _album {
   albumId: number; // 专辑ID
   novelId: number; // 小说ID
   authorId: number; // 作者ID
+  authorName?: string; // 作者名称
   latestChapterId: number; // 最新章节ID
   visitTimes: number; // 访问次数
   name: string; // 专辑名称
@@ -274,9 +276,20 @@ export interface tags {
 // 描述搜索信息的接口
 export interface searchInfos {
   novels: searchInfos_novel[]; // 小说搜索结果数组
-  comics: any; // 漫画搜索结果
-  albums: any; // 专辑搜索结果
+  comics: searchInfos_comic[]; // 漫画搜索结果
+  albums: searchInfos_album[]; // 有声专辑搜索结果
   booklist: any; // 书单搜索结果
+}
+
+interface _comic {
+  comicId: number;
+  comicName: string;
+  authorName?: string;
+  lastUpdateTime: string;
+  comicCover?: string;
+  coverBig?: string;
+  coverMedium?: string;
+  coverSmall?: string;
 }
 
 // 描述搜索到的小说信息的接口
@@ -301,6 +314,25 @@ export interface searchInfos_novel {
   categoryid: number; // 分类ID
   weight: number; // 权重
   Highlight: string[]; // 高亮显示的字段数组
+}
+
+export interface searchInfos_album {
+  albumId: number;
+  novelId: number;
+  name: string;
+  authorName?: string;
+  lastUpdateTime: string;
+  coverBig?: string;
+  coverMedium?: string;
+  coverSmall?: string;
+}
+
+export interface searchInfos_comic {
+  comicId: number;
+  comicName: string;
+  authorName?: string;
+  lastUpdateTime: string;
+  comicCover?: string;
 }
 
 export interface adBonusNum {

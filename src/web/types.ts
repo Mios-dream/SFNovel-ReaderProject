@@ -8,6 +8,7 @@ export type Novel = {
   novelCover: string;
   lastUpdateTime: string;
   bookshelfName?: string;
+  bookshelfType?: "novel" | "audio" | "comic";
   categoryName?: string;
   typeId?: number;
   description?: string;

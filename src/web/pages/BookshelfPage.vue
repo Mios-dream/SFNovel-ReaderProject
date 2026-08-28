@@ -72,7 +72,7 @@ function jumpToPage(event: Event) {
     <div v-if="visibleNovels.length" class="novel-grid shelf-grid">
       <NovelCard
         v-for="novel in visibleNovels"
-        :key="`${novel.novelId}-${novel.bookshelfName || '默认书架'}`"
+        :key="`${novel.novelId}-${novel.bookshelfName || '默认书架'}-${novel.bookshelfType || 'novel'}`"
         :novel="novel"
         :format-date="formatDate"
         @select="(novel, mode) => emit('select', novel, mode)"
