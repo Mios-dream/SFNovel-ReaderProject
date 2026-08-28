@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { Download, Headphones } from "lucide-vue-next";
+import { Download } from "lucide-vue-next";
 import type { Novel } from "../types";
 
 defineProps<{
   novel: Novel;
-  audioAvailable: boolean;
   formatDate: (value: string) => string;
 }>();
 
@@ -27,7 +26,6 @@ const emit = defineEmits<{ select: [novel: Novel, mode: "text" | "audio"] }>();
     </div>
     <div class="novel-actions">
       <button class="download-button" :title="`选择章节并下载：${novel.novelName}`" @click.stop="emit('select', novel, 'text')"><Download :size="18" /></button>
-      <button v-if="audioAvailable" class="download-button audio" :title="`选择有声章节并下载：${novel.novelName}`" @click.stop="emit('select', novel, 'audio')"><Headphones :size="17" /></button>
     </div>
   </article>
 </template>

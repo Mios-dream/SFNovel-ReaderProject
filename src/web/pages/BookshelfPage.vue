@@ -18,11 +18,10 @@ const props = defineProps<{
   page: number;
   totalPages: number;
   filteredCount: number;
-  audioAvailable: Record<number, boolean>;
   formatDate: (value: string) => string;
 }>();
 const emit = defineEmits<{
-  refresh: [];
+  refresh: [force: boolean];
   category: [value: string];
   page: [value: number];
   select: [novel: Novel, mode: "text" | "audio"];
@@ -49,7 +48,7 @@ function jumpToPage(event: Event) {
       class="icon-button"
       title="刷新书架"
       :disabled="loading"
-      @click="emit('refresh')"
+      @click="emit('refresh', true)"
     >
       <RefreshCw :class="{ spin: loading }" :size="19" />
     </button>
@@ -70,15 +69,18 @@ function jumpToPage(event: Event) {
         {{ category }}
       </button>
     </div>
-    <div class="novel-grid shelf-grid">
+    <div v-if="visibleNovels.length" class="novel-grid shelf-grid">
       <NovelCard
         v-for="novel in visibleNovels"
         :key="`${novel.novelId}-${novel.bookshelfName || '默认书架'}`"
         :novel="novel"
-        :audio-available="Boolean(audioAvailable[novel.novelId])"
         :format-date="formatDate"
         @select="(novel, mode) => emit('select', novel, mode)"
       />
+    </div>
+    <div v-else class="empty-state">
+      <BookMarked :size="28" />
+      <p>该分类中还没有可显示的小说</p>
     </div>
     <nav v-if="totalPages > 1" class="pagination" aria-label="书架分页">
       <button

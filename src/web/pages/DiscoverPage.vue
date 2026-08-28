@@ -4,7 +4,7 @@ import coverImage from "../../../cover.webp";
 import NovelCard from "../components/NovelCard.vue";
 import type { Novel } from "../types";
 
-defineProps<{ query: string; results: Novel[]; loading: boolean; searched: boolean; audioAvailable: Record<number, boolean>; formatDate: (value: string) => string }>();
+defineProps<{ query: string; results: Novel[]; loading: boolean; searched: boolean; formatDate: (value: string) => string }>();
 const emit = defineEmits<{ "update:query": [value: string]; search: []; select: [novel: Novel, mode: "text" | "audio"] }>();
 </script>
 
@@ -24,7 +24,7 @@ const emit = defineEmits<{ "update:query": [value: string]; search: []; select: 
   <div v-if="!searched" class="empty-state"><Search :size="28" /><p>输入小说名称，开始搜索</p></div>
   <div v-else-if="!loading && !results.length" class="empty-state"><BookOpen :size="28" /><p>没有找到匹配的作品</p></div>
   <div v-else class="novel-grid">
-    <NovelCard v-for="novel in results" :key="novel.novelId" :novel="novel" :audio-available="Boolean(audioAvailable[novel.novelId])" :format-date="formatDate" @select="(novel, mode) => emit('select', novel, mode)" />
+    <NovelCard v-for="novel in results" :key="novel.novelId" :novel="novel" :format-date="formatDate" @select="(novel, mode) => emit('select', novel, mode)" />
   </div>
 </template>
 

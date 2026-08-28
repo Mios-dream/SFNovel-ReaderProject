@@ -31,6 +31,7 @@ import {
   IvolumeInfos,
   Ichapter,
   IadBonusNum,
+  IbookshelfCollection,
   IbookshelfInfos,
   IsearchInfos,
   IaccountInfo,
@@ -326,36 +327,45 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
-  // 书架默认信息
-  async bookshelfInfos(): Promise<IbookshelfInfos[] | false> {
+  // 书架分组及其中的小说。分组名由用户在官方 App 中管理。
+  async bookshelfCollection(): Promise<IbookshelfCollection | false> {
     try {
       const res = await this.get<bookshelfInfos[]>("/user/Pockets", {
         expand: "novels,albums,comics",
       });
-      const bookshelfInfos: IbookshelfInfos[] = [];
+      const categories: string[] = [];
+      const bookshelfNovels: IbookshelfInfos[] = [];
       for (const bookshelf of (Array.isArray(res) ? res : [])) {
         const directNovel = bookshelf as any;
-        const novels = bookshelf?.expand?.novels || (directNovel?.novelId ? [directNovel] : []);
-        if (novels) {
-          novels.forEach((novel: any) => {
-            bookshelfInfos.push({
+        const bookshelfName = bookshelf?.name || "未分类";
+        categories.push(bookshelfName);
+        const novelEntries = bookshelf?.expand?.novels || (directNovel?.novelId ? [directNovel] : []);
+        if (novelEntries) {
+          novelEntries.forEach((novel: any) => {
+            bookshelfNovels.push({
               authorName: novel.authorName, // 作者名字
               lastUpdateTime: novel.lastUpdateTime, // 最后更新时间
               novelCover: novel.novelCover, // 小说封面URL
               novelId: novel.novelId, // 小说ID
               novelName: novel.novelName, // 小说名称
-              bookshelfName: bookshelf?.name || "默认书架",
+              bookshelfName,
               typeId: novel.typeId,
             });
           });
         }
       }
-      return bookshelfInfos;
+      return { categories: [...new Set(categories)], novels: bookshelfNovels };
     } catch (err: any) {
       const errMsg = err?.response?.data?.status?.msg || err?.response?.data?.message || err?.message || "未知错误";
-      console.error(`GET bookshelfInfos failed: ${JSON.stringify(errMsg)}`);
+      console.error(`GET bookshelfCollection failed: ${JSON.stringify(errMsg)}`);
       return false;
     }
+  }
+
+  // 保留命令行下载器使用的扁平书架列表。
+  async bookshelfInfos(): Promise<IbookshelfInfos[] | false> {
+    const collection = await this.bookshelfCollection();
+    return collection ? collection.novels : false;
   }
 
   // 筛选分类信息

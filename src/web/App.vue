@@ -26,8 +26,8 @@ const desk = reactive(useNovelDesk());
         <button class="icon-button" title="打开输出目录" @click="desk.navigate('library')"><FolderOpen :size="20" /></button>
       </header>
 
-      <DiscoverPage v-if="desk.active === 'discover'" v-model:query="desk.query" :results="desk.results" :loading="desk.loading" :searched="desk.searched" :audio-available="desk.audioAvailable" :format-date="desk.formatDate" @search="desk.search" @select="desk.openChapterPicker" />
-      <BookshelfPage v-else-if="desk.active === 'bookshelf'" :novels="desk.bookshelf" :visible-novels="desk.pagedBookshelf" :loading="desk.bookshelfLoading" :categories="desk.bookshelfCategories" :active-category="desk.bookshelfCategory" :page="desk.bookshelfPage" :total-pages="desk.bookshelfTotalPages" :filtered-count="desk.filteredBookshelf.length" :audio-available="desk.audioAvailable" :format-date="desk.formatDate" @refresh="desk.refreshBookshelf" @category="desk.selectBookshelfCategory" @page="desk.setBookshelfPage" @select="desk.openChapterPicker" />
+      <DiscoverPage v-if="desk.active === 'discover'" v-model:query="desk.query" :results="desk.results" :loading="desk.loading" :searched="desk.searched" :format-date="desk.formatDate" @search="desk.search" @select="desk.openChapterPicker" />
+      <BookshelfPage v-else-if="desk.active === 'bookshelf'" :novels="desk.bookshelf" :visible-novels="desk.pagedBookshelf" :loading="desk.bookshelfLoading" :categories="desk.bookshelfCategories" :active-category="desk.bookshelfCategory" :page="desk.bookshelfPage" :total-pages="desk.bookshelfTotalPages" :filtered-count="desk.filteredBookshelf.length" :format-date="desk.formatDate" @refresh="desk.refreshBookshelf" @category="desk.selectBookshelfCategory" @page="desk.setBookshelfPage" @select="desk.openChapterPicker" />
       <LibraryPage v-else v-model:managing="desk.libraryManaging" :books="desk.library" :jobs="desk.libraryJobs" :format-date="desk.formatDate" @open="desk.openLibraryBook" @remove="desk.deleteBook" @pause="desk.pauseJob" @resume="desk.resumeJob" @discover="desk.navigate('discover')" />
     </section>
 

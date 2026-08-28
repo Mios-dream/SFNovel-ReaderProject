@@ -63,6 +63,11 @@ export interface IadBonusNum {
 
 export type IbookshelfInfos = IsearchInfos
 
+export interface IbookshelfCollection {
+  categories: string[];
+  novels: IbookshelfInfos[];
+}
+
 export interface IsearchInfos {
   authorName: string; // 作者名称
   lastUpdateTime: string; // 最后更新时间

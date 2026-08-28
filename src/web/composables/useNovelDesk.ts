@@ -11,6 +11,8 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+type BookshelfResponse = { categories: string[]; novels: Novel[] };
+
 export function useNovelDesk() {
   const active = ref<ViewName>("discover");
   const query = ref("");
@@ -20,13 +22,13 @@ export function useNovelDesk() {
   const jobs = ref<Job[]>([]);
   const library = ref<Book[]>([]);
   const bookshelf = ref<Novel[]>([]);
+  const bookshelfGroupNames = ref<string[]>([]);
   const bookshelfLoading = ref(false);
   const bookshelfCategory = ref("全部");
   const bookshelfPage = ref(1);
   const bookshelfPageSize = 12;
   const libraryManaging = ref(false);
   const confirmBook = ref<Book>();
-  const audioAvailable = ref<Record<number, boolean>>({});
   const chapterModalOpen = ref(false);
   const chapterLoading = ref(false);
   const chapterMode = ref<ChapterMode>("text");
@@ -46,8 +48,11 @@ export function useNovelDesk() {
   const runningJobs = computed(() => jobs.value.filter((job) => ["downloading", "queued", "paused"].includes(job.status)));
   const completedJobs = computed(() => jobs.value.filter((job) => job.status === "done"));
   const libraryJobs = computed(() => jobs.value.filter((job) => ["queued", "downloading", "paused"].includes(job.status)));
-  const bookshelfCategoryFor = (novel: Novel) => novel.categoryName || (audioAvailable.value[novel.novelId] ? "小说+有声" : "纯小说");
-  const bookshelfCategories = computed(() => ["全部", ...Array.from(new Set(bookshelf.value.map(bookshelfCategoryFor)))]);
+  const bookshelfCategoryFor = (novel: Novel) => novel.bookshelfName || "未分类";
+  const bookshelfCategories = computed(() => ["全部", ...Array.from(new Set([
+    ...bookshelfGroupNames.value,
+    ...bookshelf.value.map(bookshelfCategoryFor),
+  ]))]);
   const filteredBookshelf = computed(() => bookshelfCategory.value === "全部" ? bookshelf.value : bookshelf.value.filter((novel) => bookshelfCategoryFor(novel) === bookshelfCategory.value));
   const bookshelfTotalPages = computed(() => Math.max(1, Math.ceil(filteredBookshelf.value.length / bookshelfPageSize)));
   const pagedBookshelf = computed(() => filteredBookshelf.value.slice((bookshelfPage.value - 1) * bookshelfPageSize, bookshelfPage.value * bookshelfPageSize));
@@ -70,7 +75,6 @@ export function useNovelDesk() {
         auth.value = result;
         loginBusy.value = false;
         credentialsOpen.value = false;
-        void checkAudioAvailability(results.value);
         notify("SF 账号已登录到当前会话");
         return;
       }
@@ -108,16 +112,6 @@ export function useNovelDesk() {
     } catch { notify("退出登录失败"); }
   }
 
-  async function checkAudioAvailability(novels: Novel[]) {
-    if (!auth.value.authenticated) return;
-    await Promise.all(novels.map(async (novel) => {
-      try {
-        const data = await request<{ chapters: Chapter[] }>(`/api/audio/${novel.novelId}`);
-        audioAvailable.value[novel.novelId] = data.chapters.length > 0;
-      } catch { audioAvailable.value[novel.novelId] = false; }
-    }));
-  }
-
   async function search() {
     if (!query.value.trim()) return;
     await refreshAuthStatus();
@@ -125,7 +119,6 @@ export function useNovelDesk() {
     searched.value = true;
     try {
       results.value = await request<Novel[]>(`/api/search?q=${encodeURIComponent(query.value.trim())}`);
-      void checkAudioAvailability(results.value);
     } catch (error) { notify(error instanceof Error ? error.message : "搜索失败"); }
     finally { loading.value = false; }
   }
@@ -229,15 +222,16 @@ export function useNovelDesk() {
     } catch { /* server may be restarting */ }
   }
   async function refreshLibrary() { try { library.value = await request<Book[]>("/api/library"); } catch { /* no library yet */ } }
-  async function refreshBookshelf() {
+  async function refreshBookshelf(forceRefresh = false) {
     await refreshAuthStatus();
     if (!auth.value.authenticated) { credentialsOpen.value = true; notify("登录后即可读取 SF 书架"); return; }
     bookshelfLoading.value = true;
     try {
-      bookshelf.value = await request<Novel[]>("/api/bookshelf");
+      const response = await request<BookshelfResponse>(`/api/bookshelf${forceRefresh ? "?refresh=1" : ""}`);
+      bookshelf.value = response.novels;
+      bookshelfGroupNames.value = response.categories;
       if (!bookshelfCategories.value.includes(bookshelfCategory.value)) bookshelfCategory.value = "全部";
       bookshelfPage.value = 1;
-      void checkAudioAvailability(bookshelf.value);
     } catch (error) { notify(error instanceof Error ? error.message : "读取书架失败"); }
     finally { bookshelfLoading.value = false; }
   }
@@ -252,5 +246,5 @@ export function useNovelDesk() {
   onMounted(() => { void refreshJobs(); void refreshLibrary(); void refreshAuthStatus(); document.addEventListener("copy", blockCopy); });
   onBeforeUnmount(() => { window.clearTimeout(loginPollTimer); window.clearTimeout(toastTimer); document.removeEventListener("copy", blockCopy); });
 
-  return { active, query, results, loading, searched, jobs, library, bookshelf, bookshelfLoading, bookshelfCategory, bookshelfPage, libraryManaging, confirmBook, audioAvailable, chapterModalOpen, chapterLoading, chapterMode, chapterHasAudio, chapterNovel, chapterVolumes, audioChapters, selectedChapterIds, queueOpen, credentialsOpen, auth, loginBusy, toast, runningJobs, libraryJobs, bookshelfCategories, filteredBookshelf, bookshelfTotalPages, pagedBookshelf, search, openChapterPicker, changeChapterMode, toggleAllChapters, confirmChapterDownload, pauseJob, resumeJob, deleteJob, deleteBook, confirmDeleteBook, openLibraryBook, selectBookshelfCategory, setBookshelfPage, refreshBookshelf, navigate, login, logout, formatDate };
+  return { active, query, results, loading, searched, jobs, library, bookshelf, bookshelfLoading, bookshelfCategory, bookshelfPage, libraryManaging, confirmBook, chapterModalOpen, chapterLoading, chapterMode, chapterHasAudio, chapterNovel, chapterVolumes, audioChapters, selectedChapterIds, queueOpen, credentialsOpen, auth, loginBusy, toast, runningJobs, libraryJobs, bookshelfCategories, filteredBookshelf, bookshelfTotalPages, pagedBookshelf, search, openChapterPicker, changeChapterMode, toggleAllChapters, confirmChapterDownload, pauseJob, resumeJob, deleteJob, deleteBook, confirmDeleteBook, openLibraryBook, selectBookshelfCategory, setBookshelfPage, refreshBookshelf, navigate, login, logout, formatDate };
 }
