@@ -279,9 +279,18 @@ export class SfacgApiClient extends SfacgHttpClient {
       /<div\b[^>]*\bid=["']ChapterBody["'][^>]*>([\s\S]*?)<\/div>/i,
     );
     if (!match) return "";
-    return this.decodeHtml(match[1])
+    const body = this.decodeHtml(match[1]).replace(
+      /<img\b([^>]*)>/gi,
+      (_tag, attributes: string) => {
+        const source = attributes.match(
+          /\b(?:data-original|data-src|src)\s*=\s*(["'])(.*?)\1/i,
+        )?.[2];
+        return source ? `\n\n![章节插图](${source})\n\n` : "";
+      },
+    );
+    return body
       .replace(/<br\s*\/?\s*>/gi, "\n")
-      .replace(/<\/p\s*>/gi, "\n\n")
+      .replace(/<\/p\s*>/gi, "\n")
       .replace(/<p\b[^>]*>/gi, "")
       .replace(/<[^>]+>/g, "")
       .replace(/\r\n?/g, "\n")

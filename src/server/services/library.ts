@@ -1,13 +1,26 @@
 import fse from "fs-extra";
 import path from "node:path";
 import { config } from "../config";
-import type {
-  NovelChapterStore,
-  NovelDownloadMetadata,
-  StoredTextChapter,
-} from "../types";
+import type { NovelChapterStore, NovelDownloadMetadata, StoredTextChapter } from "../types";
 
 const chapterStoreName = ".novel-flow-chapters.json";
+
+function isCurrentChapterStore(value: unknown): value is NovelChapterStore {
+  if (!value || typeof value !== "object") return false;
+  const store = value as Partial<NovelChapterStore>;
+  if (!Number.isInteger(store.novelId) || !store.chapters || typeof store.chapters !== "object")
+    return false;
+  return Object.values(store.chapters).every(
+    (chapter) =>
+      chapter &&
+      Number.isInteger(chapter.id) &&
+      typeof chapter.volume === "string" &&
+      typeof chapter.title === "string" &&
+      typeof chapter.content === "string" &&
+      Number.isInteger(chapter.volumeIndex) &&
+      Number.isInteger(chapter.chapterIndex),
+  );
+}
 
 /**
  * 将名称中的文件系统保留字符替换为下划线。
@@ -83,39 +96,16 @@ export async function writeNovelDownloadMetadata(
   );
 }
 
-/** 读取可恢复的文本章节内容；同时兼容早期下载留下的进度文件。 */
+/** 读取可恢复的文本章节内容。 */
 export async function readNovelChapterStore(dir: string): Promise<NovelChapterStore> {
-  for (const filename of [chapterStoreName, ".novel-flow-progress.json"]) {
-    try {
-      const value = (await fse.readJson(path.join(dir, filename))) as NovelChapterStore;
-      if (Number.isInteger(value?.novelId) && value.chapters && typeof value.chapters === "object")
-        return value;
-    } catch {
-      /* try the next compatible file */
-    }
-  }
-  // 兼容章节库引入前生成的 Markdown，使旧书也能在本地阅读和导出。
   try {
-    const markdown = (await fse.readdir(dir)).find((file) => file.endsWith(".md"));
-    if (markdown) {
-      const source = await fse.readFile(path.join(dir, markdown), "utf8");
-      const sections = source.split(/(?=^##\s+)/m).slice(1);
-      let volume = "未分卷";
-      let legacyId = -1;
-      const chapters: Record<string, StoredTextChapter> = {};
-      for (const section of sections) {
-        const title = section.match(/^##\s+(.+)$/m)?.[1]?.trim();
-        if (!title) continue;
-        const before = source.slice(0, source.indexOf(section));
-        const headings = [...before.matchAll(/^#\s+(.+)$/gm)];
-        volume = headings.at(-1)?.[1]?.trim() || volume;
-        chapters[String(legacyId)] = { id: legacyId, volume, title, content: section.trim() };
-        legacyId -= 1;
-      }
-      if (Object.keys(chapters).length) return { novelId: 0, chapters };
-    }
+    const value = (await fse.readJson(
+      path.join(dir, chapterStoreName),
+    )) as NovelChapterStore;
+    if (isCurrentChapterStore(value))
+      return value;
   } catch {
-    /* no legacy Markdown is available */
+    /* no current chapter store is available */
   }
   return { novelId: 0, chapters: {} };
 }
@@ -123,6 +113,15 @@ export async function readNovelChapterStore(dir: string): Promise<NovelChapterSt
 /** 将每章正文独立持久化，使暂停、继续和增量下载不会覆盖已有章节。 */
 export async function writeNovelChapterStore(dir: string, store: NovelChapterStore) {
   await fse.outputJson(path.join(dir, chapterStoreName), store);
+}
+
+/** 按在线目录的卷和卷内位置排序；旧书库回退到章节 ID。 */
+export function sortStoredTextChapters(chapters: StoredTextChapter[]) {
+  return [...chapters].sort((left, right) =>
+    left.volumeIndex - right.volumeIndex ||
+    left.chapterIndex - right.chapterIndex ||
+    left.id - right.id,
+  );
 }
 
 /** 从章节库生成稳定的 Markdown 正文，按在线目录而非本次选择的章节排序。 */
@@ -152,10 +151,9 @@ export function buildNovelMarkdown(
 /**
  * 汇总指定小说在本地书库中的文本和有声下载状态。
  * @param novelId SF 小说编号。
- * @returns 已下载章节 ID 及兼容旧文件得到的章节标题集合。
+ * @returns 已下载章节 ID。
  */
 export async function getLocalDownloadState(novelId: number) {
-  // 通过下载元数据和旧版 Markdown 标题双重识别已下载章节，兼容历史文件。
   await fse.ensureDir(config.libraryDir);
   const folders = await fse.readdir(config.libraryDir, { withFileTypes: true });
   const states = await Promise.all(
@@ -165,29 +163,14 @@ export async function getLocalDownloadState(novelId: number) {
         const dir = path.join(config.libraryDir, folder.name);
         const metadata = await readNovelDownloadMetadata(dir);
         if (metadata.novelId !== novelId)
-          return { metadata, downloadedTextTitles: [] as string[], downloadedTextChapterIds: [] as number[] };
+          return { metadata, downloadedTextChapterIds: [] as number[] };
         const store = await readNovelChapterStore(dir);
         const storeIds = store.novelId === novelId ? Object.keys(store.chapters).map(Number).filter((id) => Number.isInteger(id) && id > 0) : [];
         const metadataIds = numberIds(metadata.downloadedTextChapterIds);
-        if (metadataIds.length || storeIds.length)
-          return { metadata, downloadedTextTitles: [] as string[], downloadedTextChapterIds: [...new Set([...metadataIds, ...storeIds])] };
-        const markdown = (await fse.readdir(dir)).find((file) =>
-          file.endsWith(".md"),
-        );
-        if (!markdown)
-          return { metadata, downloadedTextTitles: [] as string[], downloadedTextChapterIds: [] as number[] };
-        try {
-          const content = await fse.readFile(path.join(dir, markdown), "utf8");
-          return {
-            metadata,
-            downloadedTextTitles: [...content.matchAll(/^##\s+(.+)$/gm)].map(
-              (match) => match[1].trim(),
-            ),
-            downloadedTextChapterIds: [] as number[],
-          };
-        } catch {
-          return { metadata, downloadedTextTitles: [] as string[], downloadedTextChapterIds: [] as number[] };
-        }
+        return {
+          metadata,
+          downloadedTextChapterIds: [...new Set([...metadataIds, ...storeIds])],
+        };
       }),
   );
   const matching = states.filter(
@@ -202,11 +185,7 @@ export async function getLocalDownloadState(novelId: number) {
         ]),
       ),
     ],
-    downloadedTextTitles: [
-      ...new Set(
-        matching.flatMap(({ downloadedTextTitles }) => downloadedTextTitles),
-      ),
-    ],
+    downloadedTextTitles: [],
     downloadedAudioChapterIds: [
       ...new Set(
         matching.flatMap(({ metadata }) =>

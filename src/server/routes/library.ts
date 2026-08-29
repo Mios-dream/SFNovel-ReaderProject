@@ -10,6 +10,7 @@ import {
   readNovelChapterStore,
   readNovelDownloadMetadata,
   safeName,
+  sortStoredTextChapters,
 } from "../services/library";
 
 export const libraryRouter = Router();
@@ -109,8 +110,17 @@ libraryRouter.get("/library/:folder", async (req, res) => {
   const cover = path.join(target.dir, "imgs", "cover.jpeg");
   const [audioTracks, chapters] = await Promise.all([
     readLocalAudioTracks(target.name, target.dir),
-    Promise.resolve(Object.values(store.chapters).sort((a, b) => a.id - b.id)),
+    Promise.resolve(sortStoredTextChapters(Object.values(store.chapters))),
   ]);
+  const chapterVolumes = chapters.reduce<
+    Array<{ volume: string; chapters: typeof chapters }>
+  >((volumes, chapter) => {
+    const current = volumes.at(-1);
+    if (!current || current.volume !== chapter.volume)
+      volumes.push({ volume: chapter.volume, chapters: [] });
+    volumes.at(-1)!.chapters.push(chapter);
+    return volumes;
+  }, []);
   res.json({
     name: target.name,
     novelId: metadata.novelId,
@@ -119,7 +129,10 @@ libraryRouter.get("/library/:folder", async (req, res) => {
     cover: (await fse.pathExists(cover)) ? bookUrl(target.name, "imgs/cover.jpeg") : undefined,
     audioTracks,
     epubHref: (await fse.pathExists(path.join(target.dir, `${target.name}.epub`))) ? bookUrl(target.name, `${target.name}.epub`) : undefined,
-    chapters: chapters.map(({ id, title, volume }) => ({ id, title, volume })),
+    chapterVolumes: chapterVolumes.map(({ volume, chapters }) => ({
+      volume,
+      chapters: chapters.map(({ id, title }) => ({ id, title })),
+    })),
   });
 });
 
@@ -143,7 +156,7 @@ libraryRouter.post("/library/:folder/epub", async (req, res) => {
     readNovelDownloadMetadata(target.dir),
     readNovelChapterStore(target.dir),
   ]);
-  const chapters = Object.values(store.chapters).sort((a, b) => a.id - b.id);
+  const chapters = sortStoredTextChapters(Object.values(store.chapters));
   if (!chapters.length)
     return res.status(409).json({ message: "这本书没有可导出的已下载文字章节" });
   const filename = `${target.name}.epub`;
@@ -153,6 +166,7 @@ libraryRouter.post("/library/:folder/epub", async (req, res) => {
     description: metadata.description || "",
     chapters,
     coverPath: path.join(target.dir, "imgs", "cover.jpeg"),
+    imagesDir: path.join(target.dir, "imgs"),
   });
   res.json({ href: bookUrl(target.name, filename) });
 });

@@ -56,6 +56,7 @@ export function useNovelDesk() {
   const confirmBook = ref<Book>();
   const localBook = ref<LocalBookDetail>();
   const localChapter = ref<LocalChapterContent>();
+  const localAudioTrackIndex = ref(0);
   const exportingEpub = ref(false);
   const chapterModalOpen = ref(false);
   const chapterLoading = ref(false);
@@ -390,7 +391,9 @@ export function useNovelDesk() {
               .find((item) => item.chapId === id)
           : audioChapters.value.find((item) => item.id === id);
       return (
-        chapter && !chapter.downloaded && (!chapter.isVip || chapter.isUnlocked)
+        chapter &&
+        !chapter.downloaded &&
+        (!chapter.isVip || chapter.isUnlocked)
       );
     });
   }
@@ -409,7 +412,9 @@ export function useNovelDesk() {
               .find((item) => item.chapId === id)
           : audioChapters.value.find((item) => item.id === id);
       return (
-        chapter && !chapter.downloaded && (!chapter.isVip || chapter.isUnlocked)
+        chapter &&
+        !chapter.downloaded &&
+        (!chapter.isVip || chapter.isUnlocked)
       );
     });
     selectedChapterIds.value =
@@ -541,11 +546,15 @@ export function useNovelDesk() {
   }
 
   /** 打开本地有声播放器，播放器逐首播放 M3U8 清单中的 MP3。 */
-  function openLocalAudioPlayer() {
+  function openLocalAudioPlayer(trackIndex = 0) {
     if (!localBook.value?.audioTracks.length) {
       notify("本地没有可播放的有声章节");
       return;
     }
+    localAudioTrackIndex.value = Math.min(
+      Math.max(0, trackIndex),
+      localBook.value.audioTracks.length - 1,
+    );
     active.value = "audioPlayer";
   }
 
@@ -732,6 +741,7 @@ export function useNovelDesk() {
     confirmBook,
     localBook,
     localChapter,
+    localAudioTrackIndex,
     exportingEpub,
     chapterModalOpen,
     chapterLoading,

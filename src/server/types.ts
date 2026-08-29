@@ -45,6 +45,10 @@ export type StoredTextChapter = {
   volume: string;
   title: string;
   content: string;
+  /** 在线目录中的卷序号，用于离线时保持与章节详情一致的顺序。 */
+  volumeIndex: number;
+  /** 卷内章节序号，用于离线时保持与章节详情一致的顺序。 */
+  chapterIndex: number;
 };
 
 export type NovelChapterStore = {

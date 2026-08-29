@@ -26,6 +26,51 @@ type AudioCatalogErrorCode = "NO_AUDIO" | "AUTH_EXPIRED" | "UPSTREAM_ERROR";
 const SF_WEB_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
 
+const chapterImagePattern = /!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g;
+
+function imageExtension(url: string) {
+  try {
+    const extension = path.extname(new URL(url).pathname).toLowerCase();
+    return [".jpeg", ".jpg", ".png", ".gif", ".webp"].includes(extension)
+      ? extension
+      : ".jpeg";
+  } catch {
+    return ".jpeg";
+  }
+}
+
+/** 将网页正文中的插图保存到书库，并改写为 Markdown 本地图片链接。 */
+async function downloadChapterImages(
+  content: string,
+  chapterId: number,
+  imageDir: string,
+) {
+  const matches = [...content.matchAll(chapterImagePattern)];
+  if (!matches.length) return content;
+
+  let imageIndex = 0;
+  let result = "";
+  let lastIndex = 0;
+  for (const match of matches) {
+    result += content.slice(lastIndex, match.index);
+    lastIndex = (match.index || 0) + match[0].length;
+    const imageUrl = match[2];
+    const filename = `chapter-${chapterId}-${String(imageIndex + 1).padStart(2, "0")}${imageExtension(imageUrl)}`;
+    imageIndex += 1;
+    try {
+      await fse.outputFile(
+        path.join(imageDir, filename),
+        await throttledDownload(() => SfacgApiClient.image(imageUrl)),
+      );
+      result += `![${match[1]}](imgs/${filename})`;
+    } catch {
+      // 保留远程地址，避免单张失效图片阻断整章下载。
+      result += match[0];
+    }
+  }
+  return result + content.slice(lastIndex);
+}
+
 export class AudioCatalogError extends Error {
   /**
    * 创建有声目录业务错误。
@@ -97,8 +142,8 @@ export async function writeNovel(
   );
   const contentSources = new Set<string>();
   onProgress?.(4, "正在准备书籍文件");
-  for (const volume of volumes) {
-    for (const chapter of volume.chapterList) {
+  for (const [volumeIndex, volume] of volumes.entries()) {
+    for (const [chapterIndex, chapter] of volume.chapterList.entries()) {
       if (selected && !selected.has(chapter.chapId)) continue;
       if (signal.aborted) throw new Error("下载已取消");
       const saved = savedChapters[String(chapter.chapId)];
@@ -131,12 +176,20 @@ export async function writeNovel(
         );
         if (raw.trim()) {
           contentSources.add("网页解析");
-          const chapterContent = `## ${chapter.ntitle}\n\n${raw.replaceAll("\n", "\n\n")}`;
+          const contentWithImages = await downloadChapterImages(
+            raw,
+            chapter.chapId,
+            imageDir,
+          );
+          // 网页解析器已完成段落换行规范化，这里不能再次放大换行。
+          const chapterContent = `## ${chapter.ntitle}\n\n${contentWithImages}`;
           savedChapters[String(chapter.chapId)] = {
             id: chapter.chapId,
             volume: volume.title,
             title: chapter.ntitle,
             content: chapterContent,
+            volumeIndex,
+            chapterIndex,
           };
           downloadedTextChapterIds.add(chapter.chapId);
           await writeNovelChapterStore(novelDir, {

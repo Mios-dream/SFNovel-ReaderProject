@@ -17,6 +17,7 @@ const props = defineProps<{
   author: string;
   cover?: string;
   tracks: LocalAudioTrack[];
+  initialTrackIndex?: number;
 }>();
 const emit = defineEmits<{ back: [] }>();
 
@@ -54,7 +55,7 @@ function togglePlayback() {
   else void play();
 }
 function selectTrack(index: number, shouldPlay = playing.value) {
-  trackIndex.value = index;
+  trackIndex.value = Math.min(Math.max(0, index), props.tracks.length - 1);
   currentTime.value = 0;
   timelinePosition.value = 0;
   seeking.value = false;
@@ -113,6 +114,14 @@ watch(volume, (value) => {
 watch(playbackRate, (value) => {
   if (audio.value) audio.value.playbackRate = value;
 });
+watch(
+  () => props.initialTrackIndex,
+  (index) => {
+    if (!props.tracks.length) return;
+    selectTrack(index || 0, false);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>

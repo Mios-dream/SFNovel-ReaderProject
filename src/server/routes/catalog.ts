@@ -84,15 +84,14 @@ catalogRouter.get("/chapters/:novelId", async (req, res) => {
     );
     const localState = await getLocalDownloadState(novelId);
     if (!volumes) throw new Error("无法读取章节目录");
-    const downloaded = new Set(localState.downloadedTextChapterIds),
-      titles = new Set(localState.downloadedTextTitles);
+    const downloaded = new Set(localState.downloadedTextChapterIds);
     res.json(
       volumes.map((volume) => ({
         volumeId: volume.volumeId,
         title: volume.title,
         chapters: volume.chapterList.map((chapter) => {
           const isDownloaded =
-            downloaded.has(chapter.chapId) || titles.has(chapter.ntitle);
+            downloaded.has(chapter.chapId);
           return {
             chapId: chapter.chapId,
             title: chapter.ntitle,

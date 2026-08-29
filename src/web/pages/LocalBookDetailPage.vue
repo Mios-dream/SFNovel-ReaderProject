@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
 import {
   BookOpen,
   ChevronLeft,
@@ -9,11 +10,26 @@ import {
 } from "lucide-vue-next";
 import type { LocalBookDetail } from "../types";
 
-defineProps<{ book: LocalBookDetail; exporting: boolean }>();
+const { book } = defineProps<{ book: LocalBookDetail; exporting: boolean }>();
+const textChapterCount = computed(() =>
+  book.chapterVolumes.reduce(
+    (count, volume) => count + volume.chapters.length,
+    0,
+  ),
+);
+const audioChapterCount = computed(() => book.audioTracks.length);
+const chapterMode = ref<"text" | "audio">(
+  textChapterCount.value ? "text" : "audio",
+);
+const chapterCount = computed(() =>
+  chapterMode.value === "text"
+    ? textChapterCount.value
+    : audioChapterCount.value,
+);
 const emit = defineEmits<{
   back: [];
   read: [chapterId: number];
-  playAudio: [];
+  playAudio: [trackIndex: number];
   online: [];
   continueDownload: [];
   export: [];
@@ -57,7 +73,7 @@ const emit = defineEmits<{
           </button>
           <button
             class="action-button"
-            :disabled="!book.chapters.length || exporting"
+            :disabled="!chapterCount || exporting"
             title="导出 EPUB"
             @click="emit('export')"
           >
@@ -67,7 +83,7 @@ const emit = defineEmits<{
             v-if="book.audioTracks.length"
             class="action-button"
             title="播放本地有声内容"
-            @click="emit('playAudio')"
+            @click="emit('playAudio', 0)"
           >
             <Headphones :size="17" />播放有声
           </button>
@@ -76,21 +92,78 @@ const emit = defineEmits<{
     </section>
     <section class="chapter-section">
       <div class="chapter-heading">
-        <span><ListTree :size="19" />已下载章节目录</span
-        ><small>{{ book.chapters.length }} 章</small>
+        <span><ListTree :size="19" />已下载章节目录</span>
+        <div class="chapter-heading-actions">
+          <div class="chapter-mode" aria-label="章节类型">
+            <button
+              :class="{ active: chapterMode === 'text' }"
+              :disabled="!textChapterCount"
+              @click="chapterMode = 'text'"
+            >
+              <BookOpen :size="15" />文字章节
+            </button>
+            <button
+              :class="{ active: chapterMode === 'audio' }"
+              :disabled="!audioChapterCount"
+              @click="chapterMode = 'audio'"
+            >
+              <Headphones :size="15" />有声章节
+            </button>
+          </div>
+          <small>{{ chapterCount }} 章</small>
+        </div>
       </div>
-      <div v-if="book.chapters.length" class="chapter-list">
-        <button
-          v-for="chapter in book.chapters"
-          :key="chapter.id"
-          class="chapter-row"
-          @click="emit('read', chapter.id)"
+      <div
+        v-if="chapterMode === 'text' && textChapterCount"
+        class="chapter-list"
+      >
+        <section
+          v-for="volume in book.chapterVolumes"
+          :key="volume.volume"
+          class="chapter-volume"
         >
-          <span>{{ chapter.volume }}</span
-          ><strong>{{ chapter.title }}</strong>
+          <h3
+            style="
+              font-size: 16px;
+              display: flex;
+              align-items: center;
+              gap: 6px;
+            "
+          >
+            <BookOpen :size="17" />{{ volume.volume }}
+          </h3>
+          <button
+            v-for="chapter in volume.chapters"
+            :key="chapter.id"
+            class="chapter-row"
+            @click="emit('read', chapter.id)"
+          >
+            <strong>{{ chapter.title }}</strong>
+          </button>
+        </section>
+      </div>
+      <div
+        v-else-if="chapterMode === 'audio' && audioChapterCount"
+        class="chapter-list"
+      >
+        <button
+          v-for="(track, index) in book.audioTracks"
+          :key="track.href"
+          class="chapter-row audio-chapter-row"
+          @click="emit('playAudio', index)"
+        >
+          <span>{{ String(index + 1).padStart(3, "0") }}</span>
+          <strong>{{ track.title }}</strong>
+          <Headphones :size="16" />
         </button>
       </div>
-      <div v-else class="empty-state"><p>尚未保存可阅读的文字章节</p></div>
+      <div v-else class="empty-state">
+        <p>
+          尚未保存{{
+            chapterMode === "text" ? "可阅读的文字" : "可播放的有声"
+          }}章节
+        </p>
+      </div>
     </section>
   </section>
 </template>
@@ -202,12 +275,47 @@ h2 {
   margin-bottom: 10px;
   color: #69453d;
 }
+.chapter-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .chapter-heading span {
   display: flex;
   align-items: center;
   gap: 6px;
   font-family: KaTongFont, "Microsoft YaHei", sans-serif;
   font-size: 18px;
+}
+.chapter-mode {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid #ead1c5;
+  border-radius: 6px;
+  background: #fffaf7;
+}
+.chapter-mode button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  color: #987972;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+}
+.chapter-mode button + button {
+  border-left: 1px solid #ead1c5;
+}
+.chapter-mode button.active {
+  color: #fff;
+  background: var(--theme-color);
+}
+.chapter-mode button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 .chapter-heading small {
   color: #ad877a;
@@ -220,8 +328,6 @@ h2 {
   background: rgba(255, 255, 255, 0.45);
 }
 .chapter-row {
-  display: grid;
-  grid-template-columns: 150px 1fr;
   width: 100%;
   min-height: 43px;
   padding: 0 14px;
@@ -231,28 +337,51 @@ h2 {
   background: none;
   text-align: left;
 }
-.chapter-row:last-child {
-  border-bottom: 0;
-}
 .chapter-row:hover {
   background: #fff5ef;
 }
-.chapter-row span {
-  overflow: hidden;
-  padding-right: 12px;
-  color: #a47b6d;
-  font-size: 11px;
-  line-height: 43px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .chapter-row strong {
+  display: block;
+  width: 100%;
   overflow: hidden;
   font-size: 13px;
   font-weight: 500;
   line-height: 43px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.audio-chapter-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 8px;
+}
+.audio-chapter-row span {
+  color: #a47b6d;
+  font: 11px monospace;
+}
+.audio-chapter-row strong {
+  line-height: 1.45;
+}
+.audio-chapter-row svg {
+  color: #a17367;
+}
+.chapter-volume + .chapter-volume {
+  border-top: 1px solid rgba(187, 132, 111, 0.22);
+}
+.chapter-volume h3 {
+  margin: 0;
+  padding: 11px 14px;
+  color: #895c51;
+  background: #fff5ef;
+  font-size: 12px;
+  font-weight: 700;
+}
+.chapter-volume h3 + .chapter-row {
+  border-top: 1px solid rgba(187, 132, 111, 0.13);
+}
+.chapter-volume .chapter-row:last-child {
+  border-bottom: 0;
 }
 .empty-state {
   min-height: 120px;
@@ -267,15 +396,22 @@ h2 {
     padding: 14px;
   }
   .chapter-row {
-    grid-template-columns: 1fr;
     padding: 8px 12px;
   }
-  .chapter-row span,
   .chapter-row strong {
     line-height: 1.45;
   }
-  .chapter-row span {
-    padding: 0;
+  .chapter-heading {
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .chapter-heading-actions {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+  .chapter-mode button {
+    padding: 0 6px;
   }
   .detail-actions {
     margin-top: 11px;

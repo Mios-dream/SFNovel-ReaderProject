@@ -69,6 +69,10 @@ export type Book = {
 };
 
 export type LocalChapter = { id: number; title: string; volume: string };
+export type LocalChapterVolume = {
+  volume: string;
+  chapters: Array<Omit<LocalChapter, "volume">>;
+};
 export type LocalAudioTrack = { title: string; href: string };
 export type LocalBookDetail = {
   name: string;
@@ -78,7 +82,7 @@ export type LocalBookDetail = {
   cover?: string;
   audioTracks: LocalAudioTrack[];
   epubHref?: string;
-  chapters: LocalChapter[];
+  chapterVolumes: LocalChapterVolume[];
 };
 export type LocalChapterContent = LocalChapter & { content: string };
 

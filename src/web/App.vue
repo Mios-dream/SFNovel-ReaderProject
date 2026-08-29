@@ -136,6 +136,7 @@ const desk = reactive(useNovelDesk());
         :author="desk.localBook.author"
         :cover="desk.localBook.cover"
         :tracks="desk.localBook.audioTracks"
+        :initial-track-index="desk.localAudioTrackIndex"
         @back="desk.navigate('libraryDetail')"
       />
     </section>
