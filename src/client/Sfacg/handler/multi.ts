@@ -75,7 +75,12 @@ export class Multi {
             console.log(
               "章节" + _buy[0].chapId + "：" + _buy[0].ntitle + "购买成功"
             );
-            const content = await client.contentInfos(_buy[0].chapId);
+            const chapter = _buy[0];
+            const content = await client.chapterContentFromWeb(
+              chapter.novelId,
+              chapter.volumeId,
+              chapter.chapId,
+            );
             if (content) {
               await _SfacgCache.UpsertChapterInfo({ ..._buy[0], content });
               count++

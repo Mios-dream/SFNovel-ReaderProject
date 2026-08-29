@@ -1,7 +1,13 @@
 import fse from "fs-extra";
 import path from "node:path";
 import { config } from "../config";
-import type { NovelDownloadMetadata } from "../types";
+import type {
+  NovelChapterStore,
+  NovelDownloadMetadata,
+  StoredTextChapter,
+} from "../types";
+
+const chapterStoreName = ".novel-flow-chapters.json";
 
 /**
  * 将名称中的文件系统保留字符替换为下划线。
@@ -77,6 +83,72 @@ export async function writeNovelDownloadMetadata(
   );
 }
 
+/** 读取可恢复的文本章节内容；同时兼容早期下载留下的进度文件。 */
+export async function readNovelChapterStore(dir: string): Promise<NovelChapterStore> {
+  for (const filename of [chapterStoreName, ".novel-flow-progress.json"]) {
+    try {
+      const value = (await fse.readJson(path.join(dir, filename))) as NovelChapterStore;
+      if (Number.isInteger(value?.novelId) && value.chapters && typeof value.chapters === "object")
+        return value;
+    } catch {
+      /* try the next compatible file */
+    }
+  }
+  // 兼容章节库引入前生成的 Markdown，使旧书也能在本地阅读和导出。
+  try {
+    const markdown = (await fse.readdir(dir)).find((file) => file.endsWith(".md"));
+    if (markdown) {
+      const source = await fse.readFile(path.join(dir, markdown), "utf8");
+      const sections = source.split(/(?=^##\s+)/m).slice(1);
+      let volume = "未分卷";
+      let legacyId = -1;
+      const chapters: Record<string, StoredTextChapter> = {};
+      for (const section of sections) {
+        const title = section.match(/^##\s+(.+)$/m)?.[1]?.trim();
+        if (!title) continue;
+        const before = source.slice(0, source.indexOf(section));
+        const headings = [...before.matchAll(/^#\s+(.+)$/gm)];
+        volume = headings.at(-1)?.[1]?.trim() || volume;
+        chapters[String(legacyId)] = { id: legacyId, volume, title, content: section.trim() };
+        legacyId -= 1;
+      }
+      if (Object.keys(chapters).length) return { novelId: 0, chapters };
+    }
+  } catch {
+    /* no legacy Markdown is available */
+  }
+  return { novelId: 0, chapters: {} };
+}
+
+/** 将每章正文独立持久化，使暂停、继续和增量下载不会覆盖已有章节。 */
+export async function writeNovelChapterStore(dir: string, store: NovelChapterStore) {
+  await fse.outputJson(path.join(dir, chapterStoreName), store);
+}
+
+/** 从章节库生成稳定的 Markdown 正文，按在线目录而非本次选择的章节排序。 */
+export function buildNovelMarkdown(
+  title: string,
+  author: string,
+  description: string,
+  volumes: Array<{ title: string; chapterList: Array<{ chapId: number }> }>,
+  chapters: Record<string, StoredTextChapter>,
+) {
+  const content = volumes
+    .map((volume) => {
+      const items = volume.chapterList
+        .map((chapter) => chapters[String(chapter.chapId)]?.content)
+        .filter((item): item is string => Boolean(item));
+      return items.length ? `# ${volume.title}\n\n${items.join("\n\n")}` : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+  const intro = description
+    .split("\n")
+    .map((line) => `  ${line}`)
+    .join("\n");
+  return `---\ntitle: '${title.replaceAll("'", "\\\\'")}'\nauthor: '${author.replaceAll("'", "\\\\'")}'\nlang: 'zh-Hans'\ndescription: |-\n${intro}\n...\n\n${content}`;
+}
+
 /**
  * 汇总指定小说在本地书库中的文本和有声下载状态。
  * @param novelId SF 小说编号。
@@ -92,17 +164,18 @@ export async function getLocalDownloadState(novelId: number) {
       .map(async (folder) => {
         const dir = path.join(config.libraryDir, folder.name);
         const metadata = await readNovelDownloadMetadata(dir);
-        if (
-          metadata.novelId !== novelId ||
-          numberIds(metadata.downloadedTextChapterIds).length
-        ) {
-          return { metadata, downloadedTextTitles: [] as string[] };
-        }
+        if (metadata.novelId !== novelId)
+          return { metadata, downloadedTextTitles: [] as string[], downloadedTextChapterIds: [] as number[] };
+        const store = await readNovelChapterStore(dir);
+        const storeIds = store.novelId === novelId ? Object.keys(store.chapters).map(Number).filter((id) => Number.isInteger(id) && id > 0) : [];
+        const metadataIds = numberIds(metadata.downloadedTextChapterIds);
+        if (metadataIds.length || storeIds.length)
+          return { metadata, downloadedTextTitles: [] as string[], downloadedTextChapterIds: [...new Set([...metadataIds, ...storeIds])] };
         const markdown = (await fse.readdir(dir)).find((file) =>
           file.endsWith(".md"),
         );
         if (!markdown)
-          return { metadata, downloadedTextTitles: [] as string[] };
+          return { metadata, downloadedTextTitles: [] as string[], downloadedTextChapterIds: [] as number[] };
         try {
           const content = await fse.readFile(path.join(dir, markdown), "utf8");
           return {
@@ -110,9 +183,10 @@ export async function getLocalDownloadState(novelId: number) {
             downloadedTextTitles: [...content.matchAll(/^##\s+(.+)$/gm)].map(
               (match) => match[1].trim(),
             ),
+            downloadedTextChapterIds: [] as number[],
           };
         } catch {
-          return { metadata, downloadedTextTitles: [] as string[] };
+          return { metadata, downloadedTextTitles: [] as string[], downloadedTextChapterIds: [] as number[] };
         }
       }),
   );
@@ -122,9 +196,10 @@ export async function getLocalDownloadState(novelId: number) {
   return {
     downloadedTextChapterIds: [
       ...new Set(
-        matching.flatMap(({ metadata }) =>
-          numberIds(metadata.downloadedTextChapterIds),
-        ),
+        matching.flatMap(({ metadata, downloadedTextChapterIds }) => [
+          ...numberIds(metadata.downloadedTextChapterIds),
+          ...downloadedTextChapterIds,
+        ]),
       ),
     ],
     downloadedTextTitles: [

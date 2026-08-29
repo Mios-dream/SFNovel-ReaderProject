@@ -28,12 +28,6 @@ export interface Itag {
 }
 [];
 
-export interface IcontentInfos {
-  title: string; // 标题
-  content: string | Buffer; // 内容
-}
-
-
 // 卷列表
 export interface IvolumeInfos {
   novelId: number; // 小说ID

@@ -3,14 +3,20 @@ import { createWriteStream } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import fse from "fs-extra";
-import { SfacgApiClient } from "../infrastructure/sfacg/client";
+import {
+  SfacgApiClient,
+  SfacgWebContentError,
+} from "../infrastructure/sfacg/client";
 import { config } from "../config";
 import type { AudioChapter, AudioInfoResponse } from "../types";
 import {
   numberIds,
+  buildNovelMarkdown,
+  readNovelChapterStore,
   readNovelDownloadMetadata,
   safeAudioName,
   safeName,
+  writeNovelChapterStore,
   writeNovelDownloadMetadata,
 } from "./library";
 import { throttledDownload } from "./cache";
@@ -64,6 +70,7 @@ export async function writeNovel(
   const novelName = safeName(novel.novelName);
   const novelDir = path.join(config.libraryDir, novelName);
   const imageDir = path.join(novelDir, "imgs");
+  const markdownFile = `${novelName}.md`;
   await fse.ensureDir(imageDir);
   const selected = chapterIds?.length ? new Set(chapterIds) : undefined;
   const total = volumes.reduce(
@@ -75,93 +82,118 @@ export async function writeNovel(
     0,
   );
   let finished = 0;
+  let contentError: Error | undefined;
   const downloadClient = new SfacgApiClient();
   if (cookie) downloadClient.setCookie(cookie);
-  const progressFile = path.join(novelDir, ".novel-flow-progress.json");
-  let savedChapters: Record<
-    string,
-    { volume: string; title: string; content: string }
-  > = {};
-  try {
-    const saved = await fse.readJson(progressFile);
-    if (
-      saved?.novelId === novelId &&
-      saved.chapters &&
-      typeof saved.chapters === "object"
-    )
-      savedChapters = saved.chapters;
-  } catch {
-    /* a fresh download has no progress file */
+  const savedStore = await readNovelChapterStore(novelDir);
+  const savedChapters =
+    savedStore.novelId === novelId ? savedStore.chapters : {};
+  for (const [id, chapter] of Object.entries(savedChapters)) {
+    if (!Number.isInteger(chapter.id)) chapter.id = Number(id);
   }
   const metadata = await readNovelDownloadMetadata(novelDir);
   const downloadedTextChapterIds = new Set(
     numberIds(metadata.downloadedTextChapterIds),
   );
+  const contentSources = new Set<string>();
   onProgress?.(4, "正在准备书籍文件");
-  const content: string[] = [];
   for (const volume of volumes) {
-    const chapters: string[] = [];
     for (const chapter of volume.chapterList) {
       if (selected && !selected.has(chapter.chapId)) continue;
       if (signal.aborted) throw new Error("下载已取消");
       const saved = savedChapters[String(chapter.chapId)];
       if (saved) {
         finished += 1;
-        chapters.push(saved.content);
+        downloadedTextChapterIds.add(chapter.chapId);
+        onProgress?.(
+          total ? Math.round(5 + (finished / total) * 90) : 100,
+          `复用本地章节：${chapter.ntitle}`,
+        );
         continue;
       }
       try {
         if (chapter.needFireMoney !== 0 && !cookie) continue;
+        onProgress?.(4, `正在通过网页解析：${chapter.ntitle}`);
         const raw = await throttledDownload(() =>
-          downloadClient.contentInfos(chapter.chapId, signal),
+          downloadClient.chapterContentFromWeb(
+            novelId,
+            volume.volumeId,
+            chapter.chapId,
+            signal,
+          ),
         );
         if (signal.aborted) throw new Error("下载已取消");
         finished += 1;
+        console.info(
+          `SF 正文来源：网页解析（章节 ${chapter.chapId}）`,
+        );
         onProgress?.(
           total ? Math.round(5 + (finished / total) * 90) : 100,
-          `正在下载：${chapter.ntitle}`,
+          `已通过网页解析获取：${chapter.ntitle}`,
         );
-        if (raw) {
+        if (raw.trim()) {
+          contentSources.add("网页解析");
           const chapterContent = `## ${chapter.ntitle}\n\n${raw.replaceAll("\n", "\n\n")}`;
           savedChapters[String(chapter.chapId)] = {
+            id: chapter.chapId,
             volume: volume.title,
             title: chapter.ntitle,
             content: chapterContent,
           };
           downloadedTextChapterIds.add(chapter.chapId);
-          chapters.push(chapterContent);
-          await fse.outputFile(
-            progressFile,
-            JSON.stringify({ novelId, chapters: savedChapters }),
-          );
+          await writeNovelChapterStore(novelDir, {
+            novelId,
+            chapters: savedChapters,
+          });
           await writeNovelDownloadMetadata(novelDir, {
             ...metadata,
             novelId,
             title: novel.novelName,
+            author: novel.authorName,
+            description: novel.expand?.intro || "",
             downloadedTextChapterIds: [...downloadedTextChapterIds],
           });
+          // 每章成功后同步 Markdown，网页不可访问的后续章节不会覆盖已下载部分。
+          await fse.outputFile(
+            path.join(novelDir, markdownFile),
+            buildNovelMarkdown(
+              novel.novelName,
+              novel.authorName,
+              novel.expand?.intro || "",
+              volumes,
+              savedChapters,
+            ),
+          );
         }
       } catch (error) {
         if (signal.aborted) throw new Error("下载已取消");
+        if (error instanceof SfacgWebContentError) {
+          contentError ||= error;
+          // 正文校验失败不是章节本身的空内容，后续章节也会被同一策略拒绝。
+          break;
+        }
         finished += 1;
       }
     }
-    if (chapters.length)
-      content.push(`# ${volume.title}\n\n${chapters.join("\n\n")}`);
+    if (contentError) break;
   }
-  const intro =
-    novel.expand?.intro
-      ?.split("\n")
-      .map((line: string) => `  ${line}`)
-      .join("\n") ?? "";
-  const markdown = `---\ntitle: '${novel.novelName.replaceAll("'", "\\'")}'\nauthor: '${novel.authorName.replaceAll("'", "\\'")}'\nlang: 'zh-Hans'\ndescription: |-\n${intro}\n...\n\n${content.join("\n\n")}`;
-  const markdownFile = `${novelName}.md`;
+  if (contentError) throw contentError;
+  if (!Object.keys(savedChapters).length)
+    throw new Error("未能下载任何可访问章节，原有本地文件未被覆盖");
+  const markdown = buildNovelMarkdown(
+    novel.novelName,
+    novel.authorName,
+    novel.expand?.intro || "",
+    volumes,
+    savedChapters,
+  );
   await fse.outputFile(path.join(novelDir, markdownFile), markdown);
-  await fse.remove(progressFile);
   await writeNovelDownloadMetadata(novelDir, {
     ...metadata,
     novelId,
     title: novel.novelName,
+    author: novel.authorName,
+    description: novel.expand?.intro || "",
     downloadedTextChapterIds: [...downloadedTextChapterIds],
   });
   if (novel.novelCover) {
@@ -181,6 +213,7 @@ export async function writeNovel(
     folder: novelName,
     file: markdownFile,
     chapters: finished,
+    sources: [...contentSources],
   };
 }
 

@@ -1,3 +1,4 @@
+import axios from "axios";
 import { SfacgHttpClient } from "./http";
 import type {
   SfacgBookshelfCollection,
@@ -12,7 +13,14 @@ import type {
   UpstreamVolume,
 } from "./types";
 
-/** 服务端访问 SF 小说接口的业务适配器。 */
+/** 网页端未提供可下载正文时的明确错误。 */
+export class SfacgWebContentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SfacgWebContentError";
+  }
+}
+
 export class SfacgApiClient extends SfacgHttpClient {
   async novelInfo(
     novelId: number,
@@ -61,20 +69,52 @@ export class SfacgApiClient extends SfacgHttpClient {
     }
   }
 
-  async contentInfos(
+  /**
+   * 读取 SF 公开网页中实际展示的章节正文。
+   * 此方法不会处理仅 App 可读或需要付费授权但网页未展示的章节。
+   */
+  async chapterContentFromWeb(
+    novelId: number,
+    volumeId: number,
     chapterId: number,
     signal?: AbortSignal,
-  ): Promise<string | false> {
+  ): Promise<string> {
     try {
-      const response = await this.get<{ expand: { content: string } }>(
-        `/Chaps/${chapterId}`,
-        { expand: "content" },
-        signal,
+      const response = await axios.get<string>(
+        `https://book.sfacg.com/Novel/${novelId}/${volumeId}/${chapterId}/`,
+        {
+          headers: {
+            cookie: this.getCookie(),
+            Accept:
+              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "User-Agent": SfacgHttpClient.webUserAgent,
+            Referer: `https://book.sfacg.com/Novel/${novelId}/MainIndex/`,
+          },
+          responseType: "text",
+          signal,
+          timeout: 15_000,
+        },
       );
-      return response.expand.content;
+      if (/章节内容当前不可用/.test(response.data))
+        throw new SfacgWebContentError(
+          "SF 网页端“章节内容当前不可用”，该章节可能仅 App 可读、受限或已下架",
+        );
+      const body = this.chapterBodyFromHtml(response.data);
+      if (!body)
+        throw new SfacgWebContentError(
+          "SF 网页端响应中没有找到 #ChapterBody，可能是页面结构变更或该章节不可公开访问",
+        );
+      return body;
     } catch (error) {
-      this.logFailure("GET contentInfos", error);
-      return false;
+      if (error instanceof SfacgWebContentError) throw error;
+      if (axios.isAxiosError(error))
+        throw new SfacgWebContentError(
+          `无法读取 SF 网页端正文（HTTP ${error.response?.status || "未知"}）`,
+        );
+      throw new SfacgWebContentError(
+        error instanceof Error ? error.message : "无法读取 SF 网页端正文",
+      );
     }
   }
 
@@ -232,5 +272,36 @@ export class SfacgApiClient extends SfacgHttpClient {
   private logFailure(operation: string, error: unknown) {
     const message = error instanceof Error ? error.message : "未知错误";
     console.error(`${operation} failed: ${message}`);
+  }
+
+  private chapterBodyFromHtml(html: string) {
+    const match = html.match(
+      /<div\b[^>]*\bid=["']ChapterBody["'][^>]*>([\s\S]*?)<\/div>/i,
+    );
+    if (!match) return "";
+    return this.decodeHtml(match[1])
+      .replace(/<br\s*\/?\s*>/gi, "\n")
+      .replace(/<\/p\s*>/gi, "\n\n")
+      .replace(/<p\b[^>]*>/gi, "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  private decodeHtml(value: string) {
+    return value
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'")
+      .replace(/&#(x[0-9a-f]+|\d+);/gi, (_, entity: string) => {
+        const code = entity.toLowerCase().startsWith("x")
+          ? Number.parseInt(entity.slice(1), 16)
+          : Number.parseInt(entity, 10);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : _;
+      });
   }
 }

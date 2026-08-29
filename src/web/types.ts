@@ -1,5 +1,10 @@
 /** 主界面导航项。 */
-export type ViewName = "discover" | "bookshelf" | "library";
+export type ViewName =
+  | "discover"
+  | "bookshelf"
+  | "library"
+  | "libraryDetail"
+  | "reader";
 export type ChapterMode = "text" | "audio";
 
 export type Novel = {
@@ -56,9 +61,24 @@ export type Book = {
   novelId?: number;
   href?: string;
   audioHref?: string;
+  epubHref?: string;
   cover?: string;
   updatedAt: string;
+  formats: { text: boolean; audio: boolean; comic: boolean };
 };
+
+export type LocalChapter = { id: number; title: string; volume: string };
+export type LocalBookDetail = {
+  name: string;
+  novelId?: number;
+  author: string;
+  description: string;
+  cover?: string;
+  audioHref?: string;
+  epubHref?: string;
+  chapters: LocalChapter[];
+};
+export type LocalChapterContent = LocalChapter & { content: string };
 
 export type AuthStatus = { authenticated: boolean; userName?: string };
 export type BrowserLoginStatus = AuthStatus & { waiting?: boolean };

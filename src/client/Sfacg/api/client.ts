@@ -1,3 +1,4 @@
+import axios from "axios";
 import { SfacgHttp } from "./basehttp";
 import {
   adBonus,
@@ -6,7 +7,6 @@ import {
   AuthorInfo,
   bookshelfInfos,
   claimTask,
-  contentInfos,
   expireInfo,
   NewAccountFavBonus,
   NewAccountFollowBonus,
@@ -315,31 +315,43 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
-  /**
-   * 获取指定章节的正文内容。
-   * @param chapId SF 章节编号。
-   * @param signal 可选的取消信号。
-   * @returns 章节正文；请求失败时返回 false。
-   */
-  async contentInfos(
+  /** 从 SF 章节网页提取公开展示的正文内容。 */
+  async chapterContentFromWeb(
+    novelId: number,
+    volumeId: number,
     chapId: number,
     signal?: AbortSignal,
   ): Promise<string | false> {
     try {
-      let res = await this.get<contentInfos>(
-        `/Chaps/${chapId}`,
+      const response = await axios.get<string>(
+        `https://book.sfacg.com/Novel/${novelId}/${volumeId}/${chapId}/`,
         {
-          expand: "content",
+          headers: {
+            Cookie: this.GetCookie(),
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "User-Agent": SfacgHttp.USER_AGENT_WEB,
+            Referer: `https://book.sfacg.com/Novel/${novelId}/MainIndex/`,
+          },
+          responseType: "text",
+          signal,
+          timeout: 15_000,
         },
-        signal,
       );
-      const content = res.expand.content;
+      if (/章节内容当前不可用/.test(response.data)) {
+        console.error(`网页正文不可用：章节 ${chapId}`);
+        return false;
+      }
+      const content = this.chapterBodyFromHtml(response.data);
+      if (!content) {
+        console.error(`网页正文不可用：章节 ${chapId}`);
+        return false;
+      }
       return content;
-      // 待添加
     } catch (err: any) {
       console.error(
-        `GET contentInfos failed: ${JSON.stringify(
-          err.response.data.status.msg,
+        `GET chapterContentFromWeb failed: ${JSON.stringify(
+          err.response?.status || err.message || "未知错误",
         )}`,
       );
       return false;
@@ -360,6 +372,37 @@ export class SfacgClient extends SfacgHttp {
       console.error(`GET image failed: ${JSON.stringify(errMsg)}`);
       return false;
     }
+  }
+
+  private chapterBodyFromHtml(html: string) {
+    const match = html.match(
+      /<div\b[^>]*\bid=["']ChapterBody["'][^>]*>([\s\S]*?)<\/div>/i,
+    );
+    if (!match) return "";
+    return this.decodeHtml(match[1])
+      .replace(/<br\s*\/?\s*>/gi, "\n")
+      .replace(/<\/p\s*>/gi, "\n\n")
+      .replace(/<p\b[^>]*>/gi, "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  private decodeHtml(value: string) {
+    return value
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'")
+      .replace(/&#(x[0-9a-f]+|\d+);/gi, (_, entity: string) => {
+        const code = entity.toLowerCase().startsWith("x")
+          ? Number.parseInt(entity.slice(1), 16)
+          : Number.parseInt(entity, 10);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : _;
+      });
   }
 
   /**

@@ -93,7 +93,11 @@ export class _SfacgDownloader {
               chapter.isVip &&
               (!exclude || !exclude.includes(chapter.chapId))
             ) {
-              const content = await client.contentInfos(chapter.chapId);
+              const content = await client.chapterContentFromWeb(
+                novelId,
+                volumes.volumeId,
+                chapter.chapId,
+              );
               content &&
                 (await _SfacgCache.UpsertChapterInfo({
                   chapId: chapter.chapId,
@@ -164,7 +168,11 @@ export class _SfacgDownloader {
         // 仅下载已购买的章节
         if (_chapter.needFireMoney === 0) {
           console.log("正在下载已购章节" + _chapter.ntitle);
-          const chapterContent = await _client.contentInfos(_chapter.chapId);
+          const chapterContent = await _client.chapterContentFromWeb(
+            volumeInfo.novelId,
+            volumeInfo.volumeId,
+            _chapter.chapId,
+          );
           return await this.ParseChapter(chapterContent, _chapter);
         }
       },
@@ -201,7 +209,11 @@ export class _SfacgDownloader {
         // 下载免费章节
         if (_chapter.needFireMoney === 0) {
           console.log("正在下载免费章节" + _chapter.ntitle);
-          const chapterContent = await _client.contentInfos(_chapter.chapId);
+          const chapterContent = await _client.chapterContentFromWeb(
+            volumeInfo.novelId,
+            volumeInfo.volumeId,
+            _chapter.chapId,
+          );
           return await this.ParseChapter(chapterContent, _chapter);
         }
       },

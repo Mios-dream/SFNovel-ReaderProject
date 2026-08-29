@@ -108,7 +108,7 @@ function run(job: Job) {
         Object.assign(job, {
           status: "done",
           progress: 100,
-          message: `已保存 ${saved.chapters} 个章节`,
+          message: `已保存 ${saved.chapters} 个章节（本次正文来源：${saved.sources.length ? saved.sources.join("、") : "复用本地章节"}）`,
           file: bookUrl(saved.folder, saved.file),
         });
       }

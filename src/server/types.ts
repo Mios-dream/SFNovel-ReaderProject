@@ -33,8 +33,23 @@ export type AudioChapter = {
 export type NovelDownloadMetadata = {
   novelId?: number;
   title?: string;
+  author?: string;
+  description?: string;
   downloadedTextChapterIds?: number[];
   downloadedAudioChapterIds?: number[];
+};
+
+/** 持久化的文本章节内容，用于断点续传、阅读器和导出。 */
+export type StoredTextChapter = {
+  id: number;
+  volume: string;
+  title: string;
+  content: string;
+};
+
+export type NovelChapterStore = {
+  novelId: number;
+  chapters: Record<string, StoredTextChapter>;
 };
 
 export type AudioInfoResponse = {

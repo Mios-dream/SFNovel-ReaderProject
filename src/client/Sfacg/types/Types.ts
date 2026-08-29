@@ -1,37 +1,3 @@
-// 小说章节内容信息
-export interface contentInfos {
-  chapId: number; // 章节ID
-  novelId: number; // 小说ID
-  volumeId: number; // 卷ID
-  charCount: number; // 字符数
-  rowNum: number; // 行数
-  chapOrder: number; // 章节顺序
-  title: string; // 标题
-  addTime: string; // 添加时间
-  updateTime: string; // 更新时间
-  sno: number; // 序列号
-  isVip: boolean; // 是否为VIP章节
-  expand: contentInfos_Expand; // 扩展信息
-  ntitle: string; // 新标题
-  isRubbish: boolean; // 是否为废弃内容
-  auditStatus: number; // 审核状态
-}
-
-// 小说章节内容的扩展信息
-export interface contentInfos_Expand {
-  needFireMoney: number; // 所需火币
-  originNeedFireMoney: number; // 原始所需火币
-  content: string; // 内容
-  tsukkomi: any; // 吐槽信息
-  chatLines: any; // 聊天线
-  paragraphs: any; // 段落
-  volume: any; // 卷信息
-  authorTalk: any; // 作者说
-  isContentEncrypted: boolean; // 内容是否加密
-  isBranch: boolean; // 是否为分支章节
-}
-
-
 // 小说信息
 export interface novelInfo {
   authorId: number; // 作者ID

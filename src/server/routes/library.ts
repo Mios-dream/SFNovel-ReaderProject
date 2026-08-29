@@ -2,7 +2,15 @@ import { Router } from "express";
 import fse from "fs-extra";
 import path from "node:path";
 import { config } from "../config";
-import { bookUrl, safeName } from "../services/library";
+import type { NovelDownloadMetadata } from "../types";
+import { writeEpub } from "../services/epub";
+import {
+  bookUrl,
+  numberIds,
+  readNovelChapterStore,
+  readNovelDownloadMetadata,
+  safeName,
+} from "../services/library";
 
 export const libraryRouter = Router();
 
@@ -21,18 +29,90 @@ libraryRouter.get("/library", async (_req, res) => {
     const markdown = files.find((file) => file.endsWith(".md"));
     const audioPlaylist = path.join(dir, "audio", "有声目录.m3u8");
     const hasAudio = await fse.pathExists(audioPlaylist);
-    if (!markdown && !hasAudio) return null;
+    const epub = files.find((file) => file.endsWith(".epub"));
+    if (!markdown && !hasAudio && !epub) return null;
     const updatedFile = markdown ? path.join(dir, markdown) : audioPlaylist;
     const cover = path.join(dir, "imgs", "cover.jpeg");
-    let metadata: { novelId?: number } = {};
+    let metadata: NovelDownloadMetadata = {};
     try { metadata = await fse.readJson(path.join(dir, ".novel-flow.json")); } catch { /* metadata is optional */ }
+    const markdownHasChapters = markdown
+      ? /^##\s+.+$/m.test(await fse.readFile(path.join(dir, markdown), "utf8"))
+      : false;
     return { name: folder.name, novelId: Number.isInteger(metadata.novelId) ? metadata.novelId : undefined,
       href: markdown ? bookUrl(folder.name, markdown) : undefined,
       audioHref: hasAudio ? bookUrl(folder.name, path.posix.join("audio", "有声目录.m3u8")) : undefined,
+      epubHref: epub ? bookUrl(folder.name, epub) : undefined,
+      formats: { text: Boolean(epub) || numberIds(metadata.downloadedTextChapterIds).length > 0 || markdownHasChapters, audio: hasAudio, comic: false },
       cover: await fse.pathExists(cover) ? bookUrl(folder.name, path.posix.join("imgs", "cover.jpeg")) : undefined,
       updatedAt: (await fse.stat(updatedFile)).mtime };
   }));
   res.json(books.filter(Boolean));
+});
+
+function libraryFolder(folder: string) {
+  const name = safeName(decodeURIComponent(folder));
+  const base = path.resolve(config.libraryDir);
+  const dir = path.resolve(base, name);
+  if (dir === base || !dir.startsWith(`${base}${path.sep}`)) return undefined;
+  return { name, dir };
+}
+
+/** 返回本地书籍目录和可阅读的已下载文本章节。 */
+libraryRouter.get("/library/:folder", async (req, res) => {
+  const target = libraryFolder(req.params.folder);
+  if (!target || !(await fse.pathExists(target.dir)))
+    return res.status(404).json({ message: "本地书籍不存在" });
+  const [metadata, store] = await Promise.all([
+    readNovelDownloadMetadata(target.dir),
+    readNovelChapterStore(target.dir),
+  ]);
+  const audioHref = path.join(target.dir, "audio", "有声目录.m3u8");
+  const cover = path.join(target.dir, "imgs", "cover.jpeg");
+  const chapters = Object.values(store.chapters).sort((a, b) => a.id - b.id);
+  res.json({
+    name: target.name,
+    novelId: metadata.novelId,
+    author: metadata.author || "未知作者",
+    description: metadata.description || "暂无简介",
+    cover: (await fse.pathExists(cover)) ? bookUrl(target.name, "imgs/cover.jpeg") : undefined,
+    audioHref: (await fse.pathExists(audioHref)) ? bookUrl(target.name, "audio/有声目录.m3u8") : undefined,
+    epubHref: (await fse.pathExists(path.join(target.dir, `${target.name}.epub`))) ? bookUrl(target.name, `${target.name}.epub`) : undefined,
+    chapters: chapters.map(({ id, title, volume }) => ({ id, title, volume })),
+  });
+});
+
+/** 读取本地的单章正文，阅读器不会再依赖在线接口。 */
+libraryRouter.get("/library/:folder/chapters/:chapterId", async (req, res) => {
+  const target = libraryFolder(req.params.folder);
+  const chapterId = Number(req.params.chapterId);
+  if (!target || !Number.isInteger(chapterId))
+    return res.status(400).json({ message: "章节参数无效" });
+  const chapter = (await readNovelChapterStore(target.dir)).chapters[String(chapterId)];
+  if (!chapter) return res.status(404).json({ message: "本地未找到该章节正文" });
+  res.json(chapter);
+});
+
+/** 将本地已下载的文字章节导出为 EPUB。 */
+libraryRouter.post("/library/:folder/epub", async (req, res) => {
+  const target = libraryFolder(req.params.folder);
+  if (!target || !(await fse.pathExists(target.dir)))
+    return res.status(404).json({ message: "本地书籍不存在" });
+  const [metadata, store] = await Promise.all([
+    readNovelDownloadMetadata(target.dir),
+    readNovelChapterStore(target.dir),
+  ]);
+  const chapters = Object.values(store.chapters).sort((a, b) => a.id - b.id);
+  if (!chapters.length)
+    return res.status(409).json({ message: "这本书没有可导出的已下载文字章节" });
+  const filename = `${target.name}.epub`;
+  await writeEpub(path.join(target.dir, filename), {
+    title: metadata.title || target.name,
+    author: metadata.author || "未知作者",
+    description: metadata.description || "",
+    chapters,
+    coverPath: path.join(target.dir, "imgs", "cover.jpeg"),
+  });
+  res.json({ href: bookUrl(target.name, filename) });
 });
 
 /**
@@ -42,10 +122,9 @@ libraryRouter.get("/library", async (_req, res) => {
  * @returns 删除处理完成后的 Promise。
  */
 libraryRouter.delete("/library/:folder", async (req, res) => {
-  const folder = safeName(decodeURIComponent(req.params.folder));
-  const target = path.resolve(config.libraryDir, folder), base = path.resolve(config.libraryDir);
-  if (target === base || !target.startsWith(`${base}${path.sep}`)) return res.status(400).json({ message: "书籍目录无效" });
-  if (!(await fse.pathExists(target))) return res.status(404).json({ message: "本地书籍不存在" });
-  await fse.remove(target);
+  const target = libraryFolder(req.params.folder);
+  if (!target) return res.status(400).json({ message: "书籍目录无效" });
+  if (!(await fse.pathExists(target.dir))) return res.status(404).json({ message: "本地书籍不存在" });
+  await fse.remove(target.dir);
   res.status(204).end();
 });

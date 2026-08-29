@@ -17,6 +17,8 @@ import { useNovelDesk } from "./composables/useNovelDesk";
 import BookshelfPage from "./pages/BookshelfPage.vue";
 import DiscoverPage from "./pages/DiscoverPage.vue";
 import LibraryPage from "./pages/LibraryPage.vue";
+import LocalBookDetailPage from "./pages/LocalBookDetailPage.vue";
+import LocalReaderPage from "./pages/LocalReaderPage.vue";
 
 // reactive 会自动解包 composable 返回的 ref，模板中可直接读写 desk.xxx。
 const desk = reactive(useNovelDesk());
@@ -43,7 +45,11 @@ const desk = reactive(useNovelDesk());
                 ? "发现想读的故事"
                 : desk.active === "bookshelf"
                   ? "我的 SF 书架"
-                  : "你的本地书库"
+                  : desk.active === "library"
+                    ? "你的本地书库"
+                    : desk.active === "libraryDetail"
+                      ? desk.localBook?.name || "本地书籍"
+                      : desk.localChapter?.title || "本地阅读"
             }}
           </h1>
         </div>
@@ -91,7 +97,7 @@ const desk = reactive(useNovelDesk());
         @select="desk.openChapterPicker"
       />
       <LibraryPage
-        v-else
+        v-else-if="desk.active === 'library'"
         v-model:managing="desk.libraryManaging"
         :books="desk.library"
         :jobs="desk.libraryJobs"
@@ -101,6 +107,22 @@ const desk = reactive(useNovelDesk());
         @pause="desk.pauseJob"
         @resume="desk.resumeJob"
         @discover="desk.navigate('discover')"
+      />
+      <LocalBookDetailPage
+        v-else-if="desk.active === 'libraryDetail' && desk.localBook"
+        :book="desk.localBook"
+        :exporting="desk.exportingEpub"
+        @back="desk.navigate('library')"
+        @read="desk.openLocalChapter"
+        @online="desk.readOnline"
+        @continue-download="desk.continueDownload"
+        @export="desk.exportEpub"
+      />
+      <LocalReaderPage
+        v-else-if="desk.active === 'reader' && desk.localBook && desk.localChapter"
+        :book-name="desk.localBook.name"
+        :chapter="desk.localChapter"
+        @back="desk.navigate('libraryDetail')"
       />
     </section>
 

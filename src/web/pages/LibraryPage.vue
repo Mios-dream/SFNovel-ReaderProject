@@ -2,6 +2,7 @@
 import {
   BookOpen,
   ChevronRight,
+  FileText,
   Headphones,
   LibraryBig,
   Pause,
@@ -76,28 +77,17 @@ const emit = defineEmits<{
       v-for="book in books"
       :key="book.name"
       class="library-card glass"
-      :class="{ 'clickable-card': book.novelId }"
-      :role="book.novelId ? 'button' : undefined"
-      :tabindex="book.novelId ? 0 : undefined"
+      :class="{ 'clickable-card': true }"
+      role="button"
+      tabindex="0"
       @click="emit('open', book)"
       @keydown.enter="emit('open', book)"
     >
-      <a
-        v-if="book.href"
-        class="library-cover"
-        :href="book.href"
-        target="_blank"
-        @click.stop
+      <span class="library-cover"
         ><img
           v-if="book.cover"
           :src="book.cover"
           :alt="`${book.name} 封面`" /><BookOpen v-else :size="34"
-      /></a>
-      <span v-else class="library-cover"
-        ><img
-          v-if="book.cover"
-          :src="book.cover"
-          :alt="`${book.name} 封面`" /><Headphones v-else :size="34"
       /></span>
       <button
         v-if="managing"
@@ -108,20 +98,20 @@ const emit = defineEmits<{
         <Trash2 :size="15" /><span>删除</span>
       </button>
       <div class="library-info">
-        <strong>{{ book.name }}</strong
-        ><small>最近写入 {{ formatDate(book.updatedAt) }}</small>
-        <div class="library-links">
-          <a v-if="book.href" :href="book.href" target="_blank" @click.stop
-            >阅读文字 <ChevronRight :size="14" /></a
-          ><a
-            v-if="book.audioHref"
-            :href="book.audioHref"
-            target="_blank"
-            @click.stop
-            >播放有声 <Headphones :size="14" /></a
-          ><span v-if="book.novelId" class="library-detail-hint"
-            >点击查看详情与章节</span
-          >
+        <div>
+          <strong>{{ book.name }}</strong
+          ><small>最近写入 {{ formatDate(book.updatedAt) }}</small>
+        </div>
+        <div class="format-icons" aria-label="已下载格式">
+          <span v-if="book.formats.text" class="format-text" title="已下载文字小说"
+            ><FileText :size="15"
+          /></span>
+          <span v-if="book.formats.audio" class="format-audio" title="已下载有声内容"
+            ><Headphones :size="15"
+          /></span>
+          <span v-if="book.formats.comic" class="format-comic" title="已下载漫画"
+            ><BookOpen :size="15"
+          /></span>
         </div>
       </div>
     </article>
@@ -292,7 +282,10 @@ const emit = defineEmits<{
   object-fit: cover;
 }
 .library-info {
-  display: grid;
+  height: 90%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
   min-width: 0;
   gap: 5px;
 }
@@ -301,35 +294,32 @@ const emit = defineEmits<{
   overflow: hidden;
   color: #65433c;
   font-family: KaTongFont, "Microsoft YaHei", sans-serif;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
-.library-info small,
-.library-detail-hint {
+.library-info small {
   color: #b18b7e;
   font-size: 11px;
 }
-.library-links {
-  display: grid;
-  gap: 3px;
-  margin-top: 3px;
-}
-.library-links a {
+.format-icons {
   display: flex;
   align-items: center;
-  gap: 2px;
-  width: max-content;
-  max-width: 100%;
-  color: var(--theme-color-dark);
-  font-size: 11px;
-  font-weight: 600;
-  text-decoration: none;
+  gap: 5px;
+  margin-top: 3px;
 }
-.library-links a:last-child {
-  color: #4e8494;
+.format-icons span {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  border: 1px solid #ecd2c5;
+  border-radius: 6px;
+  place-items: center;
 }
+.format-icons .format-text { border-color: #ecd2c5; color: #a66d59; background: #fff8f4; }
+.format-icons .format-audio { border-color: #e5bec0; color: #a6535c; background: #fdf1f0; }
+.format-icons .format-comic { border-color: #d9c5df; color: #8b6a9b; background: #faf4fc; }
 .delete-badge {
   position: absolute;
   top: 7px;

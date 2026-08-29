@@ -7,6 +7,8 @@ import type {
   ChapterMode,
   ChapterVolume,
   Job,
+  LocalBookDetail,
+  LocalChapterContent,
   Novel,
   RequestPolicy,
   UserProfile,
@@ -52,6 +54,9 @@ export function useNovelDesk() {
   const bookshelfPageSize = 12;
   const libraryManaging = ref(false);
   const confirmBook = ref<Book>();
+  const localBook = ref<LocalBookDetail>();
+  const localChapter = ref<LocalChapterContent>();
+  const exportingEpub = ref(false);
   const chapterModalOpen = ref(false);
   const chapterLoading = ref(false);
   const chapterMode = ref<ChapterMode>("text");
@@ -509,34 +514,78 @@ export function useNovelDesk() {
     }
     confirmBook.value = undefined;
   }
-  /**
-   * 打开本地书籍对应的在线章节详情；缺少 ID 时先按书名搜索。
-   * @param book 要打开的本地书籍。
-   * @returns 目录加载或搜索请求完成后的 Promise。
-   */
+  /** 打开本地书籍详情和已下载章节目录。 */
   async function openLibraryBook(book: Book) {
-    if (book.novelId)
-      return openChapterPicker(
-        {
-          novelId: book.novelId,
-          novelName: book.name,
-          authorName: "",
-          novelCover: book.cover || "",
-          lastUpdateTime: book.updatedAt,
-        },
-        "text",
-      );
     try {
-      const matches = await request<Novel[]>(
-        `/api/search?q=${encodeURIComponent(book.name)}`,
+      localBook.value = await request<LocalBookDetail>(
+        `/api/library/${encodeURIComponent(book.name)}`,
       );
-      const match =
-        matches.find((novel) => novel.novelName === book.name) || matches[0];
-      if (match) return openChapterPicker(match, "text");
-    } catch {
-      /* retain fallback below */
+      active.value = "libraryDetail";
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "无法读取本地书籍详情");
     }
-    notify("暂时找不到对应的在线小说信息");
+  }
+
+  /** 打开已下载文字章节的本地阅读页。 */
+  async function openLocalChapter(chapterId: number) {
+    const book = localBook.value;
+    if (!book) return;
+    try {
+      localChapter.value = await request<LocalChapterContent>(
+        `/api/library/${encodeURIComponent(book.name)}/chapters/${chapterId}`,
+      );
+      active.value = "reader";
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "无法读取本地章节");
+    }
+  }
+
+  /** 在 SF 官方页面打开在线阅读，避免本地书库目录请求在线内容。 */
+  function readOnline() {
+    if (localBook.value?.novelId)
+      window.open(`https://book.sfacg.com/Novel/${localBook.value.novelId}/`, "_blank", "noopener");
+  }
+
+  /** 从本地章节库导出 EPUB，并触发浏览器下载。 */
+  async function exportEpub() {
+    const book = localBook.value;
+    if (!book) return;
+    exportingEpub.value = true;
+    try {
+      const { href } = await request<{ href: string }>(
+        `/api/library/${encodeURIComponent(book.name)}/epub`,
+        { method: "POST" },
+      );
+      book.epubHref = href;
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = `${book.name}.epub`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      notify("EPUB 已导出");
+      void refreshLibrary();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "导出 EPUB 失败");
+    } finally {
+      exportingEpub.value = false;
+    }
+  }
+
+  /** 从本地详情继续挑选尚未下载的在线章节。 */
+  function continueDownload() {
+    const book = localBook.value;
+    if (!book?.novelId) return;
+    void openChapterPicker(
+      {
+        novelId: book.novelId,
+        novelName: book.name,
+        authorName: book.author,
+        novelCover: book.cover || "",
+        lastUpdateTime: "",
+      },
+      "text",
+    );
   }
 
   /**
@@ -672,6 +721,9 @@ export function useNovelDesk() {
     bookshelfPage,
     libraryManaging,
     confirmBook,
+    localBook,
+    localChapter,
+    exportingEpub,
     chapterModalOpen,
     chapterLoading,
     chapterMode,
@@ -709,6 +761,10 @@ export function useNovelDesk() {
     deleteBook,
     confirmDeleteBook,
     openLibraryBook,
+    openLocalChapter,
+    readOnline,
+    exportEpub,
+    continueDownload,
     selectBookshelfCategory,
     setBookshelfPage,
     refreshBookshelf,
