@@ -5,12 +5,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "register": "ts-node ./src/auto/register.ts",
-    "checkin": "ts-node ./src/auto/checkIn.ts",
-    "build:legacy": "webpack --mode production --config ./webpack.config.js",
     "build": "vite build",
     "server": "tsx src/server.ts",
-    "start": "tsx src/server.ts",
     "dev": "concurrently -n API,WEB \"npm run server\" \"vite\""
   },
   "author": "Rcrwrate",

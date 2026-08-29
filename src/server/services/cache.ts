@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
+import { getRequestPolicy } from "./requestPolicy";
 
 type CacheEntry<T> = { expiresAt: number; value: T };
 
 const responseCache = new Map<string, CacheEntry<unknown>>();
 const pendingCacheLoads = new Map<string, Promise<unknown>>();
-let metadataQueue: Promise<void> = Promise.resolve();
-let lastMetadataRequestAt = 0;
+let downloadQueue: Promise<void> = Promise.resolve();
+let lastDownloadRequestAt = 0;
 
 export function sessionKey(cookie: string | undefined, scope: string) {
   const identity = cookie
@@ -33,21 +34,22 @@ export async function cached<T>(
   return load;
 }
 
-// Serialize metadata probes so the upstream service is not flooded.
-export async function throttledMetadata<T>(
+// Serialize requests made by background download jobs. Interactive catalog
+// requests intentionally bypass this queue so the details dialog stays responsive.
+export async function throttledDownload<T>(
   loader: () => Promise<T>,
-  interval = 250,
+  interval = getRequestPolicy().requestIntervalMs,
 ): Promise<T> {
-  const run = metadataQueue.then(async () => {
-    const wait = Math.max(0, interval - (Date.now() - lastMetadataRequestAt));
+  const run = downloadQueue.then(async () => {
+    const wait = Math.max(0, interval - (Date.now() - lastDownloadRequestAt));
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
     try {
       return await loader();
     } finally {
-      lastMetadataRequestAt = Date.now();
+      lastDownloadRequestAt = Date.now();
     }
   });
-  metadataQueue = run.then(
+  downloadQueue = run.then(
     () => undefined,
     () => undefined,
   );

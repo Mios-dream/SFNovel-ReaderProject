@@ -22,7 +22,7 @@ const emit = defineEmits<{ navigate: [view: ViewName]; login: [] }>();
 </template>
 
 <style scoped>
-.sidebar { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: calc(100vh - 36px); padding: 22px 15px; border-radius: 22px; }
+.sidebar { position: sticky; top: 18px; z-index: 1; display: flex; flex-direction: column; height: calc(100vh - 36px); min-height: 0; padding: 22px 15px; border-radius: 22px; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 1px 8px 33px; color: var(--theme-color-dark); font-family: KaTongFont, "Microsoft YaHei", sans-serif; font-size: 21px; }
 .brand-mark { display: grid; width: 36px; height: 36px; border-radius: 13px; color: #fff; background: var(--theme-color); box-shadow: 0 7px 14px #e2946440; place-items: center; }
 nav { display: grid; gap: 7px; }
@@ -39,7 +39,7 @@ nav button.active { color: var(--theme-color-dark); background: #fbe0d0; box-sha
 .account-button svg:last-child { margin-left: auto; }
 
 @media (max-width: 760px) {
-  .sidebar { display: flex; min-height: auto; margin-bottom: 10px; padding: 14px; border-radius: 17px; }
+  .sidebar { position: relative; top: auto; display: flex; height: auto; min-height: auto; margin-bottom: 10px; padding: 14px; border-radius: 17px; }
   .brand { padding: 0; }
   .sidebar nav, .sidebar-bottom .mini-card { display: none; }
   .sidebar-bottom { margin: 0 0 0 auto; }

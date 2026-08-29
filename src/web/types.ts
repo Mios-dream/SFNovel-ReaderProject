@@ -54,3 +54,4 @@ export type Book = {
 
 export type AuthStatus = { authenticated: boolean; userName?: string };
 export type BrowserLoginStatus = AuthStatus & { waiting?: boolean };
+export type RequestPolicy = { requestIntervalMs: number; maxConcurrentDownloads: number };

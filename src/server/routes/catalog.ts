@@ -2,7 +2,7 @@ import { Router } from "express";
 import { SfacgClient } from "../../client/Sfacg/api/client";
 import { config } from "../config";
 import { getAuthSession } from "../services/auth";
-import { cached, sessionKey, throttledMetadata } from "../services/cache";
+import { cached, sessionKey } from "../services/cache";
 import { AudioCatalogError, getAudioChapters } from "../services/downloads";
 import { getLocalDownloadState } from "../services/library";
 
@@ -20,7 +20,7 @@ catalogRouter.get("/bookshelf", async (req, res) => {
   if (!session) return res.status(401).json({ message: "请先登录 SF 账号后查看书架" });
   try {
     const client = new SfacgClient(); client.SetCookie(session.cookie);
-    const load = () => throttledMetadata(() => client.bookshelfCollection());
+    const load = () => client.bookshelfCollection();
     const collection = req.query.refresh === "1" ? await load() : await cached(sessionKey(session.cookie, "bookshelf"), config.cache.bookshelfTtl, load);
     if (!collection) return res.status(401).json({ message: "SF 登录会话已失效，请重新登录后同步书架" });
     res.json(collection);
@@ -32,7 +32,7 @@ catalogRouter.get("/chapters/:novelId", async (req, res) => {
   if (!Number.isInteger(novelId) || novelId <= 0) return res.status(400).json({ message: "小说编号无效" });
   try {
     const session = getAuthSession(req); const client = new SfacgClient(); if (session) client.SetCookie(session.cookie);
-    const volumes = await cached(sessionKey(session?.cookie, `chapters:${novelId}`), config.cache.metadataTtl, () => throttledMetadata(() => client.volumeInfos(novelId)));
+    const volumes = await cached(sessionKey(session?.cookie, `chapters:${novelId}`), config.cache.metadataTtl, () => client.volumeInfos(novelId));
     const localState = await getLocalDownloadState(novelId);
     if (!volumes) throw new Error("无法读取章节目录");
     const downloaded = new Set(localState.downloadedTextChapterIds), titles = new Set(localState.downloadedTextTitles);
@@ -47,7 +47,7 @@ catalogRouter.get("/novel/:novelId", async (req, res) => {
   const novelId = Number(req.params.novelId);
   if (!Number.isInteger(novelId) || novelId <= 0) return res.status(400).json({ message: "小说编号无效" });
   try {
-    const novel = await cached(`novel:${novelId}`, config.cache.metadataTtl, () => throttledMetadata(() => new SfacgClient().novelInfo(novelId)));
+    const novel = await cached(`novel:${novelId}`, config.cache.metadataTtl, () => new SfacgClient().novelInfo(novelId));
     if (!novel) throw new Error("无法读取小说信息");
     res.json({ novelId: novel.novelId, novelName: novel.novelName, authorName: novel.authorName, novelCover: novel.novelCover, lastUpdateTime: novel.lastUpdateTime, description: novel.expand?.intro || "暂无简介", isFinish: novel.isFinish, typeName: novel.expand?.typeName });
   } catch (error) { res.status(500).json({ message: error instanceof Error ? error.message : "读取小说信息失败" }); }
@@ -59,7 +59,7 @@ catalogRouter.get("/audio/:novelId", async (req, res) => {
   const novelId = Number(req.params.novelId);
   if (!Number.isInteger(novelId) || novelId <= 0) return res.status(400).json({ message: "小说编号无效" });
   try {
-    const audio = await cached(sessionKey(session.cookie, `audio:${novelId}`), config.cache.audioTtl, () => throttledMetadata(() => getAudioChapters(novelId, session.cookie)));
+    const audio = await cached(sessionKey(session.cookie, `audio:${novelId}`), config.cache.audioTtl, () => getAudioChapters(novelId, session.cookie));
     const downloaded = new Set((await getLocalDownloadState(novelId)).downloadedAudioChapterIds);
     res.json({ title: audio.title, chapters: audio.chapters.map(({ id, title, volume }) => ({ id, title, volume, downloaded: downloaded.has(id) })) });
   } catch (error) {

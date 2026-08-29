@@ -2,11 +2,44 @@ import type { Request } from "express";
 import { bookUrl } from "./library";
 import { writeAudio, writeNovel } from "./downloads";
 import { getAuthSession } from "./auth";
+import { getRequestPolicy } from "./requestPolicy";
 import type { Job } from "../types";
 
 const jobs = new Map<string, Job>();
 const jobControllers = new Map<string, AbortController>();
 const jobSessions = new Map<string, { cookie?: string; chapterIds?: number[] }>();
+
+let activeDownloadCount = 0;
+const downloadSlotWaiters: Array<{ resolve: (release: () => void) => void; reject: (error: Error) => void; signal: AbortSignal; }> = [];
+
+function pumpDownloadSlot() {
+  while (activeDownloadCount < getRequestPolicy().maxConcurrentDownloads) {
+    const next = downloadSlotWaiters.shift();
+    if (!next) return;
+    if (next.signal.aborted) {
+      next.reject(new Error("下载已取消"));
+      continue;
+    }
+    activeDownloadCount += 1;
+    let released = false;
+    next.resolve(() => {
+      if (released) return;
+      released = true;
+      activeDownloadCount -= 1;
+      pumpDownloadSlot();
+    });
+  }
+}
+
+export function refreshDownloadSlots() { pumpDownloadSlot(); }
+
+function acquireDownloadSlot(signal: AbortSignal): Promise<() => void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new Error("下载已取消"));
+    downloadSlotWaiters.push({ resolve, reject, signal });
+    pumpDownloadSlot();
+  });
+}
 
 function run(job: Job) {
   const session = jobSessions.get(job.id);
@@ -14,7 +47,10 @@ function run(job: Job) {
   const controller = new AbortController();
   jobControllers.set(job.id, controller);
   void (async () => {
+    let release: (() => void) | undefined;
     try {
+      release = await acquireDownloadSlot(controller.signal);
+      if (controller.signal.aborted) throw new Error("下载已取消");
       job.status = "downloading";
       const update = (progress: number, message: string) => Object.assign(job, { progress, message });
       if (job.kind === "audio") {
@@ -28,7 +64,7 @@ function run(job: Job) {
       if (controller.signal.aborted && job.status === "paused") job.message = "已暂停，可继续下载";
       else if (controller.signal.aborted) Object.assign(job, { status: "cancelled", message: "下载已取消" });
       else Object.assign(job, { status: "error", message: error instanceof Error ? error.message : "下载失败" });
-    } finally { jobControllers.delete(job.id); }
+    } finally { release?.(); jobControllers.delete(job.id); }
   })();
 }
 

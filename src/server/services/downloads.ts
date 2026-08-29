@@ -7,9 +7,11 @@ import { SfacgClient } from "../../client/Sfacg/api/client";
 import { config } from "../config";
 import type { AudioChapter, AudioInfoResponse } from "../types";
 import { numberIds, readNovelDownloadMetadata, safeAudioName, safeName, writeNovelDownloadMetadata } from "./library";
+import { throttledDownload } from "./cache";
 
 type ProgressHandler = (value: number, message: string) => void;
 type AudioCatalogErrorCode = "NO_AUDIO" | "AUTH_EXPIRED" | "UPSTREAM_ERROR";
+const SF_WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
 
 export class AudioCatalogError extends Error {
   constructor(public readonly code: AudioCatalogErrorCode, message: string, public readonly httpStatus: 401 | 404 | 502) {
@@ -20,7 +22,11 @@ export class AudioCatalogError extends Error {
 
 export async function writeNovel(novelId: number, cookie: string | undefined, chapterIds: number[] | undefined, signal: AbortSignal, onProgress?: ProgressHandler) {
   const client = new SfacgClient();
-  const [novel, volumes] = await Promise.all([client.novelInfo(novelId, signal), client.volumeInfos(novelId, signal)]);
+  if (cookie) client.SetCookie(cookie);
+  const [novel, volumes] = await Promise.all([
+    throttledDownload(() => client.novelInfo(novelId, signal)),
+    throttledDownload(() => client.volumeInfos(novelId, signal)),
+  ]);
   if (!novel || !volumes) throw new Error("无法读取小说信息");
   const novelName = safeName(novel.novelName);
   const novelDir = path.join(config.libraryDir, novelName);
@@ -50,7 +56,7 @@ export async function writeNovel(novelId: number, cookie: string | undefined, ch
       if (saved) { finished += 1; chapters.push(saved.content); continue; }
       try {
         if (chapter.needFireMoney !== 0 && !cookie) continue;
-        const raw = await downloadClient.contentInfos(chapter.chapId, signal);
+        const raw = await throttledDownload(() => downloadClient.contentInfos(chapter.chapId, signal));
         if (signal.aborted) throw new Error("下载已取消");
         finished += 1;
         onProgress?.(total ? Math.round(5 + (finished / total) * 90) : 100, `正在下载：${chapter.ntitle}`);
@@ -76,7 +82,7 @@ export async function writeNovel(novelId: number, cookie: string | undefined, ch
   await fse.remove(progressFile);
   await writeNovelDownloadMetadata(novelDir, { ...metadata, novelId, title: novel.novelName, downloadedTextChapterIds: [...downloadedTextChapterIds] });
   if (novel.novelCover) {
-    try { await fse.outputFile(path.join(imageDir, "cover.jpeg"), await SfacgClient.image(novel.novelCover)); }
+    try { await fse.outputFile(path.join(imageDir, "cover.jpeg"), await throttledDownload(() => SfacgClient.image(novel.novelCover))); }
     catch { /* cover is optional */ }
   }
   onProgress?.(100, "已保存到本地书库");
@@ -88,7 +94,7 @@ export async function getAudioChapters(novelId: number, cookie: string) {
   try {
     ({ data } = await axios.get<AudioInfoResponse>("https://i.sfacg.com/ajax/ashx/Common.ashx", {
       params: { op: "getAudioInfo", nid: novelId },
-      headers: { Cookie: cookie, "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36", Accept: "application/json, text/javascript, */*; q=0.01", "X-Requested-With": "XMLHttpRequest", Referer: "https://i.sfacg.com/consume/book/" },
+      headers: { Cookie: cookie, "User-Agent": SF_WEB_USER_AGENT, Accept: "application/json, text/javascript, */*; q=0.01", "X-Requested-With": "XMLHttpRequest", Referer: "https://i.sfacg.com/consume/book/" },
       timeout: 15_000,
     }));
   } catch (error) {
@@ -110,7 +116,7 @@ export async function getAudioChapters(novelId: number, cookie: string) {
 }
 
 export async function writeAudio(novelId: number, cookie: string, chapterIds: number[] | undefined, signal: AbortSignal, onProgress?: ProgressHandler) {
-  const audio = await getAudioChapters(novelId, cookie);
+  const audio = await throttledDownload(() => getAudioChapters(novelId, cookie));
   const selected = chapterIds?.length ? new Set(chapterIds) : undefined;
   const chapters = selected ? audio.chapters.filter((chapter) => selected.has(chapter.id)) : audio.chapters;
   const novelName = safeName(audio.title);
@@ -127,7 +133,7 @@ export async function writeAudio(novelId: number, cookie: string, chapterIds: nu
     onProgress?.(Math.round((index / chapters.length) * 96) + 2, `正在下载：${chapter.title}`);
     if (!(await fse.pathExists(target))) {
       try {
-        const response = await axios.get<NodeJS.ReadableStream>(chapter.source, { responseType: "stream", signal, headers: { Cookie: cookie, "User-Agent": "Mozilla/5.0" }, timeout: 60_000 });
+        const response = await throttledDownload(() => axios.get<NodeJS.ReadableStream>(chapter.source, { responseType: "stream", signal, headers: { Cookie: cookie, "User-Agent": SF_WEB_USER_AGENT, Referer: "https://i.sfacg.com/consume/book/", Accept: "audio/mpeg,*/*;q=0.8" }, timeout: 60_000 }));
         await pipeline(response.data, createWriteStream(partialTarget));
         await fse.move(partialTarget, target, { overwrite: true });
       } catch (error) { await fse.remove(partialTarget); throw error; }

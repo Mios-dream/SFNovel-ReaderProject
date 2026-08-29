@@ -4,6 +4,7 @@ import { authRouter } from "./routes/auth";
 import { catalogRouter } from "./routes/catalog";
 import { jobsRouter } from "./routes/jobs";
 import { libraryRouter } from "./routes/library";
+import { settingsRouter } from "./routes/settings";
 
 export function createApp() {
   const app = express();
@@ -13,6 +14,7 @@ export function createApp() {
   app.use("/api/auth", authRouter);
   app.use("/api", jobsRouter);
   app.use("/api", libraryRouter);
+  app.use("/api/settings", settingsRouter);
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
   app.use(express.static(config.webDir));
   return app;

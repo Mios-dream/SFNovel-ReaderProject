@@ -1,15 +1,9 @@
 {
-  "version": "1.0.0",
-  "Register": {
-    "userName": "",
-    "passWord": "",
-    "token": ""
+  "userSettings": {
+    "libraryDir": "output/菠萝包轻小说"
   },
-  "Sfacg": {
-    "proxy": "",
-    "AppName": "Sfacg",
-    "orderedChaps": true,
-    "saveAccount": true,
-    "epubMake": true
+  "requestPolicy": {
+    "requestIntervalMs": 250,
+    "maxConcurrentDownloads": 1
   }
 }
