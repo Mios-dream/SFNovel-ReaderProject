@@ -3,7 +3,6 @@ import { ChevronRight, KeyRound, LoaderCircle, X } from "lucide-vue-next";
 import type { AuthStatus } from "../types";
 
 defineProps<{ open: boolean; auth: AuthStatus; busy: boolean }>();
-// 登录操作交由父级调用受控浏览器流程，组件本身不保存凭据。
 const emit = defineEmits<{ close: []; login: []; logout: [] }>();
 </script>
 
@@ -23,7 +22,8 @@ const emit = defineEmits<{ close: []; login: []; logout: [] }>();
           退出当前会话 <ChevronRight :size="15" /></button></template
       ><template v-else
         ><p>
-          将打开一个独立的官方登录窗口。账号、密码和滑块验证都只在该官方页面内完成，应用会自动取得本地下载会话。
+          将打开独立的官方登录窗口。账号、密码和滑块验证都只在官方页面内完成，应用仅取得下载所需的会话
+          Cookie。
         </p>
         <button
           class="primary-button full"

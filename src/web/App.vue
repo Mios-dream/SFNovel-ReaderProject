@@ -8,6 +8,7 @@ import {
 } from "lucide-vue-next";
 import AppSidebar from "./components/AppSidebar.vue";
 import AuthModal from "./components/AuthModal.vue";
+import AccountProfileModal from "./components/AccountProfileModal.vue";
 import ChapterPickerModal from "./components/ChapterPickerModal.vue";
 import ConfirmDeleteModal from "./components/ConfirmDeleteModal.vue";
 import DownloadQueueModal from "./components/DownloadQueueModal.vue";
@@ -29,7 +30,7 @@ const desk = reactive(useNovelDesk());
       :library-count="desk.library.length"
       :auth="desk.auth"
       @navigate="desk.navigate"
-      @login="desk.credentialsOpen = true"
+      @account="desk.openAccount"
     />
 
     <section class="content">
@@ -145,6 +146,14 @@ const desk = reactive(useNovelDesk());
       :busy="desk.loginBusy"
       @close="desk.credentialsOpen = false"
       @login="desk.login"
+      @logout="desk.logout"
+    />
+    <AccountProfileModal
+      :open="desk.accountOpen"
+      :profile="desk.accountProfile"
+      :loading="desk.accountProfileLoading"
+      :error="desk.accountProfileError"
+      @close="desk.accountOpen = false"
       @logout="desk.logout"
     />
     <RequestPolicyModal

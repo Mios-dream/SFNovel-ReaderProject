@@ -9,6 +9,7 @@ import type {
   Job,
   Novel,
   RequestPolicy,
+  UserProfile,
   ViewName,
 } from "../types";
 
@@ -61,6 +62,10 @@ export function useNovelDesk() {
   const selectedChapterIds = ref<number[]>([]);
   const queueOpen = ref(false);
   const credentialsOpen = ref(false);
+  const accountOpen = ref(false);
+  const accountProfile = ref<UserProfile>();
+  const accountProfileLoading = ref(false);
+  const accountProfileError = ref("");
   const requestPolicyOpen = ref(false);
   const requestPolicy = ref<RequestPolicy>({
     requestIntervalMs: 500,
@@ -198,9 +203,34 @@ export function useNovelDesk() {
       window.clearTimeout(loginPollTimer);
       await fetch("/api/auth/logout", { method: "POST" });
       auth.value = { authenticated: false };
+      accountOpen.value = false;
+      credentialsOpen.value = false;
+      accountProfile.value = undefined;
+      accountProfileError.value = "";
       notify("已清除本地登录会话");
     } catch {
       notify("退出登录失败");
+    }
+  }
+
+  /** 打开账户信息；未登录时改为打开官方登录流程。 */
+  async function openAccount() {
+    if (!auth.value.authenticated) {
+      credentialsOpen.value = true;
+      return;
+    }
+    accountOpen.value = true;
+    accountProfileLoading.value = true;
+    accountProfileError.value = "";
+    try {
+      const profile = await request<UserProfile>("/api/auth/profile");
+      accountProfile.value = profile;
+      auth.value = { ...auth.value, userName: profile.nickName };
+    } catch (error) {
+      accountProfileError.value =
+        error instanceof Error ? error.message : "读取账户资料失败";
+    } finally {
+      accountProfileLoading.value = false;
     }
   }
 
@@ -652,6 +682,10 @@ export function useNovelDesk() {
     selectedChapterIds,
     queueOpen,
     credentialsOpen,
+    accountOpen,
+    accountProfile,
+    accountProfileLoading,
+    accountProfileError,
     requestPolicyOpen,
     requestPolicy,
     requestPolicySaving,
@@ -681,6 +715,7 @@ export function useNovelDesk() {
     navigate,
     login,
     logout,
+    openAccount,
     openRequestPolicy,
     saveRequestPolicy,
     formatDate,

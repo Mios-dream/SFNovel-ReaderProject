@@ -62,6 +62,15 @@ export type Book = {
 
 export type AuthStatus = { authenticated: boolean; userName?: string };
 export type BrowserLoginStatus = AuthStatus & { waiting?: boolean };
+export type UserProfile = {
+  accountId: number;
+  nickName: string;
+  avatar: string;
+  welfareCoin: number;
+  fireMoneyRemain: number;
+  couponsRemain: number;
+  vipLevel: number;
+};
 /** 下载请求限流设置，与服务端 config.json 的 requestPolicy 对应。 */
 export type RequestPolicy = {
   requestIntervalMs: number;

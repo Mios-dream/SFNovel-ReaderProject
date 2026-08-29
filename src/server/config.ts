@@ -75,6 +75,7 @@ export const config = {
     metadataTtl: 60_000,
     audioTtl: 120_000,
     bookshelfTtl: 120_000,
+    profileTtl: 120_000,
   },
   userConfigFile: path.join(rootDir, "config.json"),
 };
