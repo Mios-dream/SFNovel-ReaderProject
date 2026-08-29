@@ -124,9 +124,7 @@ export async function writeNovel(
         );
         if (signal.aborted) throw new Error("下载已取消");
         finished += 1;
-        console.info(
-          `SF 正文来源：网页解析（章节 ${chapter.chapId}）`,
-        );
+        console.info(`SF 正文来源：网页解析（章节 ${chapter.chapId}）`);
         onProgress?.(
           total ? Math.round(5 + (finished / total) * 90) : 100,
           `已通过网页解析获取：${chapter.ntitle}`,
@@ -293,6 +291,52 @@ export async function getAudioChapters(novelId: number, cookie: string) {
 }
 
 /**
+ * 有声目录接口只包含专辑标题和章节，缺少本地书库展示所需的作者、简介与封面。
+ * 仅在本地资料不完整时补取小说详情，避免每次增量下载重复请求。
+ */
+async function ensureAudioBookDetails(
+  novelId: number,
+  cookie: string,
+  novelDir: string,
+  audioTitle: string,
+  signal: AbortSignal,
+) {
+  const metadata = await readNovelDownloadMetadata(novelDir);
+  const coverPath = path.join(novelDir, "imgs", "cover.jpeg");
+  const hasCover = await fse.pathExists(coverPath);
+  const needsDetails =
+    metadata.title === undefined ||
+    metadata.author === undefined ||
+    metadata.description === undefined;
+  if (!needsDetails && hasCover) return metadata;
+
+  const client = new SfacgApiClient();
+  client.setCookie(cookie);
+  const novel = await throttledDownload(() => client.novelInfo(novelId, signal));
+  if (!novel) return metadata;
+
+  const completedMetadata = {
+    ...metadata,
+    novelId,
+    title: metadata.title || audioTitle,
+    author: novel.authorName,
+    description: novel.expand?.intro || "",
+  };
+  await writeNovelDownloadMetadata(novelDir, completedMetadata);
+  if (!hasCover && novel.novelCover) {
+    try {
+      await fse.outputFile(
+        coverPath,
+        await throttledDownload(() => SfacgApiClient.image(novel.novelCover!)),
+      );
+    } catch {
+      /* A failed cover request must not fail an otherwise valid audio download. */
+    }
+  }
+  return completedMetadata;
+}
+
+/**
  * 下载有声章节并生成 M3U8 播放列表。
  * @param novelId SF 小说编号。
  * @param cookie 当前登录会话 Cookie。
@@ -316,22 +360,31 @@ export async function writeAudio(
     ? audio.chapters.filter((chapter) => selected.has(chapter.id))
     : audio.chapters;
   const novelName = safeName(audio.title);
-  const audioDir = path.join(config.libraryDir, novelName, "audio");
+  const novelDir = path.join(config.libraryDir, novelName);
+  const audioDir = path.join(novelDir, "audio");
   await fse.ensureDir(audioDir);
-  const playlist: string[] = ["#EXTM3U"];
-  const metadata = await readNovelDownloadMetadata(
-    path.join(config.libraryDir, novelName),
+  onProgress?.(2, "正在补全作品封面和详情");
+  const metadata = await ensureAudioBookDetails(
+    novelId,
+    cookie,
+    novelDir,
+    audio.title,
+    signal,
   );
   const downloadedAudioChapterIds = new Set(
     numberIds(metadata.downloadedAudioChapterIds),
   );
-  for (const [index, chapter] of chapters.entries()) {
+  for (const [selectedIndex, chapter] of chapters.entries()) {
     if (signal.aborted) throw new Error("下载已取消");
-    const filename = `${String(index + 1).padStart(3, "0")} - ${safeAudioName(chapter.title)}.mp3`;
+    // 使用完整在线目录中的序号，增量下载时不会覆盖已有章节文件。
+    const chapterIndex = audio.chapters.findIndex(
+      (item) => item.id === chapter.id,
+    );
+    const filename = `${String(chapterIndex + 1).padStart(3, "0")} - ${safeAudioName(chapter.title)}.mp3`;
     const target = path.join(audioDir, filename);
     const partialTarget = `${target}.part`;
     onProgress?.(
-      Math.round((index / chapters.length) * 96) + 2,
+      Math.round((selectedIndex / chapters.length) * 96) + 2,
       `正在下载：${chapter.title}`,
     );
     if (!(await fse.pathExists(target))) {
@@ -357,20 +410,30 @@ export async function writeAudio(
       }
     }
     downloadedAudioChapterIds.add(chapter.id);
-    await writeNovelDownloadMetadata(path.join(config.libraryDir, novelName), {
+    await writeNovelDownloadMetadata(novelDir, {
       ...metadata,
       novelId,
       title: audio.title,
       downloadedAudioChapterIds: [...downloadedAudioChapterIds],
     });
-    playlist.push(`#EXTINF:-1,${chapter.volume} - ${chapter.title}`, filename);
+  }
+  // 每次下载后从完整在线目录重建清单，保留此前已下载但本次未选择的章节。
+  const playlist: string[] = ["#EXTM3U"];
+  for (const [chapterIndex, chapter] of audio.chapters.entries()) {
+    const filename = `${String(chapterIndex + 1).padStart(3, "0")} - ${safeAudioName(chapter.title)}.mp3`;
+    if (await fse.pathExists(path.join(audioDir, filename))) {
+      playlist.push(
+        `#EXTINF:-1,${chapter.volume} - ${chapter.title}`,
+        filename,
+      );
+    }
   }
   const playlistFile = "有声目录.m3u8";
   await fse.outputFile(
     path.join(audioDir, playlistFile),
     `${playlist.join("\n")}\n`,
   );
-  await writeNovelDownloadMetadata(path.join(config.libraryDir, novelName), {
+  await writeNovelDownloadMetadata(novelDir, {
     ...metadata,
     novelId,
     title: audio.title,

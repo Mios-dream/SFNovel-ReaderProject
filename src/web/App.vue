@@ -19,6 +19,7 @@ import DiscoverPage from "./pages/DiscoverPage.vue";
 import LibraryPage from "./pages/LibraryPage.vue";
 import LocalBookDetailPage from "./pages/LocalBookDetailPage.vue";
 import LocalReaderPage from "./pages/LocalReaderPage.vue";
+import LocalAudioPlayerPage from "./pages/LocalAudioPlayerPage.vue";
 
 // reactive 会自动解包 composable 返回的 ref，模板中可直接读写 desk.xxx。
 const desk = reactive(useNovelDesk());
@@ -49,7 +50,9 @@ const desk = reactive(useNovelDesk());
                     ? "你的本地书库"
                     : desk.active === "libraryDetail"
                       ? desk.localBook?.name || "本地书籍"
-                      : desk.localChapter?.title || "本地阅读"
+                      : desk.active === "audioPlayer"
+                        ? `${desk.localBook?.name || "本地书籍"} 有声`
+                        : desk.localChapter?.title || "本地阅读"
             }}
           </h1>
         </div>
@@ -114,14 +117,25 @@ const desk = reactive(useNovelDesk());
         :exporting="desk.exportingEpub"
         @back="desk.navigate('library')"
         @read="desk.openLocalChapter"
+        @play-audio="desk.openLocalAudioPlayer"
         @online="desk.readOnline"
         @continue-download="desk.continueDownload"
         @export="desk.exportEpub"
       />
       <LocalReaderPage
-        v-else-if="desk.active === 'reader' && desk.localBook && desk.localChapter"
+        v-else-if="
+          desk.active === 'reader' && desk.localBook && desk.localChapter
+        "
         :book-name="desk.localBook.name"
         :chapter="desk.localChapter"
+        @back="desk.navigate('libraryDetail')"
+      />
+      <LocalAudioPlayerPage
+        v-else-if="desk.active === 'audioPlayer' && desk.localBook"
+        :book-name="desk.localBook.name"
+        :author="desk.localBook.author"
+        :cover="desk.localBook.cover"
+        :tracks="desk.localBook.audioTracks"
         @back="desk.navigate('libraryDetail')"
       />
     </section>
@@ -243,7 +257,7 @@ const desk = reactive(useNovelDesk());
   height: 100%;
   min-height: 0;
   max-width: 1200px;
-  padding: 18px 42px 18px 2px;
+  padding: 18px 42px 0px 2px;
   justify-self: center;
   overflow-x: hidden;
   overflow-y: auto;

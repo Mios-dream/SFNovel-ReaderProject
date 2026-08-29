@@ -4,7 +4,8 @@ export type ViewName =
   | "bookshelf"
   | "library"
   | "libraryDetail"
-  | "reader";
+  | "reader"
+  | "audioPlayer";
 export type ChapterMode = "text" | "audio";
 
 export type Novel = {
@@ -68,13 +69,14 @@ export type Book = {
 };
 
 export type LocalChapter = { id: number; title: string; volume: string };
+export type LocalAudioTrack = { title: string; href: string };
 export type LocalBookDetail = {
   name: string;
   novelId?: number;
   author: string;
   description: string;
   cover?: string;
-  audioHref?: string;
+  audioTracks: LocalAudioTrack[];
   epubHref?: string;
   chapters: LocalChapter[];
 };

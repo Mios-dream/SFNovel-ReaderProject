@@ -14,6 +14,46 @@ import {
 
 export const libraryRouter = Router();
 
+type LocalAudioTrack = { title: string; href: string };
+
+/**
+ * 读取下载器写出的 M3U8 文件，并将其中的本地 MP3 转成可供网页播放器使用的轨道。
+ * 播放列表只用于组织文件，浏览器实际播放的始终是单个 MP3 资源。
+ */
+async function readLocalAudioTracks(folder: string, dir: string): Promise<LocalAudioTrack[]> {
+  const audioDir = path.join(dir, "audio");
+  const playlist = path.join(audioDir, "有声目录.m3u8");
+  if (!(await fse.pathExists(playlist))) return [];
+
+  const lines = (await fse.readFile(playlist, "utf8")).split(/\r?\n/);
+  const tracks: LocalAudioTrack[] = [];
+  let title: string | undefined;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith("#EXTINF:")) {
+      title = line.slice(line.indexOf(",") + 1).trim() || undefined;
+      continue;
+    }
+    if (line.startsWith("#")) continue;
+
+    // 下载器写入的文件位于 audio 目录的第一层，拒绝清单中的路径穿越条目。
+    if (path.basename(line) !== line || !line.toLowerCase().endsWith(".mp3")) {
+      title = undefined;
+      continue;
+    }
+    const file = path.join(audioDir, line);
+    if (await fse.pathExists(file)) {
+      tracks.push({
+        title: title || path.basename(line, path.extname(line)),
+        href: bookUrl(folder, path.posix.join("audio", line)),
+      });
+    }
+    title = undefined;
+  }
+  return tracks;
+}
+
 /**
  * 扫描书库目录并从元数据推导前端所需的文本、有声和封面链接。
  * @param _req 未使用的 Express 请求。
@@ -66,16 +106,18 @@ libraryRouter.get("/library/:folder", async (req, res) => {
     readNovelDownloadMetadata(target.dir),
     readNovelChapterStore(target.dir),
   ]);
-  const audioHref = path.join(target.dir, "audio", "有声目录.m3u8");
   const cover = path.join(target.dir, "imgs", "cover.jpeg");
-  const chapters = Object.values(store.chapters).sort((a, b) => a.id - b.id);
+  const [audioTracks, chapters] = await Promise.all([
+    readLocalAudioTracks(target.name, target.dir),
+    Promise.resolve(Object.values(store.chapters).sort((a, b) => a.id - b.id)),
+  ]);
   res.json({
     name: target.name,
     novelId: metadata.novelId,
     author: metadata.author || "未知作者",
     description: metadata.description || "暂无简介",
     cover: (await fse.pathExists(cover)) ? bookUrl(target.name, "imgs/cover.jpeg") : undefined,
-    audioHref: (await fse.pathExists(audioHref)) ? bookUrl(target.name, "audio/有声目录.m3u8") : undefined,
+    audioTracks,
     epubHref: (await fse.pathExists(path.join(target.dir, `${target.name}.epub`))) ? bookUrl(target.name, `${target.name}.epub`) : undefined,
     chapters: chapters.map(({ id, title, volume }) => ({ id, title, volume })),
   });

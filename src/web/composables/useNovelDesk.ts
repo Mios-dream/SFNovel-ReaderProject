@@ -540,6 +540,15 @@ export function useNovelDesk() {
     }
   }
 
+  /** 打开本地有声播放器，播放器逐首播放 M3U8 清单中的 MP3。 */
+  function openLocalAudioPlayer() {
+    if (!localBook.value?.audioTracks.length) {
+      notify("本地没有可播放的有声章节");
+      return;
+    }
+    active.value = "audioPlayer";
+  }
+
   /** 在 SF 官方页面打开在线阅读，避免本地书库目录请求在线内容。 */
   function readOnline() {
     if (localBook.value?.novelId)
@@ -762,6 +771,7 @@ export function useNovelDesk() {
     confirmDeleteBook,
     openLibraryBook,
     openLocalChapter,
+    openLocalAudioPlayer,
     readOnline,
     exportEpub,
     continueDownload,

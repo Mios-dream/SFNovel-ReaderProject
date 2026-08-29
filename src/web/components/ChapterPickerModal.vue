@@ -307,7 +307,7 @@ function toggleChapter(id: number, checked: boolean) {
 }
 .chapter-modal {
   width: min(760px, 100%);
-  max-height: calc(100vh - 36px);
+  max-height: calc(100vh - 50px);
   overflow: auto;
 }
 .chapter-hero {
@@ -467,7 +467,7 @@ function toggleChapter(id: number, checked: boolean) {
   flex-direction: column;
   /* height: auto; */
   height: 50vh;
-  max-height: 300px;
+  max-height: 260px;
   min-height: 100px;
   padding-right: 5px;
   overflow: auto;
