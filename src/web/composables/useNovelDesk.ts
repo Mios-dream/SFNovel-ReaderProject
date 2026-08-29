@@ -57,7 +57,7 @@ export function useNovelDesk() {
   const localBook = ref<LocalBookDetail>();
   const localChapter = ref<LocalChapterContent>();
   const localAudioTrackIndex = ref(0);
-  const exportingEpub = ref(false);
+  const exportingFormat = ref<"epub" | "markdown" | "txt" | "audio">();
   const chapterModalOpen = ref(false);
   const chapterLoading = ref(false);
   const chapterMode = ref<ChapterMode>("text");
@@ -564,29 +564,36 @@ export function useNovelDesk() {
       window.open(`https://book.sfacg.com/Novel/${localBook.value.novelId}/`, "_blank", "noopener");
   }
 
-  /** 从本地章节库导出 EPUB，并触发浏览器下载。 */
-  async function exportEpub() {
+  /** 导出本地文字或有声内容，并触发浏览器下载。 */
+  async function exportBook(format: "epub" | "markdown" | "txt" | "audio") {
     const book = localBook.value;
     if (!book) return;
-    exportingEpub.value = true;
+    exportingFormat.value = format;
     try {
-      const { href } = await request<{ href: string }>(
-        `/api/library/${encodeURIComponent(book.name)}/epub`,
-        { method: "POST" },
-      );
-      book.epubHref = href;
+      let href: string;
+      if (format === "epub") {
+        ({ href } = await request<{ href: string }>(
+          `/api/library/${encodeURIComponent(book.name)}/epub`,
+          { method: "POST" },
+        ));
+        book.epubHref = href;
+      } else {
+        href = `/api/library/${encodeURIComponent(book.name)}/export/${format}`;
+      }
       const link = document.createElement("a");
       link.href = href;
-      link.download = `${book.name}.epub`;
+      link.download = `${book.name}${
+        format === "epub" ? ".epub" : format === "txt" ? ".txt" : format === "markdown" ? "-Markdown.zip" : "-有声.zip"
+      }`;
       document.body.append(link);
       link.click();
       link.remove();
-      notify("EPUB 已导出");
-      void refreshLibrary();
+      notify(`${format === "audio" ? "有声内容已打包" : `${format.toUpperCase()} 已导出`}`);
+      if (format === "epub") void refreshLibrary();
     } catch (error) {
-      notify(error instanceof Error ? error.message : "导出 EPUB 失败");
+      notify(error instanceof Error ? error.message : "导出失败");
     } finally {
-      exportingEpub.value = false;
+      exportingFormat.value = undefined;
     }
   }
 
@@ -742,7 +749,7 @@ export function useNovelDesk() {
     localBook,
     localChapter,
     localAudioTrackIndex,
-    exportingEpub,
+    exportingFormat,
     chapterModalOpen,
     chapterLoading,
     chapterMode,
@@ -783,7 +790,7 @@ export function useNovelDesk() {
     openLocalChapter,
     openLocalAudioPlayer,
     readOnline,
-    exportEpub,
+    exportBook,
     continueDownload,
     selectBookshelfCategory,
     setBookshelfPage,

@@ -114,13 +114,13 @@ const desk = reactive(useNovelDesk());
       <LocalBookDetailPage
         v-else-if="desk.active === 'libraryDetail' && desk.localBook"
         :book="desk.localBook"
-        :exporting="desk.exportingEpub"
+        :exporting="desk.exportingFormat"
         @back="desk.navigate('library')"
         @read="desk.openLocalChapter"
         @play-audio="desk.openLocalAudioPlayer"
         @online="desk.readOnline"
         @continue-download="desk.continueDownload"
-        @export="desk.exportEpub"
+        @export="desk.exportBook"
       />
       <LocalReaderPage
         v-else-if="

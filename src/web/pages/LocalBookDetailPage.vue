@@ -8,9 +8,13 @@ import {
   Headphones,
   ListTree,
 } from "lucide-vue-next";
+import ExportModal from "../components/ExportModal.vue";
 import type { LocalBookDetail } from "../types";
 
-const { book } = defineProps<{ book: LocalBookDetail; exporting: boolean }>();
+const { book } = defineProps<{
+  book: LocalBookDetail;
+  exporting?: "epub" | "markdown" | "txt" | "audio";
+}>();
 const textChapterCount = computed(() =>
   book.chapterVolumes.reduce(
     (count, volume) => count + volume.chapters.length,
@@ -21,6 +25,7 @@ const audioChapterCount = computed(() => book.audioTracks.length);
 const chapterMode = ref<"text" | "audio">(
   textChapterCount.value ? "text" : "audio",
 );
+const exportModalOpen = ref(false);
 const chapterCount = computed(() =>
   chapterMode.value === "text"
     ? textChapterCount.value
@@ -32,7 +37,7 @@ const emit = defineEmits<{
   playAudio: [trackIndex: number];
   online: [];
   continueDownload: [];
-  export: [];
+  export: [format: "epub" | "markdown" | "txt" | "audio"];
 }>();
 </script>
 
@@ -73,11 +78,13 @@ const emit = defineEmits<{
           </button>
           <button
             class="action-button"
-            :disabled="!chapterCount || exporting"
-            title="导出 EPUB"
-            @click="emit('export')"
+            :disabled="
+              Boolean(exporting) || (!textChapterCount && !audioChapterCount)
+            "
+            title="导出本地内容"
+            @click="exportModalOpen = true"
           >
-            <FileDown :size="17" />{{ exporting ? "正在导出" : "导出 EPUB" }}
+            <FileDown :size="17" />{{ exporting ? "正在导出" : "导出书籍" }}
           </button>
           <button
             v-if="book.audioTracks.length"
@@ -166,6 +173,19 @@ const emit = defineEmits<{
       </div>
     </section>
   </section>
+  <ExportModal
+    :open="exportModalOpen"
+    :text-chapter-count="textChapterCount"
+    :audio-chapter-count="audioChapterCount"
+    :exporting="exporting"
+    @close="exportModalOpen = false"
+    @export="
+      (format) => {
+        exportModalOpen = false;
+        emit('export', format);
+      }
+    "
+  />
 </template>
 
 <style scoped>

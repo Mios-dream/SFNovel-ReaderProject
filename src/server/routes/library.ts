@@ -1,8 +1,9 @@
 import { Router } from "express";
+import { ZipArchive, type ArchiverError } from "archiver";
 import fse from "fs-extra";
 import path from "node:path";
 import { config } from "../config";
-import type { NovelDownloadMetadata } from "../types";
+import type { NovelDownloadMetadata, StoredTextChapter } from "../types";
 import { writeEpub } from "../services/epub";
 import {
   bookUrl,
@@ -16,6 +17,54 @@ import {
 export const libraryRouter = Router();
 
 type LocalAudioTrack = { title: string; href: string };
+
+function textWithoutMarkdown(value: string) {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .trim();
+}
+
+function localMarkdown(
+  title: string,
+  author: string,
+  description: string,
+  chapters: StoredTextChapter[],
+) {
+  const volumes = new Map<string, string[]>();
+  for (const chapter of chapters) {
+    const items = volumes.get(chapter.volume) || [];
+    items.push(chapter.content);
+    volumes.set(chapter.volume, items);
+  }
+  const intro = description.split("\n").map((line) => `  ${line}`).join("\n");
+  const content = [...volumes.entries()]
+    .map(([volume, items]) => `# ${volume}\n\n${items.join("\n\n")}`)
+    .join("\n\n");
+  return `---\ntitle: '${title.replaceAll("'", "\\\\'")}'\nauthor: '${author.replaceAll("'", "\\\\'")}'\nlang: 'zh-Hans'\ndescription: |-\n${intro}\n...\n\n${content}`;
+}
+
+function localText(
+  title: string,
+  author: string,
+  description: string,
+  chapters: StoredTextChapter[],
+) {
+  return [
+    title,
+    author,
+    "",
+    description,
+    "",
+    ...chapters.flatMap((chapter) => [
+      `${chapter.volume} - ${chapter.title}`,
+      "",
+      textWithoutMarkdown(chapter.content),
+      "",
+    ]),
+  ].join("\n");
+}
 
 /**
  * 读取下载器写出的 M3U8 文件，并将其中的本地 MP3 转成可供网页播放器使用的轨道。
@@ -145,6 +194,68 @@ libraryRouter.get("/library/:folder/chapters/:chapterId", async (req, res) => {
   const chapter = (await readNovelChapterStore(target.dir)).chapters[String(chapterId)];
   if (!chapter) return res.status(404).json({ message: "本地未找到该章节正文" });
   res.json(chapter);
+});
+
+/** 导出本地已下载文字为 Markdown 压缩包、TXT，或将有声文件打包为 ZIP。 */
+libraryRouter.get("/library/:folder/export/:format", async (req, res) => {
+  const target = libraryFolder(req.params.folder);
+  const format = req.params.format;
+  if (!target || !(await fse.pathExists(target.dir)))
+    return res.status(404).json({ message: "本地书籍不存在" });
+  if (!["markdown", "txt", "audio"].includes(format))
+    return res.status(400).json({ message: "不支持的导出格式" });
+
+  const [metadata, store, audioTracks] = await Promise.all([
+    readNovelDownloadMetadata(target.dir),
+    readNovelChapterStore(target.dir),
+    readLocalAudioTracks(target.name, target.dir),
+  ]);
+  const chapters = sortStoredTextChapters(Object.values(store.chapters));
+  const title = metadata.title || target.name;
+  const author = metadata.author || "未知作者";
+  const description = metadata.description || "";
+
+  if (format === "txt") {
+    if (!chapters.length)
+      return res.status(409).json({ message: "这本书没有可导出的已下载文字章节" });
+    res.attachment(`${target.name}.txt`);
+    res.type("text/plain; charset=utf-8");
+    return res.send(`\ufeff${localText(title, author, description, chapters)}`);
+  }
+
+  if (format === "markdown" && !chapters.length)
+    return res.status(409).json({ message: "这本书没有可导出的已下载文字章节" });
+  if (format === "audio" && !audioTracks.length)
+    return res.status(409).json({ message: "这本书没有可打包的有声章节" });
+
+  const archive = new ZipArchive({ zlib: { level: 9 } });
+  archive.on("error", (error: ArchiverError) => res.destroy(error));
+  res.attachment(
+    `${target.name}${format === "markdown" ? "-Markdown" : "-有声"}.zip`,
+  );
+  archive.pipe(res);
+
+  if (format === "markdown") {
+    archive.append(localMarkdown(title, author, description, chapters), {
+      name: `${target.name}.md`,
+    });
+    const imagesDir = path.join(target.dir, "imgs");
+    if (await fse.pathExists(imagesDir)) archive.directory(imagesDir, "imgs");
+  } else {
+    const audioDir = path.join(target.dir, "audio");
+    const files = await fse.readdir(audioDir, { withFileTypes: true });
+    for (const file of files) {
+      if (
+        !file.isFile() ||
+        (file.name !== "有声目录.m3u8" && !file.name.toLowerCase().endsWith(".mp3"))
+      )
+        continue;
+      archive.file(path.join(audioDir, file.name), {
+        name: path.posix.join("audio", file.name),
+      });
+    }
+  }
+  await archive.finalize();
 });
 
 /** 将本地已下载的文字章节导出为 EPUB。 */
