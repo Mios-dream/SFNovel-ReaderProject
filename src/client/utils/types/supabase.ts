@@ -1,3 +1,4 @@
+/** Supabase 自动生成的 JSON 基础类型。 */
 export type Json =
   | string
   | number
@@ -6,6 +7,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
+/** Supabase 数据库表结构，用于约束缓存读写的字段类型。 */
 export type Database = {
   public: {
     Tables: {

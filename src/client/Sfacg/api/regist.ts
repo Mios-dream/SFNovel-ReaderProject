@@ -4,7 +4,11 @@ import { nameAvalible, sendCode, codeverify, regist } from "../types/Types";
 
 export class SfacgRegist extends SfacgHttp {
 
-    // 名称可用性检测
+    /**
+     * 检查昵称是否可用。
+     * @param name 待检查的昵称。
+     * @returns 昵称可用时返回 true。
+     */
     async avalibleNmae(name: string): Promise<boolean> {
         try {
             const res = await this.post<nameAvalible>("/users/availablename", {
@@ -20,7 +24,11 @@ export class SfacgRegist extends SfacgHttp {
         }
     }
 
-    // 发出验证码
+    /**
+     * 向手机号发送注册验证码。
+     * @param phone 待验证的手机号。
+     * @returns 验证码发送成功时返回 true。
+     */
     async sendCode(phone: string) {
         try {
             const res = await this.post<sendCode>(`/sms/${phone}/86`, "");
@@ -35,7 +43,12 @@ export class SfacgRegist extends SfacgHttp {
 
     }
 
-    // 携带验证
+    /**
+     * 向 SF 提交短信验证码进行校验。
+     * @param phone 已接收验证码的手机号。
+     * @param smsAuthCode 用户收到的短信验证码。
+     * @returns 验证成功时返回 true。
+     */
     async codeverify(phone: string, smsAuthCode: number) {
         try {
             const res = await this.put<codeverify>(`/sms/${phone}/86`, {
@@ -52,7 +65,14 @@ export class SfacgRegist extends SfacgHttp {
 
     }
 
-    // 注册！
+    /**
+     * 使用手机号、昵称和验证码创建 SF 账号。
+     * @param passWord 新账号密码。
+     * @param nickName 新账号昵称。
+     * @param phone 已验证的手机号。
+     * @param smsAuthCode 已通过校验的短信验证码。
+     * @returns 新账号编号；注册失败时返回 false。
+     */
     async regist(
         passWord: string,
         nickName: string,

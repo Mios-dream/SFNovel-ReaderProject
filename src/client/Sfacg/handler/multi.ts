@@ -12,6 +12,10 @@ import { _SfacgCache } from "./cache";
 export class Multi {
 
   // 返回按照过期日期进行排序的代币数目和ck
+  /**
+   * 查询所有账号的有效代币并按过期时间升序排列。
+   * @returns 可用于购买章节的 Cookie 和代币信息数组。
+   */
   async SortedInfos() {
     const _users = await _SfacgCache.GetallCookies();
     const userExpiredInfos = await Promise.all(
@@ -42,6 +46,12 @@ export class Multi {
   }
 
 
+  /**
+   * 使用多个账号依次购买尚未缓存的 VIP 章节。
+   * @param novelId SF 小说编号。
+   * @param chapIds 可选章节 ID；未传时处理全部未购买 VIP 章节。
+   * @returns 购买流程完成后的 Promise。
+   */
   async Buy(novelId: number, chapIds?: number[]) {
     const _buy = await this.NeedBuy(novelId, chapIds)
     console.log("需要购买章节总数", _buy.length)
@@ -87,7 +97,12 @@ export class Multi {
 
   }
 
-  // 排序出需要购买的章节，如果传入值为空，则为默认全本（除了免费）
+  /**
+   * 计算指定作品中尚未缓存且符合筛选条件的 VIP 章节。
+   * @param novelId SF 小说编号。
+   * @param chapIds 可选章节 ID 筛选；未传时返回全部目标章节。
+   * @returns 按章节 ID 升序排列的待购买章节。
+   */
   async NeedBuy(
     novelId: number,
     chapIds?: number[]
@@ -128,6 +143,12 @@ export class Multi {
   }
 
 
+  /**
+   * 多账号购买流程的公开入口。
+   * @param novelId SF 小说编号。
+   * @param chapIds 可选章节 ID 筛选。
+   * @returns 购买流程完成后的 Promise。
+   */
   async MultiBuy(
     novelId: number,
     chapIds?: number[]) {

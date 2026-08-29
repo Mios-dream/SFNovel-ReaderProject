@@ -1,3 +1,4 @@
+/** 后台下载任务的生命周期状态。 */
 export type JobStatus =
   | "queued"
   | "downloading"
@@ -6,6 +7,7 @@ export type JobStatus =
   | "error"
   | "cancelled";
 
+/** 返回给前端的下载任务及进度信息。 */
 export type Job = {
   id: string;
   title: string;
@@ -18,6 +20,7 @@ export type Job = {
   chapterIds?: number[];
 };
 
+/** 通过 HttpOnly 会话 Cookie 传递的 SF 登录信息。 */
 export type AuthSession = { cookie: string; userName: string };
 
 export type AudioChapter = {

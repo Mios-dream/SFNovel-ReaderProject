@@ -17,8 +17,7 @@ import BookshelfPage from "./pages/BookshelfPage.vue";
 import DiscoverPage from "./pages/DiscoverPage.vue";
 import LibraryPage from "./pages/LibraryPage.vue";
 
-// A reactive wrapper unwraps the refs returned by the composable when accessed
-// from the template, including when they are passed to child components.
+// reactive 会自动解包 composable 返回的 ref，模板中可直接读写 desk.xxx。
 const desk = reactive(useNovelDesk());
 </script>
 

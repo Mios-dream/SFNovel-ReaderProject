@@ -3,6 +3,7 @@ import { BookMarked, BookOpen, ChevronRight, CircleUserRound, Compass, LibraryBi
 import type { AuthStatus, ViewName } from "../types";
 
 defineProps<{ active: ViewName; bookshelfCount: number; libraryCount: number; auth: AuthStatus }>();
+// 侧栏仅负责导航和登录入口，页面数据通过 props 展示。
 const emit = defineEmits<{ navigate: [view: ViewName]; login: [] }>();
 </script>
 

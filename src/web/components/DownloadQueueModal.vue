@@ -12,6 +12,7 @@ import {
 import type { Job } from "../types";
 
 defineProps<{ open: boolean; jobs: Job[] }>();
+// 弹窗只派发任务操作事件，任务状态由父级 composable 统一更新。
 const emit = defineEmits<{
   close: [];
   pause: [job: Job];

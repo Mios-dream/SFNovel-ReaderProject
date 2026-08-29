@@ -12,6 +12,13 @@ import type {
   ViewName,
 } from "../types";
 
+/**
+ * 发起同源 JSON 请求并统一转换后端错误。
+ * @param url API 路径。
+ * @param options 可选的 Fetch 请求配置。
+ * @returns 解析后的响应数据。
+ * @throws 当响应状态不是成功状态时抛出后端错误消息。
+ */
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", ...options });
   if (!response.ok) {
@@ -24,6 +31,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 type BookshelfResponse = { categories: string[]; items: Novel[] };
 
+/**
+ * 创建小说桌面页面使用的共享响应式状态与操作集合。
+ * @returns 响应式页面状态、计算属性和用户操作方法。
+ */
 export function useNovelDesk() {
   const active = ref<ViewName>("discover");
   const query = ref("");
@@ -103,6 +114,11 @@ export function useNovelDesk() {
     ),
   );
 
+  /**
+   * 显示短时提示并重置自动隐藏计时器。
+   * @param message 要显示给用户的提示文本。
+   * @returns 无返回值。
+   */
   function notify(message: string) {
     toast.value = message;
     window.clearTimeout(toastTimer);
@@ -111,6 +127,10 @@ export function useNovelDesk() {
     }, 2800);
   }
 
+  /**
+   * 从服务端刷新当前 SF 登录状态。
+   * @returns 请求完成后的 Promise。
+   */
   async function refreshAuthStatus() {
     try {
       auth.value = await request<AuthStatus>("/api/auth/status");
@@ -119,7 +139,12 @@ export function useNovelDesk() {
     }
   }
 
+  /**
+   * 轮询受控浏览器登录结果，成功后更新当前会话。
+   * @returns 轮询步骤完成后的 Promise。
+   */
   async function pollBrowserLogin() {
+    // 登录在官方窗口完成，前端通过短轮询等待后端提取会话 Cookie。
     if (!loginBusy.value) return;
     try {
       const result = await request<BrowserLoginStatus>(
@@ -145,6 +170,10 @@ export function useNovelDesk() {
       loginPollTimer = window.setTimeout(() => void pollBrowserLogin(), 1200);
   }
 
+  /**
+   * 请求后端打开官方登录浏览器并开始状态轮询。
+   * @returns 登录窗口启动请求完成后的 Promise。
+   */
   async function login() {
     window.clearTimeout(loginPollTimer);
     loginBusy.value = true;
@@ -160,6 +189,10 @@ export function useNovelDesk() {
     }
   }
 
+  /**
+   * 清除服务端保存的当前登录会话。
+   * @returns 登出请求完成后的 Promise。
+   */
   async function logout() {
     try {
       window.clearTimeout(loginPollTimer);
@@ -171,6 +204,10 @@ export function useNovelDesk() {
     }
   }
 
+  /**
+   * 打开请求设置弹窗并读取当前策略。
+   * @returns 设置读取完成后的 Promise。
+   */
   async function openRequestPolicy() {
     requestPolicyOpen.value = true;
     try {
@@ -182,6 +219,11 @@ export function useNovelDesk() {
     }
   }
 
+  /**
+   * 保存请求限流策略并关闭设置弹窗。
+   * @param policy 要保存的请求间隔和并发数。
+   * @returns 保存请求完成后的 Promise。
+   */
   async function saveRequestPolicy(policy: RequestPolicy) {
     requestPolicySaving.value = true;
     try {
@@ -202,6 +244,10 @@ export function useNovelDesk() {
     }
   }
 
+  /**
+   * 使用当前搜索关键词查询 SF 作品。
+   * @returns 搜索请求完成后的 Promise。
+   */
   async function search() {
     if (!query.value.trim()) return;
     await refreshAuthStatus();
@@ -218,7 +264,14 @@ export function useNovelDesk() {
     }
   }
 
+  /**
+   * 加载作品目录并打开章节选择弹窗。
+   * @param novel 要查看或下载的作品。
+   * @param mode 初始章节类型，文本或有声。
+   * @returns 目录加载完成后的 Promise。
+   */
   async function openChapterPicker(novel: Novel, mode: ChapterMode) {
+    // 并行加载作品详情、文本目录和有声目录；未登录时跳过有声请求。
     if (novel.bookshelfType === "comic") {
       notify("当前暂不支持漫画章节下载");
       return;
@@ -274,7 +327,11 @@ export function useNovelDesk() {
     }
   }
 
-  function allChapterIds() {
+  /**
+   * 获取当前目录模式下的全部章节 ID。
+   * @returns 当前文本或有声目录中的章节 ID 数组。
+   */
+  function allChapterIds(): number[] {
     return chapterMode.value === "text"
       ? chapterVolumes.value.flatMap((volume) =>
           volume.chapters.map((chapter) => chapter.chapId),
@@ -282,6 +339,11 @@ export function useNovelDesk() {
       : audioChapters.value.map((chapter) => chapter.id);
   }
 
+  /**
+   * 切换章节类型并重新选择该类型下可下载的章节。
+   * @param mode 目标章节类型。
+   * @returns 无返回值。
+   */
   function changeChapterMode(mode: ChapterMode) {
     if (mode === "audio" && !chapterHasAudio.value) return;
     chapterMode.value = mode;
@@ -298,7 +360,12 @@ export function useNovelDesk() {
     });
   }
 
+  /**
+   * 在全选和取消全选之间切换当前目录的可下载章节。
+   * @returns 无返回值。
+   */
   function toggleAllChapters() {
+    // 只在可下载章节集合中全选/取消全选，已下载或未解锁章节不会加入任务。
     const selectable = allChapterIds().filter((id) => {
       const chapter =
         chapterMode.value === "text"
@@ -314,6 +381,10 @@ export function useNovelDesk() {
       selectedChapterIds.value.length === selectable.length ? [] : selectable;
   }
 
+  /**
+   * 将选中的章节提交为文本或有声下载任务。
+   * @returns 创建任务请求完成后的 Promise。
+   */
   async function confirmChapterDownload() {
     const novel = chapterNovel.value;
     if (!novel || !selectedChapterIds.value.length)
@@ -340,6 +411,11 @@ export function useNovelDesk() {
     }
   }
 
+  /**
+   * 暂停指定的后台下载任务。
+   * @param job 要暂停的任务。
+   * @returns 暂停请求完成后的 Promise。
+   */
   async function pauseJob(job: Job) {
     try {
       await request<Job>(`/api/jobs/${job.id}/pause`, { method: "POST" });
@@ -349,6 +425,11 @@ export function useNovelDesk() {
       notify(error instanceof Error ? error.message : "暂停下载失败");
     }
   }
+  /**
+   * 恢复指定的后台下载任务。
+   * @param job 要恢复的任务。
+   * @returns 恢复请求完成后的 Promise。
+   */
   async function resumeJob(job: Job) {
     try {
       await request<Job>(`/api/jobs/${job.id}/resume`, { method: "POST" });
@@ -359,6 +440,11 @@ export function useNovelDesk() {
       notify(error instanceof Error ? error.message : "继续下载失败");
     }
   }
+  /**
+   * 删除任务记录并从当前列表移除。
+   * @param job 要删除的任务。
+   * @returns 删除请求完成后的 Promise。
+   */
   async function deleteJob(job: Job) {
     try {
       await request<void>(`/api/jobs/${job.id}`, { method: "DELETE" });
@@ -367,9 +453,18 @@ export function useNovelDesk() {
       notify(error instanceof Error ? error.message : "删除任务失败");
     }
   }
+  /**
+   * 在管理模式下打开本地书籍删除确认框。
+   * @param book 要删除的本地书籍。
+   * @returns 无返回值。
+   */
   function deleteBook(book: Book) {
     if (libraryManaging.value) confirmBook.value = book;
   }
+  /**
+   * 删除确认框中选定的本地书籍目录。
+   * @returns 删除请求完成后的 Promise。
+   */
   async function confirmDeleteBook() {
     const book = confirmBook.value;
     if (!book) return;
@@ -384,6 +479,11 @@ export function useNovelDesk() {
     }
     confirmBook.value = undefined;
   }
+  /**
+   * 打开本地书籍对应的在线章节详情；缺少 ID 时先按书名搜索。
+   * @param book 要打开的本地书籍。
+   * @returns 目录加载或搜索请求完成后的 Promise。
+   */
   async function openLibraryBook(book: Book) {
     if (book.novelId)
       return openChapterPicker(
@@ -409,17 +509,32 @@ export function useNovelDesk() {
     notify("暂时找不到对应的在线小说信息");
   }
 
+  /**
+   * 选择书架分类并回到第一页。
+   * @param category 目标书架分类名称。
+   * @returns 无返回值。
+   */
   function selectBookshelfCategory(category: string) {
     bookshelfCategory.value = category;
     bookshelfPage.value = 1;
   }
+  /**
+   * 设置书架页码，并将页码限制在有效范围内。
+   * @param page 请求跳转的页码。
+   * @returns 无返回值。
+   */
   function setBookshelfPage(page: number) {
     bookshelfPage.value = Math.min(
       Math.max(page, 1),
       bookshelfTotalPages.value,
     );
   }
+  /**
+   * 刷新任务列表；存在运行中任务时继续轮询。
+   * @returns 任务列表请求完成后的 Promise。
+   */
   async function refreshJobs() {
+    // 下载进行中保持轮询，任务完成后刷新本地书库列表。
     try {
       jobs.value = await request<Job[]>("/api/jobs");
       if (runningJobs.value.length)
@@ -429,6 +544,10 @@ export function useNovelDesk() {
       /* server may be restarting */
     }
   }
+  /**
+   * 从服务端刷新本地书库索引。
+   * @returns 书库请求完成后的 Promise。
+   */
   async function refreshLibrary() {
     try {
       library.value = await request<Book[]>("/api/library");
@@ -436,6 +555,11 @@ export function useNovelDesk() {
       /* no library yet */
     }
   }
+  /**
+   * 读取当前账号书架并更新分类、分页状态。
+   * @param forceRefresh 是否跳过服务端缓存重新请求。
+   * @returns 书架请求完成后的 Promise。
+   */
   async function refreshBookshelf(forceRefresh = false) {
     await refreshAuthStatus();
     if (!auth.value.authenticated) {
@@ -459,10 +583,20 @@ export function useNovelDesk() {
       bookshelfLoading.value = false;
     }
   }
+  /**
+   * 切换主界面页面，进入书架时自动触发同步。
+   * @param view 目标页面名称。
+   * @returns 无返回值。
+   */
   function navigate(view: ViewName) {
     active.value = view;
     if (view === "bookshelf") void refreshBookshelf();
   }
+  /**
+   * 将 ISO 日期格式化为中文月日显示文本。
+   * @param value 可选的日期字符串。
+   * @returns 格式化后的日期或“未知时间”。
+   */
   function formatDate(value?: string) {
     if (!value) return "未知时间";
     const date = new Date(value);
@@ -473,6 +607,11 @@ export function useNovelDesk() {
           day: "numeric",
         }).format(date);
   }
+  /**
+   * 阻止页面复制事件，用于保护阅读界面的内容展示。
+   * @param event 浏览器复制事件。
+   * @returns 无返回值。
+   */
   function blockCopy(event: ClipboardEvent) {
     event.preventDefault();
   }

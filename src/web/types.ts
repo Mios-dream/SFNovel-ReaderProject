@@ -1,3 +1,4 @@
+/** 主界面导航项。 */
 export type ViewName = "discover" | "bookshelf" | "library";
 export type ChapterMode = "text" | "audio";
 
@@ -40,7 +41,14 @@ export type Chapter = {
 export type ChapterVolume = {
   volumeId: number;
   title: string;
-  chapters: Array<{ chapId: number; title: string; needFireMoney: number; isVip: boolean; isUnlocked: boolean; downloaded: boolean }>;
+  chapters: Array<{
+    chapId: number;
+    title: string;
+    needFireMoney: number;
+    isVip: boolean;
+    isUnlocked: boolean;
+    downloaded: boolean;
+  }>;
 };
 
 export type Book = {
@@ -54,4 +62,8 @@ export type Book = {
 
 export type AuthStatus = { authenticated: boolean; userName?: string };
 export type BrowserLoginStatus = AuthStatus & { waiting?: boolean };
-export type RequestPolicy = { requestIntervalMs: number; maxConcurrentDownloads: number };
+/** 下载请求限流设置，与服务端 config.json 的 requestPolicy 对应。 */
+export type RequestPolicy = {
+  requestIntervalMs: number;
+  maxConcurrentDownloads: number;
+};

@@ -14,6 +14,11 @@ type ControlledBrowserSession = { cookie: string; loginCompleted: boolean };
 
 let browserLaunchPendingUntil = 0;
 
+/**
+ * 从受控浏览器的会话 Cookie 中恢复当前请求的 SF 登录身份。
+ * @param req Express 请求对象。
+ * @returns 已解析的 SF 会话；Cookie 缺失或格式无效时返回 undefined。
+ */
 export function getAuthSession(req: Request): AuthSession | undefined {
   const { cookieName } = config.auth;
   const token = req.headers.cookie?.split(/;\s*/)
@@ -30,16 +35,31 @@ export function getAuthSession(req: Request): AuthSession | undefined {
   }
 }
 
+/**
+ * 将登录会话写入 HttpOnly Cookie。
+ * @param res Express 响应对象。
+ * @param session 待保存的 SF 会话信息。
+ * @returns 无返回值；Cookie 会附加到响应头。
+ */
 export function saveAuthSession(res: Response, session: AuthSession) {
   res.cookie(config.auth.cookieName, Buffer.from(JSON.stringify(session)).toString("base64url"), {
     httpOnly: true, sameSite: "strict", maxAge: config.auth.cookieMaxAge, path: "/",
   });
 }
 
+/**
+ * 清除当前客户端的登录会话 Cookie。
+ * @param res Express 响应对象。
+ * @returns 无返回值。
+ */
 export function clearAuthSession(res: Response) {
   res.clearCookie(config.auth.cookieName, { httpOnly: true, sameSite: "strict", path: "/" });
 }
 
+/**
+ * 查找本机安装的 Edge 或 Chrome 可执行文件。
+ * @returns 浏览器可执行文件路径，未找到时返回 undefined。
+ */
 function findBrowserExecutable() {
   const programFiles = process.env.ProgramFiles || "C:\\Program Files";
   const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
@@ -52,6 +72,11 @@ function findBrowserExecutable() {
   return candidates.find((candidate) => fse.pathExistsSync(candidate));
 }
 
+/**
+ * 判断浏览器页面是否已完成官方 SF 登录跳转。
+ * @param url 浏览器标签页当前 URL。
+ * @returns 已完成登录时返回 true。
+ */
 function hasCompletedOfficialLogin(url: string) {
   try {
     const pageUrl = new URL(url);
@@ -61,7 +86,12 @@ function hasCompletedOfficialLogin(url: string) {
   } catch { return false; }
 }
 
+/**
+ * 通过 DevTools Protocol 读取受控浏览器中的 SF Cookie。
+ * @returns 已提取的浏览器会话，无法读取时返回 undefined。
+ */
 async function getControlledBrowserSession(): Promise<ControlledBrowserSession | undefined> {
+  // 通过 Chrome DevTools Protocol 读取官方登录窗口 Cookie，避免自行模拟登录流程。
   try {
     const { data } = await axios.get<DevToolsTab[]>(`http://127.0.0.1:${config.auth.browserDebugPort}/json/list`, { timeout: 700 });
     const sfPages = data.filter((tab) => tab.type === "page" && tab.url.includes("sfacg.com") && tab.webSocketDebuggerUrl);
@@ -90,6 +120,11 @@ async function getControlledBrowserSession(): Promise<ControlledBrowserSession |
   } catch { return undefined; }
 }
 
+/**
+ * 启动带远程调试端口的官方登录浏览器窗口。
+ * @returns 浏览器进程启动完成后的 Promise。
+ * @throws 未找到支持的浏览器时抛出错误。
+ */
 export async function startBrowserLogin() {
   if (await isControlledBrowserRunning()) return;
   const executable = findBrowserExecutable();
@@ -104,6 +139,10 @@ export async function startBrowserLogin() {
   browserLaunchPendingUntil = Date.now() + 12_000;
 }
 
+/**
+ * 检查登录是否完成，完成后保存会话并关闭受控浏览器。
+ * @returns 已完成的浏览器会话；登录尚未完成时返回 undefined。
+ */
 export async function completeBrowserLogin(): Promise<ControlledBrowserSession | undefined> {
   const session = await getControlledBrowserSession();
   if (!session?.loginCompleted) return undefined;
@@ -112,15 +151,27 @@ export async function completeBrowserLogin(): Promise<ControlledBrowserSession |
   return session;
 }
 
+/**
+ * 判断登录浏览器是否正在运行或刚刚启动。
+ * @returns 仍在等待用户登录时返回 true。
+ */
 export async function isBrowserLoginWaiting() {
   return (await isControlledBrowserRunning()) || Date.now() < browserLaunchPendingUntil;
 }
 
+/**
+ * 查询受控浏览器的 DevTools 调试端口是否可用。
+ * @returns 浏览器可连接时返回 true。
+ */
 async function isControlledBrowserRunning() {
   try { await axios.get(`http://127.0.0.1:${config.auth.browserDebugPort}/json/version`, { timeout: 500 }); return true; }
   catch { return false; }
 }
 
+/**
+ * 通过 DevTools Protocol 关闭受控浏览器。
+ * @returns 浏览器关闭完成后的 Promise。
+ */
 async function closeControlledBrowser() {
   try {
     const { data } = await axios.get<DevToolsVersion>(`http://127.0.0.1:${config.auth.browserDebugPort}/json/version`, { timeout: 700 });

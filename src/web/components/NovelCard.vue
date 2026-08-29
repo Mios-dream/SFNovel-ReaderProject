@@ -7,6 +7,7 @@ defineProps<{
   formatDate: (value: string) => string;
 }>();
 
+// 卡片根据作品类型向父级发出文本或有声下载请求。
 const emit = defineEmits<{ select: [novel: Novel, mode: "text" | "audio"] }>();
 </script>
 

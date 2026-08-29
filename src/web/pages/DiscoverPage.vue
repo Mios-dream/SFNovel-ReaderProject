@@ -36,6 +36,8 @@ const recommendationImages = [
 ];
 const recommendationImage =
   recommendationImages[Math.floor(Math.random() * recommendationImages.length)];
+
+// 搜索页只维护输入和展示状态，实际查询由父级 composable 执行。
 </script>
 
 <template>

@@ -3,6 +3,7 @@ import { ChevronRight, KeyRound, LoaderCircle, X } from "lucide-vue-next";
 import type { AuthStatus } from "../types";
 
 defineProps<{ open: boolean; auth: AuthStatus; busy: boolean }>();
+// 登录操作交由父级调用受控浏览器流程，组件本身不保存凭据。
 const emit = defineEmits<{ close: []; login: []; logout: [] }>();
 </script>
 

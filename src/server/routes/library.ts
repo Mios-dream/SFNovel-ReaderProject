@@ -6,6 +6,12 @@ import { bookUrl, safeName } from "../services/library";
 
 export const libraryRouter = Router();
 
+/**
+ * 扫描书库目录并从元数据推导前端所需的文本、有声和封面链接。
+ * @param _req 未使用的 Express 请求。
+ * @param res 返回本地书籍列表的 Express 响应。
+ * @returns 书库扫描完成后的 Promise。
+ */
 libraryRouter.get("/library", async (_req, res) => {
   await fse.ensureDir(config.libraryDir);
   const folders = await fse.readdir(config.libraryDir, { withFileTypes: true });
@@ -29,6 +35,12 @@ libraryRouter.get("/library", async (_req, res) => {
   res.json(books.filter(Boolean));
 });
 
+/**
+ * 删除指定书籍目录，并验证路径未越出书库根目录。
+ * @param req 包含已编码书籍目录名的 Express 请求。
+ * @param res 返回删除结果或错误信息的 Express 响应。
+ * @returns 删除处理完成后的 Promise。
+ */
 libraryRouter.delete("/library/:folder", async (req, res) => {
   const folder = safeName(decodeURIComponent(req.params.folder));
   const target = path.resolve(config.libraryDir, folder), base = path.resolve(config.libraryDir);

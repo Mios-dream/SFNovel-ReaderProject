@@ -14,13 +14,29 @@ type AudioCatalogErrorCode = "NO_AUDIO" | "AUTH_EXPIRED" | "UPSTREAM_ERROR";
 const SF_WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
 
 export class AudioCatalogError extends Error {
+  /**
+   * 创建有声目录业务错误。
+   * @param code 可供 API 客户端识别的错误码。
+   * @param message 面向用户的错误信息。
+   * @param httpStatus 对应的 HTTP 状态码。
+   */
   constructor(public readonly code: AudioCatalogErrorCode, message: string, public readonly httpStatus: 401 | 404 | 502) {
     super(message);
     this.name = "AudioCatalogError";
   }
 }
 
+/**
+ * 下载文本章节并生成 Markdown 书籍文件。
+ * @param novelId SF 小说编号。
+ * @param cookie 可选的登录 Cookie，用于读取已购买章节。
+ * @param chapterIds 可选章节 ID 列表；未传时下载全部可用章节。
+ * @param signal 用于暂停或取消任务的 AbortSignal。
+ * @param onProgress 可选进度回调，接收百分比和状态消息。
+ * @returns 生成文件的书名、目录、文件名和处理章节数。
+ */
 export async function writeNovel(novelId: number, cookie: string | undefined, chapterIds: number[] | undefined, signal: AbortSignal, onProgress?: ProgressHandler) {
+  // 文本下载支持断点续传：章节内容先写入进度文件，全部完成后再生成最终 Markdown。
   const client = new SfacgClient();
   if (cookie) client.SetCookie(cookie);
   const [novel, volumes] = await Promise.all([
@@ -89,7 +105,15 @@ export async function writeNovel(novelId: number, cookie: string | undefined, ch
   return { name: novel.novelName, folder: novelName, file: markdownFile, chapters: finished };
 }
 
+/**
+ * 读取并解析指定小说的有声章节目录。
+ * @param novelId SF 小说编号。
+ * @param cookie 当前登录会话 Cookie。
+ * @returns 有声作品标题及章节列表。
+ * @throws AudioCatalogError 当未登录、接口失败或作品没有有声内容时抛出。
+ */
 export async function getAudioChapters(novelId: number, cookie: string) {
+  // 有声目录使用官方网页接口，响应状态同时可能出现在 HTTP 和业务字段中。
   let data: AudioInfoResponse;
   try {
     ({ data } = await axios.get<AudioInfoResponse>("https://i.sfacg.com/ajax/ashx/Common.ashx", {
@@ -115,6 +139,15 @@ export async function getAudioChapters(novelId: number, cookie: string) {
   return { title: data.data.NovelName || `小说 ${novelId}`, chapters };
 }
 
+/**
+ * 下载有声章节并生成 M3U8 播放列表。
+ * @param novelId SF 小说编号。
+ * @param cookie 当前登录会话 Cookie。
+ * @param chapterIds 可选章节 ID 列表；未传时下载全部章节。
+ * @param signal 用于暂停或取消任务的 AbortSignal。
+ * @param onProgress 可选进度回调，接收百分比和状态消息。
+ * @returns 生成播放列表的书名、目录、文件和章节数。
+ */
 export async function writeAudio(novelId: number, cookie: string, chapterIds: number[] | undefined, signal: AbortSignal, onProgress?: ProgressHandler) {
   const audio = await throttledDownload(() => getAudioChapters(novelId, cookie));
   const selected = chapterIds?.length ? new Set(chapterIds) : undefined;

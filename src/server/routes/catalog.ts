@@ -8,6 +8,12 @@ import { getLocalDownloadState } from "../services/library";
 
 export const catalogRouter = Router();
 
+/**
+ * 搜索公开作品。
+ * @param req 包含 q 查询参数的 Express 请求。
+ * @param res 返回作品数组或错误信息的 Express 响应。
+ * @returns 搜索处理完成后的 Promise。
+ */
 catalogRouter.get("/search", async (req, res) => {
   const query = String(req.query.q ?? "").trim();
   if (!query) return res.json([]);
@@ -15,6 +21,12 @@ catalogRouter.get("/search", async (req, res) => {
   catch (error) { res.status(500).json({ message: error instanceof Error ? error.message : "搜索失败" }); }
 });
 
+/**
+ * 同步当前登录账号的书架，默认使用会话隔离缓存。
+ * @param req 包含登录 Cookie 和可选 refresh 参数的 Express 请求。
+ * @param res 返回书架分类和作品的 Express 响应。
+ * @returns 书架同步完成后的 Promise。
+ */
 catalogRouter.get("/bookshelf", async (req, res) => {
   const session = getAuthSession(req);
   if (!session) return res.status(401).json({ message: "请先登录 SF 账号后查看书架" });
@@ -27,6 +39,12 @@ catalogRouter.get("/bookshelf", async (req, res) => {
   } catch (error) { res.status(502).json({ message: error instanceof Error ? `SF 书架请求失败：${error.message}` : "读取书架失败" }); }
 });
 
+/**
+ * 获取小说文本目录并标记本地已下载、已解锁章节。
+ * @param req 包含小说编号和可选登录 Cookie 的 Express 请求。
+ * @param res 返回分卷章节数据的 Express 响应。
+ * @returns 目录读取完成后的 Promise。
+ */
 catalogRouter.get("/chapters/:novelId", async (req, res) => {
   const novelId = Number(req.params.novelId);
   if (!Number.isInteger(novelId) || novelId <= 0) return res.status(400).json({ message: "小说编号无效" });
@@ -43,6 +61,12 @@ catalogRouter.get("/chapters/:novelId", async (req, res) => {
   } catch (error) { res.status(500).json({ message: error instanceof Error ? error.message : "读取章节目录失败" }); }
 });
 
+/**
+ * 获取单部小说的详情和简介。
+ * @param req 包含小说编号的 Express 请求。
+ * @param res 返回小说详情的 Express 响应。
+ * @returns 详情读取完成后的 Promise。
+ */
 catalogRouter.get("/novel/:novelId", async (req, res) => {
   const novelId = Number(req.params.novelId);
   if (!Number.isInteger(novelId) || novelId <= 0) return res.status(400).json({ message: "小说编号无效" });
@@ -53,6 +77,12 @@ catalogRouter.get("/novel/:novelId", async (req, res) => {
   } catch (error) { res.status(500).json({ message: error instanceof Error ? error.message : "读取小说信息失败" }); }
 });
 
+/**
+ * 获取登录账号可访问的有声章节目录。
+ * @param req 包含小说编号和登录 Cookie 的 Express 请求。
+ * @param res 返回有声章节或业务错误的 Express 响应。
+ * @returns 有声目录读取完成后的 Promise。
+ */
 catalogRouter.get("/audio/:novelId", async (req, res) => {
   const session = getAuthSession(req);
   if (!session) return res.status(401).json({ message: "有声内容需要登录 SF 账号" });

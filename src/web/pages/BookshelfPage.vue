@@ -27,6 +27,12 @@ const emit = defineEmits<{
   select: [novel: Novel, mode: "text" | "audio"];
 }>();
 
+// 书架分页和分类筛选由父级计算，页面只负责转发用户操作。
+/**
+ * 读取页码输入并将其限制在书架有效页码范围。
+ * @param event 页码输入框的变更事件。
+ * @returns 无返回值。
+ */
 function jumpToPage(event: Event) {
   const input = event.target as HTMLInputElement;
   const requestedPage = Number(input.value);

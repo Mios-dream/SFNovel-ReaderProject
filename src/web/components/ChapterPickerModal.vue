@@ -200,6 +200,12 @@ type SelectableChapter = (TextChapter | Chapter) & {
   isUnlocked?: boolean;
 };
 
+// 文本和有声章节统一转换为可选择结构，模板无需区分两种目录来源。
+/**
+ * 判断章节是否允许加入下载任务。
+ * @param chapter 待判断的文本或有声章节。
+ * @returns 未下载且已解锁（或免费）时返回 true。
+ */
 function canDownload(chapter: SelectableChapter) {
   return !chapter.downloaded && (!chapter.isVip || chapter.isUnlocked);
 }
@@ -224,20 +230,40 @@ const allSelected = computed(
     selectedCount.value === selectableIds.value.length,
 );
 
+/**
+ * 获取卷内所有可下载章节 ID。
+ * @param volume 要检查的章节卷。
+ * @returns 该卷中可下载章节的 ID 数组。
+ */
 function selectableVolumeIds(volume: ChapterVolume) {
   return volume.chapters.filter(canDownload).map((chapter) => chapter.chapId);
 }
 
+/**
+ * 统计卷内已选章节数量。
+ * @param volume 要统计的章节卷。
+ * @returns 当前已选章节数。
+ */
 function selectedVolumeCount(volume: ChapterVolume) {
   const ids = selectableVolumeIds(volume);
   return props.selectedIds.filter((id) => ids.includes(id)).length;
 }
 
+/**
+ * 判断章节卷是否已全选。
+ * @param volume 要判断的章节卷。
+ * @returns 卷内存在可选章节且全部已选时返回 true。
+ */
 function isVolumeSelected(volume: ChapterVolume) {
   const ids = selectableVolumeIds(volume);
   return ids.length > 0 && selectedVolumeCount(volume) === ids.length;
 }
 
+/**
+ * 切换整卷章节的选择状态。
+ * @param volume 要切换的章节卷。
+ * @returns 无返回值；通过事件通知父组件更新选中 ID。
+ */
 function toggleVolume(volume: ChapterVolume) {
   const ids = selectableVolumeIds(volume);
   const nextIds = isVolumeSelected(volume)
@@ -246,6 +272,12 @@ function toggleVolume(volume: ChapterVolume) {
   emit("update:selectedIds", nextIds);
 }
 
+/**
+ * 更新单个章节的勾选状态。
+ * @param id 章节 ID。
+ * @param checked 是否选中。
+ * @returns 无返回值。
+ */
 function toggleChapter(id: number, checked: boolean) {
   emit(
     "update:selectedIds",

@@ -9,6 +9,7 @@ const props = defineProps<{
   saving: boolean;
 }>();
 const emit = defineEmits<{ close: []; save: [policy: RequestPolicy] }>();
+// 使用本地草稿编辑，只有提交表单时才将设置发送给后端。
 const draft = reactive<RequestPolicy>({ ...props.policy });
 
 watch(

@@ -8,13 +8,15 @@ import { _SfacgCache } from "./cache";
 export class _SfacgRegister {
     regist: SfacgRegist;
     sms: sms;
+    /** 创建注册流程所需的注册 API 和短信服务客户端。 */
     constructor() {
         this.regist = new SfacgRegist();
         this.sms = new sms()
     }
 
     /**
-     * 静态方法供外部调用
+     * 启动一次完整的自动注册流程。
+     * @returns 注册流程完成后的 Promise。
      */
     static async Register() {
         const register = new _SfacgRegister()
@@ -22,6 +24,10 @@ export class _SfacgRegister {
     }
 
 
+    /**
+     * 获取可用手机号、昵称并完成短信验证和账号创建。
+     * @returns 注册流程完成后的 Promise。
+     */
     async register() {
         const phone = await this.GetAvaliblePhone()// 这里已经同时发送短信了，不必重复操作
         const name = await this.GetAvalibleName()
@@ -36,6 +42,10 @@ export class _SfacgRegister {
             }
         }
     }
+    /**
+     * 递归生成并检查可用昵称。
+     * @returns 已通过 SF 检查的昵称。
+     */
     private async GetAvalibleName(): Promise<string> {
         const name = RandomName()
         const res = await this.regist.avalibleNmae(name);
@@ -43,6 +53,10 @@ export class _SfacgRegister {
         return res ? name : await this.GetAvalibleName()
     }
 
+    /**
+     * 从短信服务获取手机号并触发 SF 验证码发送。
+     * @returns 可用手机号；获取失败时返回空字符串。
+     */
     private async GetAvaliblePhone(): Promise<string> {
         await this.sms.login()
         const phone = await this.sms.getPhone(sid.Sfacg)

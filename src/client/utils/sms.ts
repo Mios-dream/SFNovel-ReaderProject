@@ -31,6 +31,7 @@ export class sms {
   private passWord: string;
   token: any
 
+  /** 从环境变量读取接码平台凭据并初始化客户端。 */
   constructor() {
     this.userName = process.env.SMS_USERNAME ?? ""
     this.passWord = process.env.SMS_PASSWORD ?? ""
@@ -40,6 +41,12 @@ export class sms {
     }
   }
 
+  /**
+   * 轮询接码平台直到收到短信验证码。
+   * @param sid SF 或其他平台的服务编号。
+   * @param phone 待接收验证码的手机号。
+   * @returns 收到的数字验证码。
+   */
   async waitForCode(sid: sid, phone: string): Promise<number> {
     return new Promise(resolve => {
       const checkCode = async () => {
@@ -55,7 +62,11 @@ export class sms {
     });
   }
 
-  // 登录
+  /**
+   * 登录接码平台并保存访问令牌。
+   * @param retries 网络超时时的剩余重试次数，默认 3 次。
+   * @returns 接码平台令牌；登录失败时返回 undefined。
+   */
   async login(retries = 3) {
     if (retries > 0) {
       try {
@@ -78,7 +89,12 @@ export class sms {
     }
   }
 
-  // 获取一个有效号码
+  /**
+   * 获取或释放一个接码平台手机号。
+   * @param sid 目标业务服务编号。
+   * @param api 操作类型，默认获取手机号。
+   * @returns 获取成功时返回手机号，失败时返回 false。
+   */
   async getPhone(sid: sid, api: smsAction = smsAction.get) {
     try {
       const res = await axios.post<smsGetPhone>("https://api.haozhuma.com/sms/", {
@@ -95,6 +111,12 @@ export class sms {
     }
 
   }
+  /**
+   * 查询手机号收到的最新短信验证码。
+   * @param sid 目标业务服务编号。
+   * @param phone 待查询的手机号。
+   * @returns 验证码或 false（尚未收到/请求失败）。
+   */
   private async receive(sid: sid, phone: string): Promise<number | false> {
     try {
       const res = await axios.get("https://api.haozhuma.com/sms", {

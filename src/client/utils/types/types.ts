@@ -1,5 +1,7 @@
+/** 短信服务登录接口响应。 */
 export interface smsLogin { msg: string; code: number; token: string };
 
+/** 短信服务取号接口响应。 */
 export interface smsGetPhone {
     code: string;
     msg: string;

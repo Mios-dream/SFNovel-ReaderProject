@@ -9,12 +9,16 @@ export class _SfacgTasker {
     private success: string[] = [] // 成功日志
     private failed: string[] = []  // 失败日志
 
+    /**
+     * 创建任务执行器。
+     * @param Client 已初始化的 SF API 客户端。
+     */
     constructor(Client: SfacgClient) {
         this.Client = Client;
     }
     /**
-     * 
-     * 静态方法供外部调用
+     * 遍历账号并执行领取任务、签到、广告和奖励流程。
+     * @returns 全部账号任务调度完成后的 Promise。
      */
     static async TaskAll() {
         const accounts = await _SfacgCache.GetallCookies()
@@ -32,14 +36,23 @@ export class _SfacgTasker {
         })
     }
 
-    // 接受任务
+    /**
+     * 领取任务列表中尚未领取的任务。
+     * @param result SF 任务接口返回的任务数组。
+     * @returns 任务领取调度完成后的 Promise。
+     */
     async claimTasks(result: any) {
         result.map(async (task: tasks) => {
             task.status == 0 && await this.Client.claimTask(task.taskId)
         })
     }
 
-    // 祖传三件套
+    /**
+     * 执行阅读、分享、设备上报和签到组合流程，失败时重试。
+     * @param accountID SF 账号编号。
+     * @param retry 剩余重试次数，默认 3 次。
+     * @returns 组合任务完成后的 Promise。
+     */
     async performRituals(accountID: number, retry = 3) {
         if (retry > 0) {
             await this.Client.readTime(120)// 阅读时长
@@ -51,7 +64,10 @@ export class _SfacgTasker {
         }
     }
 
-    // 任务领取奖励
+    /**
+     * 领取已完成任务奖励并记录每项任务结果。
+     * @returns 奖励检查完成后的 Promise。
+     */
     async checkAndClaimRewards() {
         const PendingRewards = await this.Client.getTasks() // 查看已做待领取任务
         PendingRewards && PendingRewards.map(async (task: tasks) => {
@@ -63,7 +79,10 @@ export class _SfacgTasker {
         })
     }
 
-    // 广告任务奖励
+    /**
+     * 完成剩余广告观看次数并领取广告任务奖励。
+     * @returns 广告奖励流程完成后的 Promise。
+     */
     async handleAdRewards() {
         let adWacthtime: number = 0
         const { taskId, requireNum, completeNum } = await this.Client.adBonusNum() as IadBonusNum // 广告基础信息
@@ -77,6 +96,11 @@ export class _SfacgTasker {
         adWacthtime != 5 && this.failed.push(`广告失败观看了${5 - adWacthtime}次`)
     }
 
+    /**
+     * 输出指定账号的任务成功和失败日志。
+     * @param userName 要显示的账号名。
+     * @returns 无返回值。
+     */
     async BonusLog(userName: string) {
         let a = colorize(`用户${Secret(userName)}的任务日志：`, "blue")
         let b = colorize(`${this.success.join("\n")}`, "green")
