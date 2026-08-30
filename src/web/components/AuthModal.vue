@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import { ChevronRight, KeyRound, LoaderCircle, X } from "lucide-vue-next";
+import { ref, watch } from "vue";
 import type { AuthStatus } from "../types";
 
-defineProps<{ open: boolean; auth: AuthStatus; busy: boolean }>();
-const emit = defineEmits<{ close: []; login: []; logout: [] }>();
+const props = defineProps<{ open: boolean; auth: AuthStatus; busy: boolean }>();
+const emit = defineEmits<{ close: []; login: [username: string, password: string]; browserLogin: []; logout: [] }>();
+const username = ref("");
+const password = ref("");
+const activeTab = ref<"password" | "official">("password");
+watch(() => props.open, (open) => {
+  if (open && !props.auth.authenticated) activeTab.value = "password";
+});
+function submit() { emit("login", username.value.trim(), password.value); }
 </script>
 
 <template>
@@ -12,28 +20,49 @@ const emit = defineEmits<{ close: []; login: []; logout: [] }>();
       <button class="close-button" title="关闭" @click="emit('close')">
         <X :size="20" /></button
       ><span class="modal-icon"><KeyRound :size="22" /></span>
-      <h2>SF 下载会话</h2>
+      <h2>SF 账号登录</h2>
       <template v-if="auth.authenticated"
         ><p>
-          当前账号已通过官方登录验证。会话保存在此浏览器的本地安全 Cookie
+          当前账号已通过登录验证。会话保存在此浏览器的本地安全 Cookie
           中，刷新页面或重启本地服务后仍可恢复。
         </p>
         <button class="text-button" @click="emit('logout')">
           退出当前会话 <ChevronRight :size="15" /></button></template
       ><template v-else
-        ><p>
-          将打开独立的官方登录窗口。账号、密码和滑块验证都只在官方页面内完成，应用仅取得下载所需的会话
-          Cookie。
-        </p>
-        <button
-          class="primary-button full"
-          :disabled="busy"
-          @click="emit('login')"
-        >
-          <LoaderCircle v-if="busy" class="spin" :size="18" />{{
-            busy ? "正在等待官方登录" : "打开官方登录窗口"
-          }}
-        </button></template
+        ><div class="login-tabs" role="tablist" aria-label="登录方式">
+          <button
+            class="login-tab"
+            :class="{ active: activeTab === 'password' }"
+            role="tab"
+            :aria-selected="activeTab === 'password'"
+            type="button"
+            @click="activeTab = 'password'"
+          >账号密码</button>
+          <button
+            class="login-tab"
+            :class="{ active: activeTab === 'official' }"
+            role="tab"
+            :aria-selected="activeTab === 'official'"
+            type="button"
+            @click="activeTab = 'official'"
+          >官方网页登录</button>
+        </div>
+        <div v-if="activeTab === 'password'" class="login-panel" role="tabpanel">
+          <p>密码不会保存在本地。</p>
+          <form class="login-form" @submit.prevent="submit">
+            <input v-model="username" autocomplete="username" placeholder="账号" required />
+            <input v-model="password" autocomplete="current-password" placeholder="密码" type="password" required />
+            <button class="primary-button full" type="submit" :disabled="busy">
+              <LoaderCircle v-if="busy" class="spin" :size="18" />{{ busy ? "正在登录" : "账号密码登录" }}
+            </button>
+          </form>
+        </div>
+        <div v-else class="login-panel" role="tabpanel">
+          <p>将在独立的官方登录窗口中完成账号、密码和滑块验证，应用仅取得会话 Cookie。</p>
+          <button class="primary-button full" :disabled="busy" @click="emit('browserLogin')">
+            <LoaderCircle v-if="busy" class="spin" :size="18" />{{ busy ? "正在等待官方登录" : "打开官方登录窗口" }}
+          </button>
+        </div></template
       >
     </section>
   </div>
@@ -67,6 +96,48 @@ const emit = defineEmits<{ close: []; login: []; logout: [] }>();
   color: #99766c;
   font-size: 12px;
   line-height: 1.7;
+}
+.login-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 18px 0 15px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #f5e4db;
+}
+.login-tab {
+  min-height: 35px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9px;
+  color: #a17367;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.login-tab.active {
+  color: var(--theme-color-dark);
+  background: #fffaf7;
+  box-shadow: 0 2px 6px rgba(117, 72, 56, 0.1);
+}
+.login-panel p {
+  margin-bottom: 14px;
+}
+.login-form {
+  display: grid;
+  gap: 9px;
+}
+.login-form input {
+  width: 100%;
+  min-height: 39px;
+  padding: 0 12px;
+  border: 1px solid #efd8cc;
+  border-radius: 10px;
+  color: #69453d;
+  background: rgba(255, 255, 255, 0.8);
+  box-sizing: border-box;
 }
 .modal-icon {
   display: grid;

@@ -185,7 +185,26 @@ export function useNovelDesk() {
    * 请求后端打开官方登录浏览器并开始状态轮询。
    * @returns 登录窗口启动请求完成后的 Promise。
    */
-  async function login() {
+  async function login(username: string, password: string) {
+    window.clearTimeout(loginPollTimer);
+    loginBusy.value = true;
+    try {
+      const result = await request<AuthStatus>("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      auth.value = result;
+      credentialsOpen.value = false;
+      notify("SF 账号已登录到当前会话");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "SF 账号密码登录失败");
+    } finally {
+      loginBusy.value = false;
+    }
+  }
+
+  async function browserLogin() {
     window.clearTimeout(loginPollTimer);
     loginBusy.value = true;
     try {
@@ -797,6 +816,7 @@ export function useNovelDesk() {
     refreshBookshelf,
     navigate,
     login,
+    browserLogin,
     logout,
     openAccount,
     openRequestPolicy,

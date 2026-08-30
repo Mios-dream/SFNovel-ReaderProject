@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import WebSocket from "ws";
 import { config } from "../config";
 import type { AuthSession } from "../types";
+import { SfacgApiClient } from "../infrastructure/sfacg/client";
 
 type DevToolsTab = { type: string; url: string; webSocketDebuggerUrl?: string };
 type DevToolsCookie = { name: string; value: string; domain: string };
@@ -13,6 +14,18 @@ type DevToolsVersion = { webSocketDebuggerUrl?: string };
 type ControlledBrowserSession = { cookie: string; loginCompleted: boolean };
 
 let browserLaunchPendingUntil = 0;
+
+/** 使用 App API 签名协议登录账号，返回仅包含上游会话的应用会话。 */
+export async function loginWithPassword(username: string, password: string): Promise<AuthSession> {
+  const client = new SfacgApiClient();
+  const cookie = await client.loginWithPassword(username, password);
+  const profile = await client.userProfile();
+  return {
+    cookie,
+    userName: profile && profile.nickName ? profile.nickName : username,
+    nonce: client.getNonce(),
+  };
+}
 
 /**
  * 从受控浏览器的会话 Cookie 中恢复当前请求的 SF 登录身份。

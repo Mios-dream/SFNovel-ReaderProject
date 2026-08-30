@@ -183,6 +183,7 @@ const desk = reactive(useNovelDesk());
       :busy="desk.loginBusy"
       @close="desk.credentialsOpen = false"
       @login="desk.login"
+      @browser-login="desk.browserLogin"
       @logout="desk.logout"
     />
     <AccountProfileModal

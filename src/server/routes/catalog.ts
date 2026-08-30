@@ -39,6 +39,7 @@ catalogRouter.get("/bookshelf", async (req, res) => {
   try {
     const client = new SfacgApiClient();
     client.setCookie(session.cookie);
+    client.setNonce(session.nonce);
     const load = () => client.bookshelfCollection();
     const collection =
       req.query.refresh === "1"
@@ -76,7 +77,10 @@ catalogRouter.get("/chapters/:novelId", async (req, res) => {
   try {
     const session = getAuthSession(req);
     const client = new SfacgApiClient();
-    if (session) client.setCookie(session.cookie);
+    if (session) {
+      client.setCookie(session.cookie);
+      client.setNonce(session.nonce);
+    }
     const volumes = await cached(
       sessionKey(session?.cookie, `chapters:${novelId}`),
       config.cache.metadataTtl,

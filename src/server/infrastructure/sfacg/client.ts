@@ -22,6 +22,19 @@ export class SfacgWebContentError extends Error {
 }
 
 export class SfacgApiClient extends SfacgHttpClient {
+  /** 使用新的 App 签名接口读取章节正文。 */
+  async chapterContentFromApi(chapterId: number, signal?: AbortSignal): Promise<string> {
+    const response = await this.get<{ expand?: { content?: unknown }; content?: unknown }>(
+      `/Chaps/${chapterId}`,
+      { expand: "content,expand.content" },
+      signal,
+    );
+    const content = response?.expand?.content ?? response?.content;
+    if (typeof content !== "string" || !content.trim())
+      throw new Error("SF App API 未返回章节正文");
+    return content;
+  }
+
   async novelInfo(
     novelId: number,
     signal?: AbortSignal,

@@ -30,6 +30,10 @@
 //   const loginInfo = await sfacg.login("13696458853", "dddd1111");
 //   await fs.outputJson("./TESTDATA/loginInfo.json", loginInfo);
 
+//   // 章节内容
+//   const contentInfos = await sfacg.contentInfos(7431226);
+//   await fs.outputJson("./TESTDATA/contentInfos.json", contentInfos);
+
 //   // 我的书架信息
 //   const bookshelfInfos = await sfacg.bookshelfInfos();
 //   await fs.outputJson("./TESTDATA/bookshelfInfos.json", bookshelfInfos);
@@ -57,5 +61,3 @@
 //   await fs.outputJson("./TESTDATA/signBous.json", signBous);
 
 // })();
-
-

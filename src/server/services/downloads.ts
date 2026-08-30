@@ -8,7 +8,7 @@ import {
   SfacgWebContentError,
 } from "../infrastructure/sfacg/client";
 import { config } from "../config";
-import type { AudioChapter, AudioInfoResponse } from "../types";
+import type { AudioChapter, AudioInfoResponse, AuthSession } from "../types";
 import {
   numberIds,
   buildNovelMarkdown,
@@ -27,6 +27,14 @@ const SF_WEB_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
 
 const chapterImagePattern = /!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g;
+
+function normalizeApiChapterContent(content: string) {
+  return content
+    .replace(/\[img=[^\]]*\](https?:\/\/[^[]+)\[\/img\]/gi, "![章节插图]($1)")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 function imageExtension(url: string) {
   try {
@@ -91,7 +99,7 @@ export class AudioCatalogError extends Error {
 /**
  * 下载文本章节并生成 Markdown 书籍文件。
  * @param novelId SF 小说编号。
- * @param cookie 可选的登录 Cookie，用于读取已购买章节。
+ * @param session 可选的登录会话，用于读取已购买章节。
  * @param chapterIds 可选章节 ID 列表；未传时下载全部可用章节。
  * @param signal 用于暂停或取消任务的 AbortSignal。
  * @param onProgress 可选进度回调，接收百分比和状态消息。
@@ -99,14 +107,18 @@ export class AudioCatalogError extends Error {
  */
 export async function writeNovel(
   novelId: number,
-  cookie: string | undefined,
+  session: AuthSession | undefined,
   chapterIds: number[] | undefined,
   signal: AbortSignal,
   onProgress?: ProgressHandler,
 ) {
+  const cookie = session?.cookie;
   // 文本下载支持断点续传：章节内容先写入进度文件，全部完成后再生成最终 Markdown。
   const client = new SfacgApiClient();
-  if (cookie) client.setCookie(cookie);
+  if (cookie) {
+    client.setCookie(cookie);
+    client.setNonce(session?.nonce);
+  }
   const [novel, volumes] = await Promise.all([
     throttledDownload(() => client.novelInfo(novelId, signal)),
     throttledDownload(() => client.volumeInfos(novelId, signal)),
@@ -129,7 +141,10 @@ export async function writeNovel(
   let finished = 0;
   let contentError: Error | undefined;
   const downloadClient = new SfacgApiClient();
-  if (cookie) downloadClient.setCookie(cookie);
+  if (cookie) {
+    downloadClient.setCookie(cookie);
+    downloadClient.setNonce(session?.nonce);
+  }
   const savedStore = await readNovelChapterStore(novelDir);
   const savedChapters =
     savedStore.novelId === novelId ? savedStore.chapters : {};
@@ -158,24 +173,34 @@ export async function writeNovel(
       }
       try {
         if (chapter.needFireMoney !== 0 && !cookie) continue;
-        onProgress?.(4, `正在通过网页解析：${chapter.ntitle}`);
-        const raw = await throttledDownload(() =>
-          downloadClient.chapterContentFromWeb(
-            novelId,
-            volume.volumeId,
-            chapter.chapId,
-            signal,
-          ),
-        );
+        let raw = "";
+        let source = "App API";
+        try {
+          onProgress?.(4, `正在通过 App API 获取：${chapter.ntitle}`);
+          raw = normalizeApiChapterContent(await throttledDownload(() =>
+            downloadClient.chapterContentFromApi(chapter.chapId, signal),
+          ))
+        } catch {
+          source = "网页解析";
+          onProgress?.(4, `App API 不可用，正在通过网页解析：${chapter.ntitle}`);
+          raw = await throttledDownload(() =>
+            downloadClient.chapterContentFromWeb(
+              novelId,
+              volume.volumeId,
+              chapter.chapId,
+              signal,
+            ),
+          );
+        }
         if (signal.aborted) throw new Error("下载已取消");
         finished += 1;
-        console.info(`SF 正文来源：网页解析（章节 ${chapter.chapId}）`);
+        console.info(`SF 正文来源：${source}（章节 ${chapter.chapId}）`);
         onProgress?.(
           total ? Math.round(5 + (finished / total) * 90) : 100,
-          `已通过网页解析获取：${chapter.ntitle}`,
+          `已通过${source}获取：${chapter.ntitle}`,
         );
         if (raw.trim()) {
-          contentSources.add("网页解析");
+          contentSources.add(source);
           const contentWithImages = await downloadChapterImages(
             raw,
             chapter.chapId,

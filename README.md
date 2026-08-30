@@ -160,6 +160,7 @@ Novel Flow 的目标是让小说内容从“发现”到“保存”再到“阅
 auto-novel/
 ├── docs/
 │   ├── image/                  # README 头图和界面截图
+│   ├── SFACG-APP-API.md        # App API 签名、登录与章节下载验证
 │   └── SFACG-AUDIO-API.md      # 有声接口、认证与安全说明
 ├── src/
 │   ├── web/                    # Vue 3 前端
@@ -202,6 +203,7 @@ auto-novel/
 ## 🙏 致谢
 
 [LanBaiCode/auto-novel](https://github.com/LanBaiCode/auto-novel) ：提供部分api接口
+[Oevani/Sfacg_Downloader](https://github.com/Oevani/Sfacg_Downloader) : 提供部分api接口,及签名方案
 
 ---
 

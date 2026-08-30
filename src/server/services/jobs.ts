@@ -4,12 +4,13 @@ import { writeAudio, writeNovel } from "./downloads";
 import { getAuthSession } from "./auth";
 import { getRequestPolicy } from "./requestPolicy";
 import type { Job } from "../types";
+import type { AuthSession } from "../types";
 
 const jobs = new Map<string, Job>();
 const jobControllers = new Map<string, AbortController>();
 const jobSessions = new Map<
   string,
-  { cookie?: string; chapterIds?: number[] }
+  { session?: AuthSession; chapterIds?: number[] }
 >();
 
 // 任务状态保存在内存中；服务重启后未完成任务不会自动恢复。
@@ -86,7 +87,7 @@ function run(job: Job) {
       if (job.kind === "audio") {
         const saved = await writeAudio(
           job.novelId,
-          session.cookie || "",
+          session.session?.cookie || "",
           job.chapterIds,
           controller.signal,
           update,
@@ -100,7 +101,7 @@ function run(job: Job) {
       } else {
         const saved = await writeNovel(
           job.novelId,
-          session.cookie,
+          session.session,
           job.chapterIds,
           controller.signal,
           update,
@@ -173,7 +174,7 @@ export function createJob(
     message: "等待开始",
   };
   jobs.set(id, job);
-  jobSessions.set(id, { cookie: getAuthSession(req)?.cookie, chapterIds });
+  jobSessions.set(id, { session: getAuthSession(req), chapterIds });
   run(job);
   return job;
 }

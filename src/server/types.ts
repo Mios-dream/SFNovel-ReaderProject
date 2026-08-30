@@ -21,7 +21,7 @@ export type Job = {
 };
 
 /** 通过 HttpOnly 会话 Cookie 传递的 SF 登录信息。 */
-export type AuthSession = { cookie: string; userName: string };
+export type AuthSession = { cookie: string; userName: string; nonce?: string };
 
 export type AudioChapter = {
   id: number;

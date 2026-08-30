@@ -315,6 +315,36 @@ export class SfacgClient extends SfacgHttp {
     }
   }
 
+  /**
+   * 获取指定章节的正文内容。
+   * @param chapId SF 章节编号。
+   * @param signal 可选的取消信号。
+   * @returns 章节正文；请求失败时返回 false。
+   */
+  async contentInfos(
+    chapId: number,
+    signal?: AbortSignal,
+  ): Promise<string | false> {
+    try {
+      let res = await this.get(
+        `/Chaps/${chapId}`,
+        {
+          expand: "content",
+        },
+        signal,
+      );
+      const content = res.expand.content;
+      return content;
+      // 待添加
+    } catch (err: any) {
+      console.error(
+        `GET contentInfos failed: ${JSON.stringify(
+          err.response.data.status.msg,
+        )}`,
+      );
+      return false;
+    }
+  }
   /** 从 SF 章节网页提取公开展示的正文内容。 */
   async chapterContentFromWeb(
     novelId: number,
@@ -328,7 +358,8 @@ export class SfacgClient extends SfacgHttp {
         {
           headers: {
             Cookie: this.GetCookie(),
-            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            Accept:
+              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "zh-CN,zh;q=0.9",
             "User-Agent": SfacgHttp.USER_AGENT_WEB,
             Referer: `https://book.sfacg.com/Novel/${novelId}/MainIndex/`,
