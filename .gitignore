@@ -21,3 +21,4 @@ logs
 .sfacg-login-profile/
 
 output/
+sfacg-content-dictionary.json

@@ -198,8 +198,12 @@ const desk = reactive(useNovelDesk());
       :open="desk.requestPolicyOpen"
       :policy="desk.requestPolicy"
       :saving="desk.requestPolicySaving"
+      :dictionary-size="desk.contentDictionarySize"
+      :dictionary-updating="desk.contentDictionaryUpdating"
+      :dictionary-chapter-id="desk.contentDictionaryChapterId"
       @close="desk.requestPolicyOpen = false"
       @save="desk.saveRequestPolicy"
+      @update-dictionary="desk.updateContentDictionary"
     />
     <ConfirmDeleteModal
       :book="desk.confirmBook"

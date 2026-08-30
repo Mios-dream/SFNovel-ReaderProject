@@ -194,3 +194,15 @@ void main().catch((error: any) => {
 - `403`：会话已登录但资源无权限、未订阅或需付费。
 - Cookie 等同于登录凭证，不得提交到 Git、日志或公开 issue。
 - 本项目默认仍使用官方网页登录获取 Cookie；App API 方案应在低频、串行请求下单独验证后再接入生产代码。
+
+## 正文字符恢复
+
+App API 的 `data.content` 可能把汉字替换成另一组汉字。它不是需要解密的密文，而是逐字符的一一替换混淆。本项目内置了从 [Oevani/Sfacg_Downloader](https://github.com/Oevani/Sfacg_Downloader) 整理的 3751 项初始表：
+
+```ts
+const decoded = [...apiContent]
+  .map((character) => dictionary[character] || character)
+  .join("");
+```
+
+只对 API 来源正文执行替换，网页来源已经是正常文本，不能再次套用字典。设置中的“手动更新字典”会读取指定的公开章节，使用章节 API 返回的 `novelId/volumeId` 请求对应网页，删除非汉字后按位置建立新映射；两侧汉字数量不同或已有映射冲突时拒绝保存。成功后表保存在项目根目录的 `sfacg-content-dictionary.json`（已加入 Git 忽略），后续下载自动使用。

@@ -78,6 +78,9 @@ export function useNovelDesk() {
     maxConcurrentDownloads: 1,
   });
   const requestPolicySaving = ref(false);
+  const contentDictionarySize = ref(0);
+  const contentDictionaryUpdating = ref(false);
+  const contentDictionaryChapterId = ref(8436696);
   const auth = ref<AuthStatus>({ authenticated: false });
   const loginBusy = ref(false);
   const toast = ref("");
@@ -266,11 +269,39 @@ export function useNovelDesk() {
   async function openRequestPolicy() {
     requestPolicyOpen.value = true;
     try {
-      requestPolicy.value = await request<RequestPolicy>(
-        "/api/settings/request-policy",
-      );
+      const [policy, dictionary] = await Promise.all([
+        request<RequestPolicy>("/api/settings/request-policy"),
+        request<{ size: number }>("/api/settings/content-dictionary"),
+      ]);
+      requestPolicy.value = policy;
+      contentDictionarySize.value = dictionary.size;
     } catch (error) {
       notify(error instanceof Error ? error.message : "读取请求设置失败");
+    }
+  }
+
+  async function updateContentDictionary(chapterId: number) {
+    if (!Number.isInteger(chapterId) || chapterId <= 0) {
+      notify("请输入有效的章节编号");
+      return;
+    }
+    contentDictionaryChapterId.value = chapterId;
+    contentDictionaryUpdating.value = true;
+    try {
+      const result = await request<{ size: number; added: number }>(
+        "/api/settings/content-dictionary/update",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chapterId }),
+        },
+      );
+      contentDictionarySize.value = result.size;
+      notify(`正文恢复字典已更新，新增 ${result.added} 个字符`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "正文恢复字典更新失败");
+    } finally {
+      contentDictionaryUpdating.value = false;
     }
   }
 
@@ -786,6 +817,9 @@ export function useNovelDesk() {
     requestPolicyOpen,
     requestPolicy,
     requestPolicySaving,
+    contentDictionarySize,
+    contentDictionaryUpdating,
+    contentDictionaryChapterId,
     auth,
     loginBusy,
     toast,
@@ -821,6 +855,7 @@ export function useNovelDesk() {
     openAccount,
     openRequestPolicy,
     saveRequestPolicy,
+    updateContentDictionary,
     formatDate,
   };
 }

@@ -20,6 +20,7 @@ import {
   writeNovelDownloadMetadata,
 } from "./library";
 import { throttledDownload } from "./cache";
+import { decodeSfacgContent, loadSfacgContentDictionary } from "./sfacgContentDictionary";
 
 type ProgressHandler = (value: number, message: string) => void;
 type AudioCatalogErrorCode = "NO_AUDIO" | "AUTH_EXPIRED" | "UPSTREAM_ERROR";
@@ -112,6 +113,7 @@ export async function writeNovel(
   signal: AbortSignal,
   onProgress?: ProgressHandler,
 ) {
+  await loadSfacgContentDictionary();
   const cookie = session?.cookie;
   // 文本下载支持断点续传：章节内容先写入进度文件，全部完成后再生成最终 Markdown。
   const client = new SfacgApiClient();
@@ -177,9 +179,13 @@ export async function writeNovel(
         let source = "App API";
         try {
           onProgress?.(4, `正在通过 App API 获取：${chapter.ntitle}`);
-          raw = normalizeApiChapterContent(await throttledDownload(() =>
-            downloadClient.chapterContentFromApi(chapter.chapId, signal),
-          ))
+          raw = normalizeApiChapterContent(
+            decodeSfacgContent(
+              await throttledDownload(() =>
+                downloadClient.chapterContentFromApi(chapter.chapId, signal),
+              ),
+            ),
+          );
         } catch {
           source = "网页解析";
           onProgress?.(4, `App API 不可用，正在通过网页解析：${chapter.ntitle}`);

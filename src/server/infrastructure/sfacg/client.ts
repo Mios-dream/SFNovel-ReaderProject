@@ -24,6 +24,13 @@ export class SfacgWebContentError extends Error {
 export class SfacgApiClient extends SfacgHttpClient {
   /** 使用新的 App 签名接口读取章节正文。 */
   async chapterContentFromApi(chapterId: number, signal?: AbortSignal): Promise<string> {
+    return (await this.chapterContentWithMetadataFromApi(chapterId, signal)).content;
+  }
+
+  async chapterContentWithMetadataFromApi(
+    chapterId: number,
+    signal?: AbortSignal,
+  ): Promise<{ content: string; novelId: number; volumeId: number }> {
     const response = await this.get<{ expand?: { content?: unknown }; content?: unknown }>(
       `/Chaps/${chapterId}`,
       { expand: "content,expand.content" },
@@ -32,7 +39,14 @@ export class SfacgApiClient extends SfacgHttpClient {
     const content = response?.expand?.content ?? response?.content;
     if (typeof content !== "string" || !content.trim())
       throw new Error("SF App API 未返回章节正文");
-    return content;
+    const metadata = response as typeof response & { novelId?: unknown; volumeId?: unknown };
+    if (!Number.isInteger(metadata.novelId) || !Number.isInteger(metadata.volumeId))
+      throw new Error("SF App API 未返回章节所属作品信息");
+    return {
+      content,
+      novelId: Number(metadata.novelId),
+      volumeId: Number(metadata.volumeId),
+    };
   }
 
   async novelInfo(

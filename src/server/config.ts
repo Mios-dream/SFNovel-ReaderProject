@@ -78,6 +78,7 @@ export const config = {
     profileTtl: 120_000,
   },
   userConfigFile: path.join(rootDir, "config.json"),
+  sfacgDictionaryFile: path.join(rootDir, "sfacg-content-dictionary.json"),
 };
 
 /**
