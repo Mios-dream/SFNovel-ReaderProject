@@ -27,6 +27,7 @@ const emit = defineEmits<{
 const defaultPolicy: RequestPolicy = {
   requestIntervalMs: 500,
   maxConcurrentDownloads: 1,
+  webFallbackEnabled: true,
 };
 // 使用本地草稿编辑，只有提交表单时才将设置发送给后端。
 const draft = reactive<RequestPolicy>({ ...props.policy });
@@ -73,7 +74,8 @@ function resetDraft() {
       </header>
 
       <form class="settings-form" @submit.prevent="emit('save', { ...draft })">
-        <section class="settings-group">
+        <div class="settings-content">
+          <section class="settings-group">
           <header class="settings-group-header">
             <strong>下载设置</strong>
           </header>
@@ -111,46 +113,59 @@ function resetDraft() {
               />
             </label>
           </div>
-        </section>
-
-        <section class="settings-group dictionary-group">
-          <header class="settings-group-header">
-            <strong>解码字典</strong>
-            <small>从网页小说章节构建解码字典</small>
-          </header>
 
           <div class="setting-row">
             <div class="setting-info">
-              <strong>公开章节id</strong>
-              <small>用于构建解码字典使用的网页小说章节id</small>
+              <strong>启用网页回退</strong>
+              <small>API 正文请求失败时自动切换到网页解析，默认开启</small>
             </div>
-            <label class="setting-control">
-              <input
-                v-model.number="dictionaryChapterDraft"
-                type="number"
-                min="1"
-                required
-              />
+            <label class="setting-control toggle-control">
+              <input v-model="draft.webFallbackEnabled" type="checkbox" />
+              <span class="toggle" aria-hidden="true"></span>
+              <span>{{ draft.webFallbackEnabled ? "已启用" : "已关闭" }}</span>
             </label>
           </div>
+          </section>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <strong>构建字典</strong>
-              <small>当前已收录 {{ dictionarySize }} 个字符映射</small>
+          <section class="settings-group dictionary-group">
+            <header class="settings-group-header">
+              <strong>解码字典</strong>
+              <small>从网页小说章节构建解码字典</small>
+            </header>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>公开章节id</strong>
+                <small>用于构建解码字典使用的网页小说章节id</small>
+              </div>
+              <label class="setting-control">
+                <input
+                  v-model.number="dictionaryChapterDraft"
+                  type="number"
+                  min="1"
+                  required
+                />
+              </label>
             </div>
-            <button
-              class="secondary-button"
-              :disabled="dictionaryUpdating"
-              type="button"
-              @click="emit('updateDictionary', dictionaryChapterDraft)"
-            >
-              <LoaderCircle v-if="dictionaryUpdating" class="spin" :size="16" />
-              <RefreshCw v-else :size="16" />
-              {{ dictionaryUpdating ? "正在比对" : "更新字典" }}
-            </button>
-          </div>
-        </section>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>构建字典</strong>
+                <small>当前已收录 {{ dictionarySize }} 个字符映射</small>
+              </div>
+              <button
+                class="secondary-button"
+                :disabled="dictionaryUpdating"
+                type="button"
+                @click="emit('updateDictionary', dictionaryChapterDraft)"
+              >
+                <LoaderCircle v-if="dictionaryUpdating" class="spin" :size="16" />
+                <RefreshCw v-else :size="16" />
+                {{ dictionaryUpdating ? "正在比对" : "更新字典" }}
+              </button>
+            </div>
+          </section>
+        </div>
 
         <footer class="settings-actions">
           <button class="reset-button" type="button" @click="resetDraft">
@@ -187,8 +202,10 @@ function resetDraft() {
 }
 .settings-modal {
   width: min(760px, 100%);
-  max-height: min(680px, calc(100vh - 36px));
-  overflow: auto;
+  height: min(680px, calc(100vh - 36px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .settings-header {
   display: flex;
@@ -241,8 +258,15 @@ function resetDraft() {
 }
 .settings-form {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
+  min-height: 0;
   margin-top: 27px;
+}
+.settings-content {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
 }
 .settings-group + .settings-group {
   margin-top: 26px;
@@ -312,6 +336,44 @@ input:focus {
   border-color: var(--theme-color);
   box-shadow: 0 0 0 3px #f8d7c6;
 }
+input[type="checkbox"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.toggle-control {
+  position: relative;
+  cursor: pointer;
+}
+.toggle {
+  position: relative;
+  display: inline-flex;
+  width: 42px;
+  height: 24px;
+  border-radius: 99px;
+  background: #dfc7bd;
+  transition: background 0.2s;
+}
+.toggle::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fffaf7;
+  box-shadow: 0 1px 4px rgba(91, 49, 39, 0.2);
+  content: "";
+  transition: transform 0.2s;
+}
+.toggle-control input:checked + .toggle {
+  background: var(--theme-color);
+}
+.toggle-control input:checked + .toggle::after {
+  transform: translateX(18px);
+}
 .primary-button,
 .secondary-button {
   display: inline-flex;
@@ -354,6 +416,7 @@ input:focus {
   background: #fff0e7;
 }
 .settings-actions {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -381,7 +444,7 @@ input:focus {
 
 @media (max-width: 600px) {
   .settings-modal {
-    max-height: calc(100vh - 20px);
+    height: calc(100vh - 20px);
     padding: 22px;
   }
   .setting-row {

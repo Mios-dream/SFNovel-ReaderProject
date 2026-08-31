@@ -5,6 +5,7 @@ import android.content.Intent
 import android.webkit.CookieManager
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
+import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
@@ -16,6 +17,11 @@ import app.tauri.plugin.Plugin
  *
  * @param activity The foreground Tauri activity used to display the login screen.
  */
+@InvokeArg
+class WriteSessionCookieArgs {
+    lateinit var cookie: String
+}
+
 @TauriPlugin
 class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
     /**
@@ -50,6 +56,25 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(JSObject().put("cookie", readSfacgSessionCookie()))
     }
 
+    /** Writes a native-login cookie into the persistent application WebView jar. */
+    @Command
+    fun writeSessionCookie(invoke: Invoke) {
+        val cookie = invoke.parseArgs(WriteSessionCookieArgs::class.java).cookie
+        val manager = CookieManager.getInstance()
+        for (part in cookie.split(";")) {
+            val pair = part.trim()
+            val separator = pair.indexOf('=')
+            if (separator <= 0) continue
+            val name = pair.substring(0, separator)
+            if (name != ".SFCommunity" && name != "session_APP" && !name.startsWith("session_")) continue
+            for (url in SFACG_COOKIE_URLS) {
+                manager.setCookie(url, "$pair; Max-Age=$SESSION_MAX_AGE; Path=/; Secure")
+            }
+        }
+        manager.flush()
+        invoke.resolve()
+    }
+
     /**
      * Deletes the SF session entries from the application WebView cookie jar.
      *
@@ -61,6 +86,7 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         for (url in SFACG_COOKIE_URLS) {
             manager.setCookie(url, ".SFCommunity=; Max-Age=0; Path=/; Secure")
             manager.setCookie(url, "session_APP=; Max-Age=0; Path=/; Secure")
+            manager.setCookie(url, "session_PC=; Max-Age=0; Path=/; Secure")
         }
         manager.flush()
         invoke.resolve()
@@ -97,5 +123,6 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
             "https://api.sfacg.com/",
             "https://passport.sfacg.com/",
         )
+        const val SESSION_MAX_AGE = 30 * 24 * 60 * 60
     }
 }

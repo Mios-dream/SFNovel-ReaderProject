@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   AuthStatus,
@@ -18,6 +19,11 @@ import type {
 } from "../types";
 
 type BookshelfResponse = { categories: string[]; items: Novel[] };
+
+function localAssetSource(path?: string) {
+  if (!path || !isTauri()) return path;
+  return convertFileSrc(path);
+}
 
 /**
  * 创建小说桌面页面使用的共享响应式状态与操作集合。
@@ -61,6 +67,7 @@ export function useNovelDesk() {
   const requestPolicy = ref<RequestPolicy>({
     requestIntervalMs: 500,
     maxConcurrentDownloads: 1,
+    webFallbackEnabled: true,
   });
   const requestPolicySaving = ref(false);
   const contentDictionarySize = ref(0);
@@ -145,6 +152,26 @@ export function useNovelDesk() {
   }
 
   /**
+   * Loads the current account profile for both the sidebar identity and profile modal.
+   *
+   * @returns A promise settled after the native profile request finishes.
+   */
+  async function loadAccountProfile() {
+    if (!auth.value.authenticated) return;
+    accountProfileLoading.value = true;
+    accountProfileError.value = "";
+    try {
+      const profile = await invoke<UserProfile>("get_user_profile");
+      accountProfile.value = profile;
+      auth.value = { ...auth.value, userName: profile.nickName };
+    } catch (error) {
+      accountProfileError.value = nativeErrorMessage(error, "读取账户资料失败");
+    } finally {
+      accountProfileLoading.value = false;
+    }
+  }
+
+  /**
    * 将用户输入的账号密码提交给原生请求层进行认证。
    * @returns 登录窗口启动请求完成后的 Promise。
    */
@@ -157,9 +184,10 @@ export function useNovelDesk() {
       });
       auth.value = result;
       credentialsOpen.value = false;
+      await loadAccountProfile();
       notify("SF 账号已登录到当前会话");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "SF 账号密码登录失败");
+      notify(nativeErrorMessage(error, "SF 账号密码登录失败"));
     } finally {
       loginBusy.value = false;
     }
@@ -180,12 +208,26 @@ export function useNovelDesk() {
       }
       auth.value = result;
       credentialsOpen.value = false;
+      await loadAccountProfile();
       notify("SF 账号已登录到当前会话");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "无法打开官方登录窗口");
+      notify(nativeErrorMessage(error, "无法打开官方登录窗口"));
     } finally {
       loginBusy.value = false;
     }
+  }
+
+  /**
+   * Keeps native command failures visible in both the UI and DevTools.
+   * Tauri may reject an invoke with a plain string rather than an Error object.
+   */
+  function nativeErrorMessage(error: unknown, fallback: string) {
+    console.error(`[SF Novel Flow] ${fallback}`, error);
+    return typeof error === "string"
+      ? error
+      : error instanceof Error && error.message
+        ? error.message
+        : fallback;
   }
 
   /**
@@ -217,18 +259,7 @@ export function useNovelDesk() {
       return;
     }
     accountOpen.value = true;
-    accountProfileLoading.value = true;
-    accountProfileError.value = "";
-    try {
-      const profile = await invoke<UserProfile>("get_user_profile");
-      accountProfile.value = profile;
-      auth.value = { ...auth.value, userName: profile.nickName };
-    } catch (error) {
-      accountProfileError.value =
-        error instanceof Error ? error.message : "读取账户资料失败";
-    } finally {
-      accountProfileLoading.value = false;
-    }
+    await loadAccountProfile();
   }
 
   /**
@@ -306,7 +337,7 @@ export function useNovelDesk() {
         query: query.value.trim(),
       });
     } catch (error) {
-      notify(error instanceof Error ? error.message : "搜索失败");
+      notify(nativeErrorMessage(error, "搜索失败"));
     } finally {
       loading.value = false;
     }
@@ -536,9 +567,16 @@ export function useNovelDesk() {
    */
   async function openLibraryBook(book: Book) {
     try {
-      localBook.value = await invoke<LocalBookDetail>("get_local_book", {
+      const bookDetail = await invoke<LocalBookDetail>("get_local_book", {
         name: book.name,
       });
+      bookDetail.cover = localAssetSource(bookDetail.cover);
+      bookDetail.epubHref = localAssetSource(bookDetail.epubHref);
+      bookDetail.audioTracks = bookDetail.audioTracks.map((track) => ({
+        ...track,
+        href: localAssetSource(track.href) || "",
+      }));
+      localBook.value = bookDetail;
       active.value = "libraryDetail";
     } catch (error) {
       notify(error instanceof Error ? error.message : "无法读取本地书籍详情");
@@ -597,7 +635,7 @@ export function useNovelDesk() {
   }
 
   /**
-   * Requests a native export and dispatches the resulting file to the platform.
+   * Lets the user choose a destination, then writes the native export there.
    *
    * @param format Export format supported by the native command.
    * @returns A promise settled after export and opener dispatch complete.
@@ -607,21 +645,24 @@ export function useNovelDesk() {
     if (!book) return;
     exportingFormat.value = format;
     try {
+      const extension = format === "epub" ? "epub" : format === "txt" ? "txt" : "zip";
+      const suffix =
+        format === "markdown" ? "-Markdown" : format === "audio" ? "-有声" : "";
+      const defaultPath = `${book.name}${suffix}.${extension}`;
+      const selectedPath = await save({
+        title: "选择导出位置",
+        defaultPath,
+        filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
+      });
+      if (!selectedPath) return;
+      const outputPath = selectedPath.toLowerCase().endsWith(`.${extension}`)
+        ? selectedPath
+        : `${selectedPath}.${extension}`;
       const result = await invoke<{ href: string; fileName: string }>(
         "export_local_book",
-        { name: book.name, format },
+        { name: book.name, format, outputPath },
       );
-      const link = document.createElement("a");
-      link.href = result.href;
-      link.download = result.fileName;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      notify(`${format === "audio" ? "有声内容已打包" : `${format.toUpperCase()} 已导出`}`);
-      if (format === "epub") {
-        book.epubHref = result.href;
-        void refreshLibrary();
-      }
+      notify(`已导出到 ${result.href}`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "导出失败");
     } finally {
@@ -688,7 +729,11 @@ export function useNovelDesk() {
    */
   async function refreshLibrary() {
     try {
-      library.value = await invoke<Book[]>("list_local_library");
+      const books = await invoke<Book[]>("list_local_library");
+      library.value = books.map((book) => ({
+        ...book,
+        cover: localAssetSource(book.cover),
+      }));
     } catch {
       /* no library yet */
     }
@@ -716,7 +761,7 @@ export function useNovelDesk() {
         bookshelfCategory.value = "全部";
       bookshelfPage.value = 1;
     } catch (error) {
-      notify(error instanceof Error ? error.message : "读取书架失败");
+      notify(nativeErrorMessage(error, "读取书架失败"));
     } finally {
       bookshelfLoading.value = false;
     }
@@ -765,7 +810,7 @@ export function useNovelDesk() {
     });
     void refreshJobs();
     void refreshLibrary();
-    void refreshAuthStatus();
+    void refreshAuthStatus().then(() => loadAccountProfile());
     document.addEventListener("copy", blockCopy);
   });
   onBeforeUnmount(() => {

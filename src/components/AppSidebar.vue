@@ -8,16 +8,26 @@ import {
   LibraryBig,
   Sparkles,
 } from "lucide-vue-next";
-import type { AuthStatus, ViewName } from "../types";
+import { ref, watch } from "vue";
+import type { AuthStatus, UserProfile, ViewName } from "../types";
 
-defineProps<{
+const props = defineProps<{
   active: ViewName;
   bookshelfCount: number;
   libraryCount: number;
   auth: AuthStatus;
+  profile?: UserProfile;
 }>();
 // 侧栏仅负责导航和登录入口，页面数据通过 props 展示。
 const emit = defineEmits<{ navigate: [view: ViewName]; account: [] }>();
+const avatarFailed = ref(false);
+
+watch(
+  () => props.profile?.avatar,
+  () => {
+    avatarFailed.value = false;
+  },
+);
 </script>
 
 <template>
@@ -55,10 +65,21 @@ const emit = defineEmits<{ navigate: [view: ViewName]; account: [] }>();
         >
       </div>
       <button class="account-button" @click="emit('account')">
-        <CircleUserRound :size="20" /><span>{{
-          auth.authenticated
+        <span
+          v-if="auth.authenticated && profile?.avatar && !avatarFailed"
+          class="account-avatar"
+        >
+          <img
+            :src="profile.avatar"
+            :alt="`${profile.nickName} 的头像`"
+            @error="avatarFailed = true"
+          />
+        </span>
+        <CircleUserRound v-else :size="20" /><span>{{
+          profile?.nickName ||
+          (auth.authenticated
             ? auth.userName || "已登录 SF 账号"
-            : "登录 SF 账号"
+            : "登录 SF 账号")
         }}</span
         ><ChevronRight :size="16" />
       </button>
@@ -165,6 +186,21 @@ nav button.active {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.account-button .account-avatar {
+  display: block;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #f5d8c8;
+}
+.account-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .account-button svg:last-child {
   margin-left: auto;

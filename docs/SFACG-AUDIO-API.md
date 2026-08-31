@@ -62,13 +62,13 @@ name={账号}&password={密码}&al=false&ticket={腾讯滑块票据}&randstr={�
 
 `ticket` 和 `randstr` 必须由官方腾讯滑块组件 `TCaptcha.js` 在用户完成验证后产生，不能用用户名和密码替代，也不应绕过验证。
 
-本项目不再转发这两个字段。点击“打开官方登录窗口”后，应用会以单独的本地浏览器配置打开官方登录页；账号、密码、滑块验证和 `QuickLogin.ashx` 提交均在同一官方浏览器上下文内完成。登录成功后，应用仅从该受控窗口读取 SF 会话 Cookie，用于本地下载。
+本项目不再转发这两个字段。点击“打开官方登录窗口”后，应用会在平台原生 WebView 中打开官方登录页；账号、密码、滑块验证和 `QuickLogin.ashx` 提交均在同一官方浏览器上下文内完成。登录成功后，应用仅从该受控窗口读取 SF 会话 Cookie，用于本地下载。
 
 ## 本地会话保存
 
-应用会将受控官方窗口中的会话凭证封装进 `127.0.0.1` 的 `HttpOnly` 本地 Cookie `sfacg_session`，有效期为 30 天。官方窗口自己的配置目录是项目下 `.sfacg-login-profile/`，不会纳入 Git；页面刷新和本地服务重启后都会自动恢复。JavaScript 无法读取该 Cookie，账号密码也不会保存。
+应用只保存 SF 签发的会话 Cookie，不保存账号密码。Windows 将 `用户名 + 会话 Cookie` 写入应用数据目录中的 `auth-session.bin`，并使用当前 Windows 用户的 DPAPI 加密；应用启动时自动解密恢复。Android 使用应用私有的 WebView `CookieManager` 持久化 Cookie，并在启动时同步到原生请求层。两端的密码登录和官方网页登录都会保存会话。
 
-点击应用中的“退出当前会话”会同时清除这个本地 Cookie。SF 官方会话本身可能先于 30 天失效，发生 `401/403` 时需要重新完成官方登录和滑块验证。
+点击应用中的“退出当前会话”会同时清除内存会话和平台持久化会话。SF 官方会话本身可能过期，发生 `401/403` 时需要重新登录。
 
 ## 音频下载
 
@@ -86,6 +86,6 @@ GET https://api.sfacg.com/albums/{albumId}/chaps
 ## 安全注意事项
 
 - Cookie 等同于登录凭证，不要提交到 Git、日志或公开 issue。
-- 本项目不将 Cookie 写入源码、项目配置或日志；浏览器在本机保存 `HttpOnly` 本地 Cookie。
+- 本项目不将 Cookie 写入源码、项目配置或日志；Windows 使用当前用户 DPAPI 加密，Android 使用应用私有 WebView Cookie 存储。
 - 使用完毕后应退出 SF 账号或修改密码，使已暴露的旧 Cookie 失效。
 - 仅下载自己有权访问和保存的内容，并遵守 SF 平台条款及版权要求。

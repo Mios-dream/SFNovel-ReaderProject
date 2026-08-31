@@ -53,6 +53,7 @@ onMounted(() => {
       :bookshelf-count="desk.bookshelf.length"
       :library-count="desk.library.length"
       :auth="desk.auth"
+      :profile="desk.accountProfile"
       @navigate="desk.navigate"
       @account="desk.openAccount"
     />
@@ -149,6 +150,7 @@ onMounted(() => {
           desk.active === 'reader' && desk.localBook && desk.localChapter
         "
         :book-name="desk.localBook.name"
+        :image-directory="desk.localBook.imageDirectory"
         :chapter="desk.localChapter"
         @back="desk.navigate('libraryDetail')"
       />

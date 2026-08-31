@@ -80,6 +80,7 @@ export type LocalBookDetail = {
   author: string;
   description: string;
   cover?: string;
+  imageDirectory: string;
   audioTracks: LocalAudioTrack[];
   epubHref?: string;
   chapterVolumes: LocalChapterVolume[];
@@ -101,4 +102,5 @@ export type UserProfile = {
 export type RequestPolicy = {
   requestIntervalMs: number;
   maxConcurrentDownloads: number;
+  webFallbackEnabled: boolean;
 };

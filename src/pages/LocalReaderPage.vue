@@ -1,16 +1,26 @@
 <script setup lang="ts">
+import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { computed } from "vue";
 import { ChevronLeft } from "lucide-vue-next";
 import type { LocalChapterContent } from "../types";
-const { chapter, bookName } = defineProps<{
+const { chapter, bookName, imageDirectory } = defineProps<{
   chapter: LocalChapterContent;
   bookName: string;
+  imageDirectory: string;
 }>();
 const emit = defineEmits<{ back: [] }>();
 
 type ChapterPart =
   | { type: "text"; value: string }
   | { type: "image"; alt: string; src: string };
+
+function chapterImageSource(relativePath: string) {
+  const imagePath = `${imageDirectory}\\${relativePath
+    .slice("imgs/".length)
+    .split("/")
+    .join("\\")}`;
+  return isTauri() ? convertFileSrc(imagePath) : imagePath;
+}
 
 const chapterParts = computed<ChapterPart[]>(() => {
   const content = chapter.content.replace(/^##\s+.+\r?\n+/, "");
@@ -24,10 +34,7 @@ const chapterParts = computed<ChapterPart[]>(() => {
     parts.push({
       type: "image",
       alt: match[1] || "章节插图",
-      src: `/library/${encodeURIComponent(bookName)}/${match[2]
-        .split("/")
-        .map(encodeURIComponent)
-        .join("/")}`,
+      src: chapterImageSource(match[2]),
     });
     lastIndex = index + match[0].length;
   }
