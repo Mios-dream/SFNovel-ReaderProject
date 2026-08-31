@@ -1,9 +1,0 @@
-{
-  "userSettings": {
-    "libraryDir": "output/菠萝包轻小说"
-  },
-  "requestPolicy": {
-    "requestIntervalMs": 250,
-    "maxConcurrentDownloads": 1
-  }
-}

@@ -1,43 +1,27 @@
 {
-  "name": "@rcrwrate/crawler",
-  "version": "0.0.1",
-  "description": "Crawler",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "name": "sf-novel-flow",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
   "scripts": {
-    "build": "vite build",
-    "server": "tsx src/server.ts",
-    "dev": "concurrently -n API,WEB \"npm run server\" \"vite\""
-  },
-  "author": "Rcrwrate",
-  "license": "GPL-3.0-only",
-  "engines": {
-    "node": ">=18.17.0"
-  },
-  "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/fs-extra": "^11.0.4",
-    "@types/inquirer": "^8.0.0",
-    "@types/jsdom": "^21.1.6",
-    "@types/uuid": "^9.0.8",
-    "@vitejs/plugin-vue": "^6.0.8",
-    "concurrently": "^10.0.5",
-    "lucide-vue-next": "^1.0.0",
-    "ts-loader": "^9.5.1",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.23.12",
-    "typescript": "^5.9.3",
-    "vite": "^8.2.2",
-    "vue": "^3.5.42"
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
-    "@types/archiver": "^8.0.0",
-    "archiver": "^8.0.0",
-    "axios": "^1.6.7",
-    "axios-cookiejar-support": "^5.0.0",
-    "express": "^5.2.1",
-    "fs-extra": "^11.2.0",
-    "uuid": "^9.0.1",
-    "ws": "^8.21.3"
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "lucide-vue-next": "^1.0.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3",
+    "vue-tsc": "^2.1.10"
   }
 }
