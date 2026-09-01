@@ -25,4 +25,3 @@ src-tauri/gen/android/*.keystore
 *.njsproj
 *.sln
 *.sw?
-sfacg-content-dictionary.json
