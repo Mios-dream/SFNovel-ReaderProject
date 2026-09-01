@@ -101,7 +101,7 @@ const emit = defineEmits<{
 }
 .queue-modal {
   width: min(680px, 100%);
-  max-height: calc(100vh - 36px);
+  max-height: 90%;
   overflow: auto;
 }
 .modal h2 {
@@ -231,12 +231,5 @@ const emit = defineEmits<{
   font-size: 11px;
   font-weight: 600;
   text-decoration: none;
-}
-
-@media (max-width: 760px) {
-  .queue-modal {
-    max-height: calc(100vh - 20px);
-    padding: 21px;
-  }
 }
 </style>

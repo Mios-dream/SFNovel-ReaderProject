@@ -69,62 +69,63 @@ function resetDraft() {
       </button>
       <header class="settings-header">
         <span class="modal-icon"><Settings2 :size="22" /></span>
-
         <h2>设置</h2>
       </header>
 
       <form class="settings-form" @submit.prevent="emit('save', { ...draft })">
         <div class="settings-content">
           <section class="settings-group">
-          <header class="settings-group-header">
-            <strong>下载设置</strong>
-          </header>
+            <header class="settings-group-header">
+              <strong>下载设置</strong>
+            </header>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <strong>下载请求间隔</strong>
-              <small>每次请求之间等待的时间，单位为毫秒</small>
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>下载请求间隔</strong>
+                <small>每次请求之间等待的时间，单位为毫秒</small>
+              </div>
+              <label class="setting-control">
+                <input
+                  v-model.number="draft.requestIntervalMs"
+                  type="number"
+                  min="100"
+                  max="10000"
+                  step="50"
+                  required
+                />
+              </label>
             </div>
-            <label class="setting-control">
-              <input
-                v-model.number="draft.requestIntervalMs"
-                type="number"
-                min="100"
-                max="10000"
-                step="50"
-                required
-              />
-            </label>
-          </div>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <strong>并发下载任务</strong>
-              <small>同时处理的下载任务数量</small>
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>并发下载任务</strong>
+                <small>同时处理的下载任务数量</small>
+              </div>
+              <label class="setting-control">
+                <input
+                  v-model.number="draft.maxConcurrentDownloads"
+                  type="number"
+                  min="1"
+                  max="3"
+                  step="1"
+                  required
+                />
+              </label>
             </div>
-            <label class="setting-control">
-              <input
-                v-model.number="draft.maxConcurrentDownloads"
-                type="number"
-                min="1"
-                max="3"
-                step="1"
-                required
-              />
-            </label>
-          </div>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <strong>启用网页回退</strong>
-              <small>API 正文请求失败时自动切换到网页解析，默认开启</small>
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>启用网页回退</strong>
+                <small>API 正文请求失败时自动切换到网页解析，默认开启</small>
+              </div>
+              <label class="setting-control toggle-control">
+                <input v-model="draft.webFallbackEnabled" type="checkbox" />
+                <span class="toggle" aria-hidden="true"></span>
+                <span>{{
+                  draft.webFallbackEnabled ? "已启用" : "已关闭"
+                }}</span>
+              </label>
             </div>
-            <label class="setting-control toggle-control">
-              <input v-model="draft.webFallbackEnabled" type="checkbox" />
-              <span class="toggle" aria-hidden="true"></span>
-              <span>{{ draft.webFallbackEnabled ? "已启用" : "已关闭" }}</span>
-            </label>
-          </div>
           </section>
 
           <section class="settings-group dictionary-group">
@@ -159,7 +160,11 @@ function resetDraft() {
                 type="button"
                 @click="emit('updateDictionary', dictionaryChapterDraft)"
               >
-                <LoaderCircle v-if="dictionaryUpdating" class="spin" :size="16" />
+                <LoaderCircle
+                  v-if="dictionaryUpdating"
+                  class="spin"
+                  :size="16"
+                />
                 <RefreshCw v-else :size="16" />
                 {{ dictionaryUpdating ? "正在比对" : "更新字典" }}
               </button>
@@ -199,10 +204,11 @@ function resetDraft() {
   padding: 28px;
   border-radius: 20px;
   background: rgba(255, 249, 245, 0.8);
+  margin: 5%;
 }
 .settings-modal {
   width: min(760px, 100%);
-  height: min(680px, calc(100vh - 36px));
+  height: min(680px, 80%);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -444,7 +450,7 @@ input[type="checkbox"] {
 
 @media (max-width: 600px) {
   .settings-modal {
-    height: calc(100vh - 20px);
+    height: 80%;
     padding: 22px;
   }
   .setting-row {

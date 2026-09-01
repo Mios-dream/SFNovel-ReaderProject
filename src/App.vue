@@ -1,54 +1,20 @@
-<script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import {
-  CheckCircle2,
-  CloudDownload,
-  FolderOpen,
-  Settings2,
-} from "lucide-vue-next";
-import AppSidebar from "./components/AppSidebar.vue";
-import AuthModal from "./components/AuthModal.vue";
-import AccountProfileModal from "./components/AccountProfileModal.vue";
-import ChapterPickerModal from "./components/ChapterPickerModal.vue";
-import ConfirmDeleteModal from "./components/ConfirmDeleteModal.vue";
-import DownloadQueueModal from "./components/DownloadQueueModal.vue";
-import RequestPolicyModal from "./components/RequestPolicyModal.vue";
-import { useNovelDesk } from "./composables/useNovelDesk";
-import BookshelfPage from "./pages/BookshelfPage.vue";
-import DiscoverPage from "./pages/DiscoverPage.vue";
-import LibraryPage from "./pages/LibraryPage.vue";
-import LocalBookDetailPage from "./pages/LocalBookDetailPage.vue";
-import LocalReaderPage from "./pages/LocalReaderPage.vue";
-import LocalAudioPlayerPage from "./pages/LocalAudioPlayerPage.vue";
-
-// reactive 会自动解包 composable 返回的 ref，模板中可直接读写 desk.xxx。
-const desk = reactive(useNovelDesk());
-const nativeVersion = ref("检测中");
-
-/**
- * 读取 Rust 运行时版本，用于确认当前页面运行在 Tauri 原生桥接中。
- *
- * 该调用不读取文件、网络或会话信息；桥接失败时保留可识别的降级文本，
- * 便于独立使用 Vite 页面进行前端开发。
- * @returns 原生版本调用完成后的 Promise。
- */
-async function loadNativeRuntimeVersion(): Promise<void> {
-  try {
-    nativeVersion.value = await invoke<string>("app_runtime_version");
-  } catch {
-    nativeVersion.value = "Web 开发模式";
-  }
-}
-
-onMounted(() => {
-  void loadNativeRuntimeVersion();
-});
-</script>
-
 <template>
-  <main class="app-shell">
+  <main
+    class="app-shell"
+    :class="{
+      'immersive-active':
+        desk.active === 'libraryDetail' ||
+        desk.active === 'reader' ||
+        desk.active === 'audioPlayer',
+    }"
+  >
     <AppSidebar
+      :class="{
+        'immersive-sidebar':
+          desk.active === 'libraryDetail' ||
+          desk.active === 'reader' ||
+          desk.active === 'audioPlayer',
+      }"
       :active="desk.active"
       :bookshelf-count="desk.bookshelf.length"
       :library-count="desk.library.length"
@@ -56,30 +22,25 @@ onMounted(() => {
       :profile="desk.accountProfile"
       @navigate="desk.navigate"
       @account="desk.openAccount"
+      @request-settings="desk.openRequestPolicy"
     />
 
     <section class="content">
-      <header class="topbar">
+      <header
+        v-if="
+          desk.active !== 'libraryDetail' &&
+          desk.active !== 'reader' &&
+          desk.active !== 'audioPlayer'
+        "
+        class="topbar"
+      >
         <div>
           <p class="eyebrow">PERSONAL NOVEL DESK</p>
           <h1>
-            {{
-              desk.active === "discover"
-                ? "发现想读的故事"
-                : desk.active === "bookshelf"
-                  ? "我的 SF 书架"
-                  : desk.active === "library"
-                    ? "你的本地书库"
-                    : desk.active === "libraryDetail"
-                      ? desk.localBook?.name || "本地书籍"
-                      : desk.active === "audioPlayer"
-                        ? `${desk.localBook?.name || "本地书籍"} 有声`
-                        : desk.localChapter?.title || "本地阅读"
-            }}
+            {{ titleContent }}
           </h1>
         </div>
         <div class="topbar-actions">
-          <span class="runtime-badge" title="当前原生运行时">Native {{ nativeVersion }}</span>
           <button
             class="icon-button"
             title="请求设置"
@@ -87,7 +48,7 @@ onMounted(() => {
           >
             <Settings2 :size="20" /></button
           ><button
-            class="icon-button"
+            class="icon-button open-library-button"
             title="打开输出目录"
             @click="desk.navigate('library')"
           >
@@ -138,7 +99,7 @@ onMounted(() => {
         v-else-if="desk.active === 'libraryDetail' && desk.localBook"
         :book="desk.localBook"
         :exporting="desk.exportingFormat"
-        @back="desk.navigate('library')"
+        @back="desk.backFromLibraryDetail"
         @read="desk.openLocalChapter"
         @play-audio="desk.openLocalAudioPlayer"
         @online="desk.readOnline"
@@ -218,7 +179,7 @@ onMounted(() => {
       @close="desk.accountOpen = false"
       @logout="desk.logout"
     />
-    <RequestPolicyModal
+    <SettingModal
       :open="desk.requestPolicyOpen"
       :policy="desk.requestPolicy"
       :saving="desk.requestPolicySaving"
@@ -241,6 +202,50 @@ onMounted(() => {
     >
   </main>
 </template>
+<script setup lang="ts">
+import { computed, reactive } from "vue";
+import {
+  CheckCircle2,
+  CloudDownload,
+  FolderOpen,
+  Settings2,
+} from "lucide-vue-next";
+import AppSidebar from "./components/AppSidebar.vue";
+import AuthModal from "./components/AuthModal.vue";
+import AccountProfileModal from "./components/AccountProfileModal.vue";
+import ChapterPickerModal from "./components/ChapterPickerModal.vue";
+import ConfirmDeleteModal from "./components/ConfirmDeleteModal.vue";
+import DownloadQueueModal from "./components/DownloadQueueModal.vue";
+import SettingModal from "./components/SettingModal.vue";
+import { useNovelDesk } from "./composables/useNovelDesk";
+import BookshelfPage from "./pages/BookshelfPage.vue";
+import DiscoverPage from "./pages/DiscoverPage.vue";
+import LibraryPage from "./pages/LibraryPage.vue";
+import LocalBookDetailPage from "./pages/LocalBookDetailPage.vue";
+import LocalReaderPage from "./pages/LocalReaderPage.vue";
+import LocalAudioPlayerPage from "./pages/LocalAudioPlayerPage.vue";
+
+// reactive 会自动解包 composable 返回的 ref，模板中可直接读写 desk.xxx。
+const desk = reactive(useNovelDesk());
+const titleContent = computed(() => {
+  switch (desk.active) {
+    case "discover":
+      return "发现想读的故事";
+    case "bookshelf":
+      return "我的 SF 书架";
+    case "library":
+      return "本地书库";
+    case "libraryDetail":
+      return desk.localBook?.name || "本地书籍";
+    case "reader":
+      return desk.localBook?.name || "本地阅读";
+    case "audioPlayer":
+      return desk.localBook?.name || "本地有声书";
+    default:
+      return "";
+  }
+});
+</script>
 
 <style scoped>
 .app-shell {
@@ -293,11 +298,22 @@ onMounted(() => {
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
+.immersive-active .content {
+  grid-column: 1 / -1;
+  max-width: 1200px;
+  padding-top: 0;
+}
+.immersive-active .immersive-sidebar {
+  display: none;
+}
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 22px;
+}
+.topbar > div:first-child {
+  min-width: 0;
 }
 .eyebrow {
   margin: 0 0 6px;
@@ -410,25 +426,39 @@ onMounted(() => {
 @media (max-width: 760px) {
   .app-shell {
     display: block;
-    height: auto;
     min-height: 100vh;
-    padding: 10px;
+    padding: 8px 12px calc(78px + env(safe-area-inset-bottom));
     overflow: visible;
+    overflow-y: auto;
+    scrollbar-width: none;
   }
   .content {
     height: auto;
     overflow: visible;
-    padding: 12px 2px;
+    padding: 10px 0 0;
+  }
+  .immersive-active {
+    padding-bottom: 16px;
+  }
+  .immersive-active .content {
+    padding-top: 0;
+  }
+  .immersive-active .queue-fab {
+    display: none;
   }
   .topbar {
-    margin: 6px 3px 17px;
-  }
-  .topbar h1 {
-    font-size: 24px;
+    display: none;
   }
   .queue-fab {
-    right: 16px;
-    bottom: 16px;
+    right: 18px;
+    bottom: calc(70px + env(safe-area-inset-bottom));
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+  }
+  .toast {
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    max-width: calc(100vw - 32px);
   }
 }
 </style>

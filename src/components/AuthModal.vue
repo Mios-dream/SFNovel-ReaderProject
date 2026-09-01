@@ -4,13 +4,21 @@ import { ref, watch } from "vue";
 import type { AuthStatus } from "../types";
 
 const props = defineProps<{ open: boolean; auth: AuthStatus; busy: boolean }>();
-const emit = defineEmits<{ close: []; login: [username: string, password: string]; browserLogin: []; logout: [] }>();
+const emit = defineEmits<{
+  close: [];
+  login: [username: string, password: string];
+  browserLogin: [];
+  logout: [];
+}>();
 const username = ref("");
 const password = ref("");
 const activeTab = ref<"password" | "official">("password");
-watch(() => props.open, (open) => {
-  if (open && !props.auth.authenticated) activeTab.value = "password";
-});
+watch(
+  () => props.open,
+  (open) => {
+    if (open && !props.auth.authenticated) activeTab.value = "password";
+  },
+);
 /**
  * Emits credentials for immediate native submission without retaining either field.
  * @returns No return value.
@@ -27,8 +35,8 @@ function submit() {
   const submittedUsername = username.value.trim();
   const submittedPassword = password.value;
   emit("login", submittedUsername, submittedPassword);
-  username.value = "";
-  password.value = "";
+  // username.value = "";
+  // password.value = "";
 }
 </script>
 
@@ -41,7 +49,8 @@ function submit() {
       <h2>SF 账号登录</h2>
       <template v-if="auth.authenticated"
         ><p>
-          当前账号已通过登录验证。官方网页登录会话由应用内 WebView 保留，账号密码不会写入本地。
+          当前账号已通过登录验证。官方网页登录会话由应用内 WebView
+          保留，账号密码不会写入本地。
         </p>
         <button class="text-button" @click="emit('logout')">
           退出当前会话 <ChevronRight :size="15" /></button></template
@@ -54,7 +63,9 @@ function submit() {
             :aria-selected="activeTab === 'password'"
             type="button"
             @click="activeTab = 'password'"
-          >账号密码</button>
+          >
+            账号密码
+          </button>
           <button
             class="login-tab"
             :class="{ active: activeTab === 'official' }"
@@ -62,22 +73,50 @@ function submit() {
             :aria-selected="activeTab === 'official'"
             type="button"
             @click="activeTab = 'official'"
-          >官方网页登录</button>
+          >
+            官方网页登录
+          </button>
         </div>
-        <div v-if="activeTab === 'password'" class="login-panel" role="tabpanel">
+        <div
+          v-if="activeTab === 'password'"
+          class="login-panel"
+          role="tabpanel"
+        >
           <p>密码不会保存在本地。</p>
           <form class="login-form" @submit.prevent="submit">
-            <input v-model="username" autocomplete="username" placeholder="账号" required />
-            <input v-model="password" autocomplete="current-password" placeholder="密码" type="password" required />
+            <input
+              v-model="username"
+              autocomplete="username"
+              placeholder="账号"
+              required
+            />
+            <input
+              v-model="password"
+              autocomplete="current-password"
+              placeholder="密码"
+              type="password"
+              required
+            />
             <button class="primary-button full" type="submit" :disabled="busy">
-              <LoaderCircle v-if="busy" class="spin" :size="18" />{{ busy ? "正在登录" : "账号密码登录" }}
+              <LoaderCircle v-if="busy" class="spin" :size="18" />{{
+                busy ? "正在登录" : "账号密码登录"
+              }}
             </button>
           </form>
         </div>
         <div v-else class="login-panel" role="tabpanel">
-          <p>将在应用内官方网页登录页完成账号、密码和滑块验证，应用只使用会话 Cookie，不读取系统浏览器数据。</p>
-          <button class="primary-button full" :disabled="busy" @click="emit('browserLogin')">
-            <LoaderCircle v-if="busy" class="spin" :size="18" />{{ busy ? "正在等待官方登录" : "打开应用内登录页" }}
+          <p>
+            将在应用内官方网页登录页完成账号、密码和滑块验证，应用只使用会话
+            Cookie，不读取系统浏览器数据。
+          </p>
+          <button
+            class="primary-button full"
+            :disabled="busy"
+            @click="emit('browserLogin')"
+          >
+            <LoaderCircle v-if="busy" class="spin" :size="18" />{{
+              busy ? "正在等待官方登录" : "打开应用内登录页"
+            }}
           </button>
         </div></template
       >

@@ -366,7 +366,7 @@ const emit = defineEmits<{
 }
 @media (max-width: 760px) {
   .section-head {
-    margin-top: 27px;
+    margin-top: 20px;
   }
   .library-grid {
     grid-template-columns: 1fr;
@@ -377,6 +377,13 @@ const emit = defineEmits<{
   .library-download-title,
   .library-download-row .progress {
     flex-basis: 100%;
+  }
+  .library-download-row .text-button {
+    min-height: 32px;
+    margin-left: auto;
+    padding: 0 8px;
+    border-radius: 7px;
+    background: #fff0e7;
   }
 }
 </style>

@@ -18,7 +18,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: https://book.sfacg.com https://api.sfacg.com https://rss.sfacg.com https://i.sfacg.com data:; media-src 'self' asset: https://rss.sfacg.com https://i.sfacg.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost https://book.sfacg.com https://api.sfacg.com https://rss.sfacg.com https://i.sfacg.com",
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost https://book.sfacg.com https://api.sfacg.com https://rss.sfacg.com https://i.sfacg.com data:; media-src 'self' asset: http://asset.localhost https://rss.sfacg.com https://i.sfacg.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost https://book.sfacg.com https://api.sfacg.com https://rss.sfacg.com https://i.sfacg.com",
       "assetProtocol": {
         "enable": true,
         "scope": ["$APPDATA/library/**/*", "$APPDATA/exports/**/*"]

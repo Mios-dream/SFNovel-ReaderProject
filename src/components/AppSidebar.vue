@@ -6,6 +6,7 @@ import {
   CircleUserRound,
   Compass,
   LibraryBig,
+  Settings2,
   Sparkles,
 } from "lucide-vue-next";
 import { ref, watch } from "vue";
@@ -19,7 +20,11 @@ const props = defineProps<{
   profile?: UserProfile;
 }>();
 // 侧栏仅负责导航和登录入口，页面数据通过 props 展示。
-const emit = defineEmits<{ navigate: [view: ViewName]; account: [] }>();
+const emit = defineEmits<{
+  navigate: [view: ViewName];
+  account: [];
+  requestSettings: [];
+}>();
 const avatarFailed = ref(false);
 
 watch(
@@ -34,7 +39,7 @@ watch(
   <aside class="sidebar glass">
     <div class="brand">
       <span class="brand-mark"><BookOpen :size="22" /></span
-      ><span>Novel Flow</span>
+      ><span>SF Novel Flow</span>
     </div>
     <nav>
       <button
@@ -64,6 +69,13 @@ watch(
           >本地优先<br /><small>数据仅保存在此设备</small></span
         >
       </div>
+      <button
+        class="mobile-settings-button"
+        title="请求设置"
+        @click="emit('requestSettings')"
+      >
+        <Settings2 :size="20" />
+      </button>
       <button class="account-button" @click="emit('account')">
         <span
           v-if="auth.authenticated && profile?.avatar && !avatarFailed"
@@ -77,9 +89,7 @@ watch(
         </span>
         <CircleUserRound v-else :size="20" /><span>{{
           profile?.nickName ||
-          (auth.authenticated
-            ? auth.userName || "已登录 SF 账号"
-            : "登录 SF 账号")
+          (auth.authenticated ? "已登录 SF 账号" : "登录 SF 账号")
         }}</span
         ><ChevronRight :size="16" />
       </button>
@@ -187,6 +197,9 @@ nav button.active {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.mobile-settings-button {
+  display: none;
+}
 .account-button .account-avatar {
   display: block;
   flex: 0 0 auto;
@@ -208,30 +221,101 @@ nav button.active {
 
 @media (max-width: 760px) {
   .sidebar {
-    position: relative;
+    position: static;
     top: auto;
     display: flex;
+    flex-direction: row;
     height: auto;
     min-height: auto;
-    margin-bottom: 10px;
-    padding: 14px;
-    border-radius: 17px;
+    margin-bottom: 0;
+    padding: 6px 2px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
   .brand {
+    gap: 8px;
     padding: 0;
+    font-size: 18px;
   }
-  .sidebar nav,
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
   .sidebar-bottom .mini-card {
     display: none;
   }
+  .sidebar nav {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 8;
+    display: flex;
+    gap: 2px;
+    min-height: calc(64px + env(safe-area-inset-bottom));
+    padding: 7px 12px calc(7px + env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(224, 176, 154, 0.6);
+    background: rgba(255, 249, 245, 0.96);
+    box-shadow: 0 -8px 24px rgba(137, 76, 55, 0.1);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+  .sidebar nav button {
+    flex: 1 1 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    min-height: 50px;
+    padding: 4px 6px;
+    border-radius: 8px;
+    font-size: 11px;
+    text-align: center;
+  }
+  .sidebar nav button.active {
+    box-shadow: none;
+  }
+  .sidebar nav .count {
+    position: absolute;
+    top: 5px;
+    margin-left: 30px;
+    min-width: 17px;
+    padding: 1px 4px;
+    font-size: 9px;
+  }
   .sidebar-bottom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     margin: 0 0 0 auto;
   }
+  .mobile-settings-button {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: 12px;
+    color: #a17367;
+    background: rgba(255, 255, 255, 0.58);
+    place-items: center;
+  }
   .account-button {
+    width: 40px;
+    height: 40px;
     margin: 0;
     padding: 0;
+    border-radius: 12px;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.58);
   }
   .account-button span {
+    display: none;
+  }
+  .account-button svg:last-child {
     display: none;
   }
 }
