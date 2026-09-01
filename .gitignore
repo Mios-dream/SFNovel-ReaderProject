@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 src-tauri/target
+src-tauri/gen/android/keystore.properties
+src-tauri/gen/android/*.jks
+src-tauri/gen/android/*.keystore
 
 # Editor directories and files
 .vscode
