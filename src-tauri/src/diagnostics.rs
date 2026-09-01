@@ -20,12 +20,12 @@ fn greet(name: &str) -> String {
 
 /// Returns the application runtime version used by the renderer diagnostics.
 ///
-/// The value is compiled into the native binary and has no side effects.
+/// The value comes from the Tauri application package metadata and has no side effects.
 ///
 /// # Returns
-/// The semantic version declared by the Cargo package.
+/// The semantic version declared by the application package.
 #[tauri::command]
-fn app_runtime_version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+fn app_runtime_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
 }
 
