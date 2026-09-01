@@ -427,7 +427,8 @@ const titleContent = computed(() => {
   .app-shell {
     display: block;
     min-height: 100vh;
-    padding: 8px 12px calc(78px + env(safe-area-inset-bottom));
+    padding: calc(8px + env(safe-area-inset-top)) 12px
+      calc(78px + env(safe-area-inset-bottom));
     overflow: visible;
     overflow-y: auto;
     scrollbar-width: none;

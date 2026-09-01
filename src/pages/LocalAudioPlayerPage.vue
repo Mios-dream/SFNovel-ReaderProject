@@ -8,7 +8,9 @@ import {
   Play,
   SkipBack,
   SkipForward,
+  SlidersHorizontal,
   Volume2,
+  X,
 } from "lucide-vue-next";
 import type { LocalAudioTrack } from "../types";
 
@@ -30,7 +32,27 @@ const seeking = ref(false);
 const duration = ref(0);
 const volume = ref(0.8);
 const playbackRate = ref(1);
+const mobileSettingsOpen = ref(false);
+const playlistOpen = ref(false);
 const currentTrack = computed(() => props.tracks[trackIndex.value]);
+
+function closeMobileDrawers() {
+  mobileSettingsOpen.value = false;
+  playlistOpen.value = false;
+}
+
+function toggleMobileSettings() {
+  if (mobileSettingsOpen.value) closeMobileDrawers();
+  else {
+    playlistOpen.value = false;
+    mobileSettingsOpen.value = true;
+  }
+}
+
+function openMobilePlaylist() {
+  mobileSettingsOpen.value = false;
+  playlistOpen.value = true;
+}
 /**
  * Converts a playback duration into the compact minutes-and-seconds label.
  *
@@ -219,6 +241,12 @@ watch(
     <button class="back-button" @click="emit('back')">
       <ChevronLeft :size="17" />{{ bookName }}
     </button>
+    <div
+      v-if="mobileSettingsOpen || playlistOpen"
+      class="playlist-backdrop"
+      aria-hidden="true"
+      @click="closeMobileDrawers"
+    />
     <section class="music-player">
       <div class="player-main">
         <div class="cover-frame" :class="{ playing }">
@@ -305,13 +333,68 @@ watch(
               {{ rate }}x
             </button>
           </div>
+          <div class="mobile-settings-action">
+            <button
+              :class="{ active: mobileSettingsOpen }"
+              :aria-expanded="mobileSettingsOpen"
+              title="播放设置"
+              @click="toggleMobileSettings"
+            >
+              <SlidersHorizontal :size="19" />
+            </button>
+          </div>
+          <div class="mobile-playlist-action">
+            <button
+              :aria-expanded="playlistOpen"
+              title="播放队列"
+              @click="openMobilePlaylist"
+            >
+              <ListMusic :size="20" />
+            </button>
+          </div>
         </div>
+        <section v-if="mobileSettingsOpen" class="mobile-player-settings">
+          <div class="drawer-heading">
+            <strong>播放设置</strong>
+            <button title="关闭播放设置" @click="closeMobileDrawers">
+              <X :size="19" />
+            </button>
+          </div>
+          <label>
+            <Volume2 :size="18" />
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              :value="volume"
+              aria-label="音量"
+              @input="changeVolume"
+            />
+            <span>{{ Math.round(volume * 100) }}%</span>
+          </label>
+          <div class="mobile-rate-options" aria-label="播放速度">
+            <button
+              v-for="rate in [1, 1.25, 1.5, 2]"
+              :key="rate"
+              :class="{ active: playbackRate === rate }"
+              @click="setPlaybackRate(rate)"
+            >
+              {{ rate }}x
+            </button>
+          </div>
+        </section>
       </div>
-      <aside class="track-section">
-        <div class="track-heading">
+      <aside class="track-section" :class="{ 'queue-open': playlistOpen }">
+        <button
+          class="track-heading"
+          :aria-expanded="playlistOpen"
+          @click="playlistOpen ? closeMobileDrawers() : openMobilePlaylist()"
+        >
           <span><ListMusic :size="19" />播放队列</span
-          ><small>{{ tracks.length }} 章</small>
-        </div>
+          ><small>{{ tracks.length }} 章</small
+          ><X class="drawer-close" :size="19" />
+        </button>
         <div class="track-list">
           <button
             v-for="(track, index) in tracks"
@@ -334,8 +417,10 @@ watch(
 
 <style scoped>
 .audio-player-page {
-  height: calc(100dvh - 130px);
+  display: flex;
+  height: 100%;
   min-height: 0;
+  flex-direction: column;
   padding: 5px 8px 10px;
   overflow: hidden;
 }
@@ -354,7 +439,8 @@ watch(
 .music-player {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-  height: calc(100% - 30px);
+  height: auto;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
   border: 1px solid rgba(224, 176, 154, 0.8);
@@ -519,6 +605,12 @@ watch(
   color: #fff;
   background: var(--theme-color);
 }
+.mobile-player-settings,
+.mobile-settings-action,
+.mobile-playlist-action,
+.playlist-backdrop {
+  display: none;
+}
 .track-section {
   display: flex;
   min-height: 0;
@@ -530,8 +622,13 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
   padding: 0 20px 14px;
+  border: 0;
   color: #69453d;
+  background: none;
+  font: inherit;
+  text-align: left;
 }
 .track-heading span {
   display: flex;
@@ -543,6 +640,27 @@ watch(
 .track-heading small {
   color: #ad877a;
   font-size: 12px;
+}
+.drawer-close {
+  display: none;
+}
+.drawer-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  color: #69453d;
+  font-size: 16px;
+}
+.drawer-heading button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  color: #895c51;
+  background: rgba(255, 242, 234, 0.9);
+  place-items: center;
 }
 .track-list {
   overflow-y: auto;
@@ -588,32 +706,210 @@ watch(
 }
 @media (max-width: 800px) {
   .audio-player-page {
+    min-height: calc(100dvh - env(safe-area-inset-top));
+    /* padding: 0 4px calc(92px + env(safe-area-inset-bottom)); */
+    overflow: visible;
+  }
+  .back-button {
+    min-height: 42px;
+    margin-bottom: 8px;
+  }
+  .music-player {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
     height: auto;
     min-height: 0;
     overflow: visible;
-  }
-  .music-player {
-    grid-template-columns: 1fr;
-    height: auto;
-    min-height: 0;
+    border: 0;
+    background: none;
   }
   .player-main {
+    flex: 1 1 auto;
+    border: 1px solid rgba(224, 176, 154, 0.8);
+    border-radius: 8px;
     border-right: 0;
-    border-bottom: 1px solid rgba(187, 132, 111, 0.2);
+    background: linear-gradient(
+      150deg,
+      rgba(255, 255, 255, 0.76),
+      rgba(255, 236, 226, 0.7)
+    );
   }
   .track-section {
-    max-height: 330px;
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 16;
+    height: min(70dvh, 510px);
+    min-height: 0;
+    padding: 0;
+    border: 1px solid rgba(224, 176, 154, 0.9);
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    background: rgba(255, 250, 247, 0.98);
+    box-shadow: 0 -12px 32px rgba(91, 54, 44, 0.16);
+    pointer-events: none;
+    transform: translateY(100%);
+    transition: transform 0.24s ease;
+    will-change: transform;
+  }
+  .track-section.queue-open {
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+  .playlist-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    display: block;
+    background: rgba(77, 47, 40, 0.24);
+  }
+  .track-heading {
+    position: relative;
+    min-height: 65px;
+    padding: 0 18px;
+    border-bottom: 1px solid rgba(187, 132, 111, 0.14);
+  }
+  .track-heading::before {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: #dfb7a6;
+    content: "";
+    transform: translateX(-50%);
+  }
+  .drawer-close {
+    display: block;
+    margin-left: 12px;
+  }
+  .track-heading small {
+    margin-left: auto;
+  }
+  .track-list {
+    padding-bottom: env(safe-area-inset-bottom);
   }
   .cover-frame {
     width: min(220px, 52vw);
   }
-  .track-list {
-    max-height: 260px;
+  .control-row {
+    grid-template-columns: 1fr auto 1fr;
+    min-height: 64px;
+    margin-top: 14px;
+  }
+  .player-options,
+  .rate-options {
+    display: none;
+  }
+  .playback-controls {
+    grid-column: 2;
+    grid-row: 1;
+    gap: 20px;
+  }
+  .playback-controls button {
+    width: 45px;
+    height: 45px;
+  }
+  .playback-controls .play-button {
+    width: 64px;
+    height: 64px;
+  }
+  .mobile-settings-action,
+  .mobile-playlist-action {
+    display: grid;
+    align-items: center;
+  }
+  .mobile-settings-action {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+  }
+  .mobile-playlist-action {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+  }
+  .mobile-settings-action button,
+  .mobile-playlist-action button {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    border: 0;
+    border-radius: 50%;
+    color: #895c51;
+    background: rgba(255, 242, 234, 0.9);
+    place-items: center;
+  }
+  .mobile-settings-action button.active {
+    color: #fff;
+    background: var(--theme-color);
+  }
+  .mobile-player-settings {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 16;
+    display: flex;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+    width: min(100%, 520px);
+    margin: 0 auto;
+    padding: 20px 18px calc(18px + env(safe-area-inset-bottom));
+    border: 1px solid rgba(187, 132, 111, 0.16);
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    background: rgba(255, 250, 247, 0.98);
+    box-shadow: 0 -12px 32px rgba(91, 54, 44, 0.16);
+  }
+  .drawer-heading {
+    margin-bottom: 2px;
+  }
+  .mobile-player-settings label {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: 8px;
+    color: #a17367;
+  }
+  .mobile-player-settings input {
+    width: 100%;
+    min-width: 48px;
+    accent-color: var(--theme-color);
+  }
+  .mobile-player-settings label span {
+    min-width: 30px;
+    color: #895c51;
+    font: 11px monospace;
+    text-align: right;
+  }
+  .mobile-rate-options {
+    display: flex;
+    align-self: center;
+    gap: 3px;
+  }
+  .mobile-rate-options button {
+    min-width: 34px;
+    padding: 5px 3px;
+    border: 0;
+    border-radius: 4px;
+    color: #895c51;
+    background: transparent;
+    font-size: 10px;
+  }
+  .mobile-rate-options button.active {
+    color: #fff;
+    background: var(--theme-color);
   }
 }
 @media (max-width: 500px) {
   .player-main {
-    padding: 28px 18px 22px;
+    padding: 20px 18px 26px;
   }
   .cover-frame {
     width: min(190px, 56vw);
@@ -625,23 +921,13 @@ watch(
   .now-playing {
     margin-top: 23px;
   }
-  .control-row {
-    grid-template-columns: 1fr auto;
-    gap: 12px;
+  .playback-controls {
+    gap: 14px;
   }
-  .rate-options {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    justify-self: center;
-  }
-  .player-options input {
-    width: 95px;
-  }
-  .track-section {
-    padding-top: 19px;
-  }
-  .track-heading {
-    padding: 0 15px 11px;
+  .mobile-settings-action button,
+  .mobile-playlist-action button {
+    width: 34px;
+    height: 34px;
   }
 }
 </style>
