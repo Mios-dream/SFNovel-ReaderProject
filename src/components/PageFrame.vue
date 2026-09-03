@@ -57,7 +57,6 @@ async function navigate(view: ViewName) {
 .page-frame {
   display: grid;
   grid-template-columns: 238px minmax(0, 1fr);
-  gap: 18px;
   height: 100dvh;
   min-height: 0;
   padding: 18px;
@@ -96,11 +95,7 @@ async function navigate(view: ViewName) {
   font: 12px monospace;
   place-items: center;
 }
-@media (max-width: 1150px) {
-  .page-frame {
-    grid-template-columns: 215px minmax(0, 1fr);
-  }
-}
+
 @media (max-width: 760px) {
   .page-frame {
     display: block;

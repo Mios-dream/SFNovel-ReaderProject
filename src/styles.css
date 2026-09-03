@@ -31,15 +31,11 @@
   -webkit-tap-highlight-color: transparent;
   /* scrollbar-width: thin; */
   scrollbar-color: #edb18d transparent;
-}
 
-@media (max-width: 900px) {
-  * {
-    scrollbar-width: none;
-  }
-  *::-webkit-scrollbar {
-    display: none;
-  }
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
 }
 
 body {

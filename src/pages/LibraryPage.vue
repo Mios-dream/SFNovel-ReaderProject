@@ -173,7 +173,7 @@ async function openDiscover() {
 .library-page {
   min-width: 0;
   height: 100%;
-  padding: 18px 42px 28px 2px;
+  padding: 0px 42px 28px 18px;
   overflow-y: auto;
   background-color: var(--background-color);
   scrollbar-gutter: stable;
@@ -434,9 +434,7 @@ async function openDiscover() {
     padding: 10px 0 0;
     overflow: visible;
   }
-  .section-head {
-    margin-top: 20px;
-  }
+
   .library-grid {
     grid-template-columns: 1fr;
   }

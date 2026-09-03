@@ -122,7 +122,7 @@ const recommendationImage =
 .discover-page {
   min-width: 0;
   height: 100%;
-  padding: 18px 42px 28px 2px;
+  padding: 0px 42px 28px 18px;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }

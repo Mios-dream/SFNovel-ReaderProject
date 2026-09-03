@@ -70,11 +70,11 @@ watch(
         >
       </div>
       <button
-        class="mobile-settings-button"
-        title="请求设置"
+        class="request-settings-button"
+        title="设置"
         @click="emit('requestSettings')"
       >
-        <Settings2 :size="20" />
+        <Settings2 :size="20" /><span>应用设置</span>
       </button>
       <button class="account-button" @click="emit('account')">
         <span
@@ -179,6 +179,7 @@ nav button.active {
   font-size: 12px;
 }
 .mini-card svg {
+  margin: auto 0;
   flex: 0 0 auto;
   color: var(--theme-color);
 }
@@ -197,8 +198,23 @@ nav button.active {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mobile-settings-button {
-  display: none;
+.request-settings-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #f1c8b3;
+  border-radius: 12px;
+  color: #9b573e;
+  background: #fff7f2;
+  font-size: 14px;
+}
+.request-settings-button:hover {
+  color: #fff;
+  background: var(--theme-color);
 }
 .account-button .account-avatar {
   display: block;
@@ -293,15 +309,20 @@ nav button.active {
     gap: 6px;
     margin: 0 0 0 auto;
   }
-  .mobile-settings-button {
+  .request-settings-button {
     display: grid;
     width: 40px;
     height: 40px;
+    margin: 0;
+    padding: 0;
     border: 0;
     border-radius: 12px;
     color: #a17367;
     background: rgba(255, 255, 255, 0.58);
     place-items: center;
+  }
+  .request-settings-button span {
+    display: none;
   }
   .account-button {
     width: 40px;

@@ -42,14 +42,21 @@ watch(
 watch(
   () => route.path,
   (path) => {
-    const view =
-      path === "/discover"
-        ? "discover"
-        : path === "/bookshelf"
-          ? "bookshelf"
-          : path === "/library"
-            ? "library"
-            : undefined;
+    let view: "discover" | "bookshelf" | "library" | undefined;
+    switch (path) {
+      case "/discover":
+        view = "discover";
+        break;
+      case "/bookshelf":
+        view = "bookshelf";
+        break;
+      case "/library":
+        view = "library";
+        break;
+      default:
+        view = undefined;
+        break;
+    }
     if (view && desk.active !== view) desk.navigate(view);
   },
   { immediate: true },

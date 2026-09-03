@@ -149,7 +149,7 @@ function jumpToPage(event: Event) {
 .bookshelf-page {
   min-width: 0;
   height: 100%;
-  padding: 18px 42px 28px 2px;
+  padding: 0px 42px 28px 18px;
   overflow-y: auto;
   background-color: var(--background-color);
   scrollbar-gutter: stable;
@@ -284,9 +284,6 @@ function jumpToPage(event: Event) {
   }
   .novel-grid {
     grid-template-columns: 1fr;
-  }
-  .section-head {
-    margin-top: 27px;
   }
 }
 </style>

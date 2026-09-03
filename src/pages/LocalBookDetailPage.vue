@@ -74,6 +74,29 @@ const localStatusLabel = computed(() => {
   if (book.value?.isFinished == null) return "";
   return book.value.isFinished ? "已完结" : "连载中";
 });
+const desktopBookFacts = computed(() => {
+  const currentBook = book.value;
+  if (!currentBook) return [];
+
+  const facts: Array<{ label: string; value: string; title?: string }> = [];
+  const updatedAt = currentBook.latestChapterTime || currentBook.lastUpdateTime;
+  if (updatedAt) {
+    facts.push({ label: "最近更新", value: formatSourceDate(updatedAt) });
+  }
+  if (currentBook.viewCount != null) {
+    facts.push({ label: "热度", value: formatMetric(currentBook.viewCount) });
+  }
+  if (currentBook.pointCount != null) {
+    facts.push({ label: "人气", value: formatMetric(currentBook.pointCount) });
+  }
+  if (currentBook.favoriteCount != null) {
+    facts.push({
+      label: "收藏",
+      value: formatMetric(currentBook.favoriteCount),
+    });
+  }
+  return facts;
+});
 
 function formatMetric(value?: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
@@ -260,7 +283,7 @@ watch(
 
     <section v-if="detailMode === 'novel'" class="desktop-book-workbench">
       <section class="desktop-book-hero-layout">
-        <section class="desktop-cover-card">
+        <section class="desktop-cover-card glass">
           <div class="desktop-cover" :class="{ 'without-cover': !book.cover }">
             <img
               v-if="book.cover"
@@ -270,7 +293,7 @@ watch(
             <BookOpen v-else :size="54" />
           </div>
         </section>
-        <section class="desktop-book-overview">
+        <section class="desktop-book-overview glass">
           <div class="desktop-book-copy">
             <h2>{{ book.name }}</h2>
             <p class="desktop-author">{{ book.author || "未知作者" }}</p>
@@ -326,17 +349,17 @@ watch(
             </div>
           </div>
         </section>
-        <aside class="desktop-book-facts" aria-label="作品状态">
+        <aside class="desktop-book-facts glass" aria-label="作品状态">
           <div
             v-if="book.score != null"
             class="desktop-score-card"
             :class="scoreToneClass(book.score)"
           >
             <div>
-              <small>读者评分</small>
+              <small>源站评分</small>
               <strong>{{ book.score.toFixed(1) }}</strong>
             </div>
-            <span><Star :size="15" fill="currentColor" />源站评分</span>
+            <span><Star :size="15" fill="currentColor" />仅作参考</span>
           </div>
           <div class="desktop-key-metrics" aria-label="作品核心数据">
             <div>
@@ -353,6 +376,16 @@ watch(
               <Heart :size="16" fill="currentColor" />
               <strong>{{ formatMetric(book.markCount) }}</strong>
               <span>点赞</span>
+            </div>
+          </div>
+          <div
+            v-if="desktopBookFacts.length"
+            class="desktop-fact-table"
+            aria-label="作品详细信息"
+          >
+            <div v-for="fact in desktopBookFacts" :key="fact.label">
+              <span>{{ fact.label }}</span>
+              <strong :title="fact.title">{{ fact.value }}</strong>
             </div>
           </div>
         </aside>
@@ -405,7 +438,7 @@ watch(
 
       <aside
         ref="desktopDirectoryElement"
-        class="desktop-directory"
+        class="desktop-directory glass"
         aria-label="本地目录"
       >
         <header>
@@ -918,15 +951,6 @@ watch(
     display: contents;
   }
 
-  .desktop-cover-card,
-  .desktop-book-overview,
-  .desktop-book-facts,
-  .desktop-directory {
-    border: 1px solid #eadfd1;
-    background: #fffdf8;
-    box-shadow: 0 14px 30px rgba(69, 57, 43, 0.08);
-  }
-
   .desktop-cover-card {
     padding: 14px;
     border-radius: 20px;
@@ -935,7 +959,8 @@ watch(
   .desktop-cover {
     position: relative;
     display: flex;
-    aspect-ratio: 3 / 4;
+    width: 100%;
+    height: 100%;
     align-items: center;
     justify-content: center;
     overflow: hidden;
@@ -952,10 +977,27 @@ watch(
   }
 
   .desktop-book-overview {
+    position: relative;
     display: flex;
     min-width: 0;
     padding: 30px 34px;
     border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .desktop-book-overview:after {
+    content: "";
+    position: absolute;
+    width: 260px;
+    height: 260px;
+    border: 1px solid rgba(226, 148, 100, 0.28);
+    border-radius: 50%;
+    right: -90px;
+    top: -120px;
+    box-shadow:
+      0 0 0 35px rgba(226, 148, 100, 0.06),
+      0 0 0 70px rgba(226, 148, 100, 0.035);
+    pointer-events: none;
   }
 
   .desktop-book-copy {
@@ -1012,7 +1054,7 @@ watch(
   .desktop-description-preview {
     display: -webkit-box;
     overflow: hidden;
-    margin: 21px 0 0;
+    margin: 11px 0 0;
     padding: 0;
     border: 0;
     color: #766960;
@@ -1038,7 +1080,7 @@ watch(
     flex-wrap: wrap;
     gap: 9px;
     margin-top: auto;
-    padding-top: 22px;
+    padding-top: 11px;
   }
 
   .desktop-primary-actions button {
@@ -1084,7 +1126,7 @@ watch(
   .desktop-secondary-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 14px;
+    gap: 22px;
     margin-top: 14px;
   }
 
@@ -1113,11 +1155,12 @@ watch(
     min-width: 0;
     flex-direction: column;
     gap: 14px;
-    padding: 14px;
+    padding: 14px 14px 0 14px;
     border-radius: 20px;
   }
 
   .desktop-score-card {
+    position: relative;
     display: flex;
     min-height: 112px;
     align-items: end;
@@ -1129,22 +1172,26 @@ watch(
     box-shadow: 0 9px 18px rgba(201, 110, 67, 0.2);
   }
 
-  .desktop-score-card.score-excellent {
-    color: #704b0b;
-    background: #f3d477;
+  .desktop-score-card:after {
+    content: "✦";
+    position: absolute;
+    font-size: 120px;
+    right: -30px;
+    top: -15px;
+    opacity: 0.16;
   }
 
-  .desktop-score-card.score-excellent small,
-  .desktop-score-card.score-excellent > span {
-    color: rgba(112, 75, 11, 0.78);
+  .desktop-score-card.score-excellent {
+    /* color: #704b0b; */
+    background: #e29464;
   }
 
   .desktop-score-card.score-good {
-    background: #75b397;
+    background: #9275b3;
   }
 
   .desktop-score-card.score-average {
-    background: #719fc0;
+    background: #c08a71;
   }
 
   .desktop-score-card.score-low {
@@ -1212,6 +1259,47 @@ watch(
     font-size: 10px;
   }
 
+  .desktop-fact-table {
+    display: flex;
+    flex: 1 1 auto;
+    margin-top: 2px;
+    border-top: 1px solid #eadfd1;
+    flex-direction: column;
+  }
+
+  .desktop-fact-table > div {
+    display: flex;
+    min-width: 0;
+    min-height: 37px;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid #eadfd1;
+  }
+
+  .desktop-fact-table > div:last-child {
+    border-bottom: 0;
+  }
+
+  .desktop-fact-table span {
+    flex: 0 0 auto;
+    color: #a09083;
+    font-size: 11px;
+  }
+
+  .desktop-fact-table strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #6f5a4e;
+    font-family: KaTongFont, "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    line-height: 1.2;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .desktop-content-tabs {
     display: flex;
     grid-column: 1 / -1;
@@ -1226,10 +1314,7 @@ watch(
     align-items: center;
     gap: 12px;
     padding: 14px 17px;
-    border: 1px solid #eadfd1;
     border-radius: 16px;
-    color: #54483f;
-    background: #fffdf8;
     text-align: left;
   }
 
@@ -1273,7 +1358,7 @@ watch(
   .desktop-content-tab.active {
     border-color: #e3a078;
     color: #bd6548;
-    box-shadow: 0 8px 18px rgba(188, 112, 77, 0.12);
+    /* box-shadow: 0 8px 18px rgba(188, 112, 77, 0.12); */
   }
 
   .desktop-content-tab:disabled {
