@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { inject } from "vue";
+import { useRouter } from "vue-router";
 import {
   BookOpen,
   ChevronRight,
@@ -10,122 +12,172 @@ import {
   Settings2,
   Trash2,
 } from "lucide-vue-next";
-import type { Book, Job } from "../types";
+import PageFrame from "../components/PageFrame.vue";
+import { deskInjectionKey } from "../deskContext";
+import type { Book } from "../types";
 
-defineProps<{
-  books: Book[];
-  jobs: Job[];
-  managing: boolean;
-  formatDate: (value: string) => string;
-}>();
-const emit = defineEmits<{
-  "update:managing": [value: boolean];
-  open: [book: Book];
-  remove: [book: Book];
-  pause: [job: Job];
-  resume: [job: Job];
-  discover: [];
-}>();
+function requireDesk() {
+  const desk = inject(deskInjectionKey);
+  if (!desk) throw new Error("Desk context is unavailable");
+  return desk;
+}
+
+const desk = requireDesk();
+const router = useRouter();
+
+async function openBook(book: Book) {
+  if (await desk.loadLocalBook(book.name)) {
+    await router.push(`/library/${encodeURIComponent(book.name)}`);
+  }
+}
+
+async function openDiscover() {
+  desk.navigate("discover");
+  await router.push("/discover");
+}
 
 // 本地书库同时展示已完成作品和仍在运行的任务，操作通过事件交给父级处理。
 </script>
 
 <template>
-  <section class="section-head library-head">
-    <div>
-      <p class="eyebrow">LOCAL LIBRARY</p>
-      <h2>{{ books.length ? `共 ${books.length} 本本地作品` : "本地书库" }}</h2>
-    </div>
-    <button
-      class="manage-button"
-      :class="{ active: managing }"
-      :disabled="!books.length"
-      @click="emit('update:managing', !managing)"
-    >
-      <Settings2 :size="17" /><span>{{ managing ? "完成管理" : "管理" }}</span>
-    </button>
-  </section>
-  <section v-if="jobs.length" class="library-downloads glass">
-    <div class="library-downloads-head">
-      <strong>下载进度</strong><span>{{ jobs.length }} 个任务</span>
-    </div>
-    <article v-for="job in jobs" :key="job.id" class="library-download-row">
-      <div class="library-download-title">
-        <span>{{ job.title }}</span
-        ><small>{{ job.message }}</small>
-      </div>
-      <div class="progress"><i :style="{ width: `${job.progress}%` }"></i></div>
-      <button
-        v-if="job.status === 'paused'"
-        class="text-button"
-        title="继续下载"
-        @click="emit('resume', job)"
-      >
-        <Play :size="14" />继续下载</button
-      ><button
-        v-else-if="job.status === 'downloading' || job.status === 'queued'"
-        class="text-button"
-        title="暂停下载"
-        @click="emit('pause', job)"
-      >
-        <Pause :size="14" />暂停
-      </button>
-    </article>
-  </section>
-  <section v-if="books.length" class="library-grid" :class="{ managing }">
-    <article
-      v-for="book in books"
-      :key="book.name"
-      class="library-card glass"
-      :class="{ 'clickable-card': true }"
-      role="button"
-      tabindex="0"
-      @click="emit('open', book)"
-      @keydown.enter="emit('open', book)"
-    >
-      <span class="library-cover"
-        ><img
-          v-if="book.cover"
-          :src="book.cover"
-          :alt="`${book.name} 封面`" /><BookOpen v-else :size="34"
-      /></span>
-      <button
-        v-if="managing"
-        class="delete-badge"
-        title="删除本地内容"
-        @click.stop="emit('remove', book)"
-      >
-        <Trash2 :size="15" /><span>删除</span>
-      </button>
-      <div class="library-info">
+  <PageFrame>
+    <main class="library-page">
+      <section class="section-head library-head">
         <div>
-          <strong>{{ book.name }}</strong
-          ><small>最近写入 {{ formatDate(book.updatedAt) }}</small>
+          <p class="eyebrow">LOCAL LIBRARY</p>
+          <h2>
+            {{
+              desk.library.value.length
+                ? `共 ${desk.library.value.length} 本本地作品`
+                : "本地书库"
+            }}
+          </h2>
         </div>
-        <div class="format-icons" aria-label="已下载格式">
-          <span v-if="book.formats.text" class="format-text" title="已下载文字小说"
-            ><FileText :size="15"
-          /></span>
-          <span v-if="book.formats.audio" class="format-audio" title="已下载有声内容"
-            ><Headphones :size="15"
-          /></span>
-          <span v-if="book.formats.comic" class="format-comic" title="已下载漫画"
-            ><BookOpen :size="15"
-          /></span>
+        <button
+          class="manage-button"
+          :class="{ active: desk.libraryManaging.value }"
+          :disabled="!desk.library.value.length"
+          @click="desk.libraryManaging.value = !desk.libraryManaging.value"
+        >
+          <Settings2 :size="17" /><span>{{
+            desk.libraryManaging.value ? "完成管理" : "管理"
+          }}</span>
+        </button>
+      </section>
+      <section
+        v-if="desk.libraryJobs.value.length"
+        class="library-downloads glass"
+      >
+        <div class="library-downloads-head">
+          <strong>下载进度</strong
+          ><span>{{ desk.libraryJobs.value.length }} 个任务</span>
         </div>
+        <article
+          v-for="job in desk.libraryJobs.value"
+          :key="job.id"
+          class="library-download-row"
+        >
+          <div class="library-download-title">
+            <span>{{ job.title }}</span
+            ><small>{{ job.message }}</small>
+          </div>
+          <div class="progress">
+            <i :style="{ width: `${job.progress}%` }"></i>
+          </div>
+          <button
+            v-if="job.status === 'paused'"
+            class="text-button"
+            title="继续下载"
+            @click="desk.resumeJob(job)"
+          >
+            <Play :size="14" />继续下载</button
+          ><button
+            v-else-if="job.status === 'downloading' || job.status === 'queued'"
+            class="text-button"
+            title="暂停下载"
+            @click="desk.pauseJob(job)"
+          >
+            <Pause :size="14" />暂停
+          </button>
+        </article>
+      </section>
+      <section
+        v-if="desk.library.value.length"
+        class="library-grid"
+        :class="{ managing: desk.libraryManaging.value }"
+      >
+        <article
+          v-for="book in desk.library.value"
+          :key="book.name"
+          class="library-card glass"
+          :class="{ 'clickable-card': true }"
+          role="button"
+          tabindex="0"
+          @click="openBook(book)"
+          @keydown.enter="openBook(book)"
+        >
+          <span class="library-cover"
+            ><img
+              v-if="book.cover"
+              :src="book.cover"
+              :alt="`${book.name} 封面`" /><BookOpen v-else :size="34"
+          /></span>
+          <button
+            v-if="desk.libraryManaging.value"
+            class="delete-badge"
+            title="删除本地内容"
+            @click.stop="desk.deleteBook(book)"
+          >
+            <Trash2 :size="15" /><span>删除</span>
+          </button>
+          <div class="library-info">
+            <div>
+              <strong>{{ book.name }}</strong
+              ><small>最近写入 {{ desk.formatDate(book.updatedAt) }}</small>
+            </div>
+            <div class="format-icons" aria-label="已下载格式">
+              <span
+                v-if="book.formats.text"
+                class="format-text"
+                title="已下载文字小说"
+                ><FileText :size="15"
+              /></span>
+              <span
+                v-if="book.formats.audio"
+                class="format-audio"
+                title="已下载有声内容"
+                ><Headphones :size="15"
+              /></span>
+              <span
+                v-if="book.formats.comic"
+                class="format-comic"
+                title="已下载漫画"
+                ><BookOpen :size="15"
+              /></span>
+            </div>
+          </div>
+        </article>
+      </section>
+      <div v-else class="empty-state tall">
+        <LibraryBig :size="32" />
+        <p>书库还是空的</p>
+        <button class="text-button" @click="openDiscover">
+          去搜索小说 <ChevronRight :size="16" />
+        </button>
       </div>
-    </article>
-  </section>
-  <div v-else class="empty-state tall">
-    <LibraryBig :size="32" />
-    <p>书库还是空的</p>
-    <button class="text-button" @click="emit('discover')">
-      去搜索小说 <ChevronRight :size="16" />
-    </button>
-  </div>
+    </main>
+  </PageFrame>
 </template>
 
 <style scoped>
+.library-page {
+  min-width: 0;
+  height: 100%;
+  padding: 18px 42px 28px 2px;
+  overflow-y: auto;
+  background-color: var(--background-color);
+  scrollbar-gutter: stable;
+}
 .section-head {
   display: flex;
   align-items: flex-end;
@@ -317,9 +369,21 @@ const emit = defineEmits<{
   border-radius: 6px;
   place-items: center;
 }
-.format-icons .format-text { border-color: #ecd2c5; color: #a66d59; background: #fff8f4; }
-.format-icons .format-audio { border-color: #e5bec0; color: #a6535c; background: #fdf1f0; }
-.format-icons .format-comic { border-color: #d9c5df; color: #8b6a9b; background: #faf4fc; }
+.format-icons .format-text {
+  border-color: #ecd2c5;
+  color: #a66d59;
+  background: #fff8f4;
+}
+.format-icons .format-audio {
+  border-color: #e5bec0;
+  color: #a6535c;
+  background: #fdf1f0;
+}
+.format-icons .format-comic {
+  border-color: #d9c5df;
+  color: #8b6a9b;
+  background: #faf4fc;
+}
 .delete-badge {
   position: absolute;
   top: 7px;
@@ -365,6 +429,11 @@ const emit = defineEmits<{
   }
 }
 @media (max-width: 760px) {
+  .library-page {
+    height: auto;
+    padding: 10px 0 0;
+    overflow: visible;
+  }
   .section-head {
     margin-top: 20px;
   }

@@ -1,8 +1,16 @@
 package com.sansan.sf_novel_flow
 
 import android.app.Activity
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import android.webkit.CookieManager
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -20,6 +28,12 @@ import app.tauri.plugin.Plugin
 @InvokeArg
 class WriteSessionCookieArgs {
     lateinit var cookie: String
+}
+
+@InvokeArg
+class WriteExportToUriArgs {
+    lateinit var sourcePath: String
+    lateinit var uri: String
 }
 
 @TauriPlugin
@@ -92,6 +106,48 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve()
     }
 
+    /** Checks Android's special shared-storage access and opens its settings page when needed. */
+    @Command
+    fun ensureExternalStorageAccess(invoke: Invoke) {
+        val granted = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->
+                ContextCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                    PackageManager.PERMISSION_GRANTED
+            else -> true
+        }
+        if (!granted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:${activity.packageName}"),
+            )
+            activity.startActivity(intent)
+        } else if (!granted) {
+            ActivityCompat.requestPermissions(
+                activity,
+                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                STORAGE_PERMISSION_REQUEST_CODE,
+            )
+        }
+        invoke.resolve(JSObject().put("granted", granted))
+    }
+
+    /** Copies a generated export into the URI granted by Android's document picker. */
+    @Command
+    fun writeExportToUri(invoke: Invoke) {
+        try {
+            val args = invoke.parseArgs(WriteExportToUriArgs::class.java)
+            val target = Uri.parse(args.uri)
+            val resolver = activity.contentResolver
+            resolver.openOutputStream(target, "w")?.use { output ->
+                java.io.FileInputStream(args.sourcePath).use { input -> input.copyTo(output) }
+            } ?: throw java.io.IOException("无法打开系统保存位置")
+            invoke.resolve()
+        } catch (error: Exception) {
+            invoke.reject(error.message ?: "无法写入系统保存位置")
+        }
+    }
+
     /**
      * Reads and filters cookies required by SF requests from the app-owned WebView jar.
      *
@@ -124,5 +180,6 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
             "https://passport.sfacg.com/",
         )
         const val SESSION_MAX_AGE = 30 * 24 * 60 * 60
+        const val STORAGE_PERMISSION_REQUEST_CODE = 4101
     }
 }

@@ -1,14 +1,23 @@
 <script setup lang="ts">
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
-import { computed } from "vue";
+import { computed, inject, onMounted } from "vue";
 import { ChevronLeft } from "lucide-vue-next";
-import type { LocalChapterContent } from "../types";
-const { chapter, bookName, imageDirectory } = defineProps<{
-  chapter: LocalChapterContent;
-  bookName: string;
-  imageDirectory: string;
-}>();
-const emit = defineEmits<{ back: [] }>();
+import { useRouter } from "vue-router";
+import { deskInjectionKey } from "../deskContext";
+
+function requireDesk() {
+  const desk = inject(deskInjectionKey);
+  if (!desk) throw new Error("Desk context is unavailable");
+  return desk;
+}
+
+const desk = requireDesk();
+const router = useRouter();
+const chapter = computed(() => desk.localChapter.value);
+const bookName = computed(() => desk.localBook.value?.name || "本地阅读");
+const imageDirectory = computed(
+  () => desk.localBook.value?.imageDirectory || "",
+);
 
 type ChapterPart =
   | { type: "text"; value: string }
@@ -16,13 +25,13 @@ type ChapterPart =
 
 function chapterImageSource(relativePath: string) {
   const fileName = relativePath.slice("imgs/".length).replace(/\\/g, "/");
-  const separator = imageDirectory.includes("\\") ? "\\" : "/";
-  const imagePath = `${imageDirectory.replace(/[\\/]+$/, "")}${separator}${fileName.replace(/\//g, separator)}`;
+  const separator = imageDirectory.value.includes("\\") ? "\\" : "/";
+  const imagePath = `${imageDirectory.value.replace(/[\\/]+$/, "")}${separator}${fileName.replace(/\//g, separator)}`;
   return isTauri() ? convertFileSrc(imagePath) : imagePath;
 }
 
 const chapterParts = computed<ChapterPart[]>(() => {
-  const content = chapter.content.replace(/^##\s+.+\r?\n+/, "");
+  const content = chapter.value?.content.replace(/^##\s+.+\r?\n+/, "") || "";
   const pattern = /!\[([^\]]*)\]\((imgs[\\/][^)]+)\)/g;
   const parts: ChapterPart[] = [];
   let lastIndex = 0;
@@ -41,11 +50,22 @@ const chapterParts = computed<ChapterPart[]>(() => {
     parts.push({ type: "text", value: content.slice(lastIndex) });
   return parts;
 });
+
+onMounted(() => {
+  if (!desk.localBook.value || !desk.localChapter.value) {
+    void router.replace("/library");
+    return;
+  }
+  desk.navigate("reader");
+});
 </script>
 
 <template>
-  <article class="reader">
-    <button class="back-button" @click="emit('back')">
+  <article v-if="chapter" class="reader">
+    <button
+      class="back-button"
+      @click="router.push(`/library/${encodeURIComponent(bookName)}`)"
+    >
       <ChevronLeft :size="17" />{{ bookName }}
     </button>
     <!-- <header>
@@ -69,8 +89,11 @@ const chapterParts = computed<ChapterPart[]>(() => {
 <style scoped>
 .reader {
   width: min(820px, 100%);
+  min-height: 100dvh;
+  overflow-y: auto;
   padding: 10px 24px 64px;
   margin: 0 auto;
+  background: #f8f6f0;
 }
 .back-button {
   display: inline-flex;
@@ -124,6 +147,7 @@ h2 {
 }
 @media (max-width: 760px) {
   .reader {
+    min-height: 100dvh;
     padding: 14px 16px calc(28px + env(safe-area-inset-bottom));
   }
   .back-button {

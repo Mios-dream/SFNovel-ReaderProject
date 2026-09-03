@@ -380,7 +380,10 @@ async fn enrich_local_book(
     let detail = client
         .get_data_with_cookie(
             &format!("/novels/{novel_id}"),
-            &[("expand", "intro".to_string())],
+            &[(
+                "expand",
+                "intro,typeName,sysTags,chapterCount,pointCount,fav,ticket,latestchapter".to_string(),
+            )],
             cookie,
         )
         .await?;
@@ -399,6 +402,72 @@ async fn enrich_local_book(
     {
         metadata.description = Some(description.to_string());
     }
+    metadata.type_name = detail
+        .get("expand")
+        .and_then(|value| value.get("typeName"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string);
+    metadata.tags = detail
+        .get("expand")
+        .and_then(|value| value.get("sysTags"))
+        .and_then(Value::as_array)
+        .map(|tags| {
+            tags.iter()
+                .filter_map(|tag| {
+                    tag.as_str()
+                        .or_else(|| tag.get("tagName").and_then(Value::as_str))
+                        .or_else(|| tag.get("name").and_then(Value::as_str))
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToString::to_string)
+                })
+                .take(8)
+                .collect()
+        })
+        .unwrap_or_default();
+    metadata.is_finished = detail.get("isFinish").and_then(Value::as_bool);
+    metadata.score = detail.get("point").and_then(Value::as_f64);
+    metadata.chapter_count = detail
+        .get("expand")
+        .and_then(|value| value.get("chapterCount"))
+        .and_then(Value::as_i64);
+    metadata.character_count = detail.get("charCount").and_then(Value::as_i64);
+    metadata.view_count = detail.get("viewTimes").and_then(Value::as_i64);
+    metadata.mark_count = detail.get("markCount").and_then(Value::as_i64);
+    metadata.point_count = detail
+        .get("expand")
+        .and_then(|value| value.get("pointCount"))
+        .and_then(Value::as_i64);
+    metadata.favorite_count = detail
+        .get("expand")
+        .and_then(|value| value.get("fav"))
+        .and_then(Value::as_i64);
+    metadata.ticket_count = detail
+        .get("expand")
+        .and_then(|value| value.get("ticket"))
+        .and_then(Value::as_i64);
+    metadata.allow_download = detail.get("allowDown").and_then(Value::as_bool);
+    if let Some(latest) = detail
+        .get("expand")
+        .and_then(|value| value.get("latestChapter").or_else(|| value.get("latestchapter")))
+    {
+        metadata.latest_chapter_title = latest
+            .get("title")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(ToString::to_string);
+        metadata.latest_chapter_time = latest
+            .get("addTime")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(ToString::to_string);
+    }
+    metadata.last_update_time = detail
+        .get("lastUpdateTime")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string);
     let Some(cover_url) = detail
         .get("novelCover")
         .and_then(Value::as_str)
@@ -628,6 +697,9 @@ async fn create_text_download(
     if chapter_ids.is_empty() || chapter_ids.iter().any(|id| *id <= 0) {
         return Err("章节选择无效".to_string());
     }
+    if !ensure_external_storage_access(app.clone()).await? {
+        return Err("请在系统设置中允许本应用管理所有文件，然后重试下载".to_string());
+    }
     let id = format!(
         "{}-{novel_id}",
         SystemTime::now()
@@ -705,6 +777,9 @@ async fn create_audio_download(
     }
     if chapter_ids.is_empty() || chapter_ids.iter().any(|id| *id <= 0) {
         return Err("章节选择无效".to_string());
+    }
+    if !ensure_external_storage_access(app.clone()).await? {
+        return Err("请在系统设置中允许本应用管理所有文件，然后重试下载".to_string());
     }
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inject } from "vue";
 import {
   BookMarked,
   ChevronLeft,
@@ -7,25 +8,16 @@ import {
   RefreshCw,
 } from "lucide-vue-next";
 import NovelCard from "../components/NovelCard.vue";
-import type { Novel } from "../types";
+import PageFrame from "../components/PageFrame.vue";
+import { deskInjectionKey } from "../deskContext";
 
-const props = defineProps<{
-  novels: Novel[];
-  visibleNovels: Novel[];
-  loading: boolean;
-  categories: string[];
-  activeCategory: string;
-  page: number;
-  totalPages: number;
-  filteredCount: number;
-  formatDate: (value: string) => string;
-}>();
-const emit = defineEmits<{
-  refresh: [force: boolean];
-  category: [value: string];
-  page: [value: number];
-  select: [novel: Novel, mode: "text" | "audio"];
-}>();
+function requireDesk() {
+  const desk = inject(deskInjectionKey);
+  if (!desk) throw new Error("Desk context is unavailable");
+  return desk;
+}
+
+const desk = requireDesk();
 
 // 书架分页和分类筛选由父级计算，页面只负责转发用户操作。
 /**
@@ -37,97 +29,131 @@ function jumpToPage(event: Event) {
   const input = event.target as HTMLInputElement;
   const requestedPage = Number(input.value);
   const page = Number.isInteger(requestedPage)
-    ? Math.min(Math.max(requestedPage, 1), props.totalPages)
-    : props.page;
+    ? Math.min(Math.max(requestedPage, 1), desk.bookshelfTotalPages.value)
+    : desk.bookshelfPage.value;
   input.value = String(page);
-  emit("page", page);
+  desk.setBookshelfPage(page);
 }
 </script>
 
 <template>
-  <section class="section-head shelf-head">
-    <div>
-      <p class="eyebrow">SFACG BOOKSHELF</p>
-      <h2>{{ loading ? "正在同步书架" : `共 ${novels.length} 本收藏` }}</h2>
-    </div>
-    <button
-      class="icon-button"
-      title="刷新书架"
-      :disabled="loading"
-      @click="emit('refresh', true)"
-    >
-      <RefreshCw :class="{ spin: loading }" :size="19" />
-    </button>
-  </section>
-  <div v-if="loading && !novels.length" class="empty-state">
-    <LoaderCircle class="spin" :size="28" />
-    <p>正在读取书架</p>
-  </div>
-  <template v-else-if="novels.length">
-    <div class="bookshelf-toolbar" aria-label="书架分类">
-      <button
-        v-for="category in categories"
-        :key="category"
-        class="category-tab"
-        :class="{ active: activeCategory === category }"
-        @click="emit('category', category)"
+  <PageFrame>
+    <main class="bookshelf-page">
+      <section class="section-head shelf-head">
+        <div>
+          <p class="eyebrow">SFACG BOOKSHELF</p>
+          <h2>
+            {{
+              desk.bookshelfLoading.value
+                ? "正在同步书架"
+                : `共 ${desk.bookshelf.value.length} 本收藏`
+            }}
+          </h2>
+        </div>
+        <button
+          class="icon-button"
+          title="刷新书架"
+          :disabled="desk.bookshelfLoading.value"
+          @click="desk.refreshBookshelf(true)"
+        >
+          <RefreshCw
+            :class="{ spin: desk.bookshelfLoading.value }"
+            :size="19"
+          />
+        </button>
+      </section>
+      <div
+        v-if="desk.bookshelfLoading.value && !desk.bookshelf.value.length"
+        class="empty-state"
       >
-        {{ category }}
-      </button>
-    </div>
-    <div v-if="visibleNovels.length" class="novel-grid shelf-grid">
-      <NovelCard
-        v-for="novel in visibleNovels"
-        :key="`${novel.novelId}-${novel.bookshelfName || '默认书架'}-${novel.bookshelfType || 'novel'}`"
-        :novel="novel"
-        :format-date="formatDate"
-        @select="(novel, mode) => emit('select', novel, mode)"
-      />
-    </div>
-    <div v-else class="empty-state">
-      <BookMarked :size="28" />
-      <p>该分类中还没有可显示的小说</p>
-    </div>
-    <nav v-if="totalPages > 1" class="pagination" aria-label="书架分页">
-      <button
-        class="icon-button"
-        title="上一页"
-        :disabled="page === 1"
-        @click="emit('page', page - 1)"
-      >
-        <ChevronLeft :size="18" /></button
-      ><span class="page-status">第</span
-      ><input
-        class="page-jump"
-        type="number"
-        inputmode="numeric"
-        :value="page"
-        min="1"
-        :max="totalPages"
-        step="1"
-        aria-label="输入页码跳转"
-        title="输入页码后按回车或移开焦点跳转"
-        @change="jumpToPage"
-        @keydown.enter.prevent="jumpToPage"
-      /><span class="page-status"
-        >/ {{ totalPages }} 页 · {{ filteredCount }} 本</span
-      ><button
-        class="icon-button"
-        title="下一页"
-        :disabled="page === totalPages"
-        @click="emit('page', page + 1)"
-      >
-        <ChevronRight :size="18" />
-      </button>
-    </nav>
-  </template>
-  <div v-else class="empty-state tall">
-    <BookMarked :size="32" />
-    <p>书架中还没有可显示的作品</p>
-  </div>
+        <LoaderCircle class="spin" :size="28" />
+        <p>正在读取书架</p>
+      </div>
+      <template v-else-if="desk.bookshelf.value.length">
+        <div class="bookshelf-toolbar" aria-label="书架分类">
+          <button
+            v-for="category in desk.bookshelfCategories.value"
+            :key="category"
+            class="category-tab"
+            :class="{ active: desk.bookshelfCategory.value === category }"
+            @click="desk.selectBookshelfCategory(category)"
+          >
+            {{ category }}
+          </button>
+        </div>
+        <div
+          v-if="desk.pagedBookshelf.value.length"
+          class="novel-grid shelf-grid"
+        >
+          <NovelCard
+            v-for="novel in desk.pagedBookshelf.value"
+            :key="`${novel.novelId}-${novel.bookshelfName || '默认书架'}-${novel.bookshelfType || 'novel'}`"
+            :novel="novel"
+            :format-date="desk.formatDate"
+            @select="desk.openChapterPicker"
+          />
+        </div>
+        <div v-else class="empty-state">
+          <BookMarked :size="28" />
+          <p>该分类中还没有可显示的小说</p>
+        </div>
+        <nav
+          v-if="desk.bookshelfTotalPages.value > 1"
+          class="pagination"
+          aria-label="书架分页"
+        >
+          <button
+            class="icon-button"
+            title="上一页"
+            :disabled="desk.bookshelfPage.value === 1"
+            @click="desk.setBookshelfPage(desk.bookshelfPage.value - 1)"
+          >
+            <ChevronLeft :size="18" /></button
+          ><span class="page-status">第</span
+          ><input
+            class="page-jump"
+            type="number"
+            inputmode="numeric"
+            :value="desk.bookshelfPage.value"
+            min="1"
+            :max="desk.bookshelfTotalPages.value"
+            step="1"
+            aria-label="输入页码跳转"
+            title="输入页码后按回车或移开焦点跳转"
+            @change="jumpToPage"
+            @keydown.enter.prevent="jumpToPage"
+          /><span class="page-status"
+            >/ {{ desk.bookshelfTotalPages.value }} 页 ·
+            {{ desk.filteredBookshelf.value.length }} 本</span
+          ><button
+            class="icon-button"
+            title="下一页"
+            :disabled="
+              desk.bookshelfPage.value === desk.bookshelfTotalPages.value
+            "
+            @click="desk.setBookshelfPage(desk.bookshelfPage.value + 1)"
+          >
+            <ChevronRight :size="18" />
+          </button>
+        </nav>
+      </template>
+      <div v-else class="empty-state tall">
+        <BookMarked :size="32" />
+        <p>书架中还没有可显示的作品</p>
+      </div>
+    </main>
+  </PageFrame>
 </template>
 
 <style scoped>
+.bookshelf-page {
+  min-width: 0;
+  height: 100%;
+  padding: 18px 42px 28px 2px;
+  overflow-y: auto;
+  background-color: var(--background-color);
+  scrollbar-gutter: stable;
+}
 .section-head {
   display: flex;
   align-items: flex-end;
@@ -251,6 +277,11 @@ function jumpToPage(event: Event) {
 }
 
 @media (max-width: 760px) {
+  .bookshelf-page {
+    height: auto;
+    padding: 10px 0 0;
+    overflow: visible;
+  }
   .novel-grid {
     grid-template-columns: 1fr;
   }

@@ -33,7 +33,6 @@ export function useNovelDesk() {
   const auth = useDeskAuth(notify);
   const requestPolicy = useRequestPolicy(notify);
   const library = useDeskLibrary({
-    active,
     libraryDetailReturnView,
     notify,
   });
@@ -120,7 +119,8 @@ export function useNovelDesk() {
       active.value = "libraryDetail";
       return;
     }
-    if (active.value === "libraryDetail") library.backFromLibraryDetail();
+    if (active.value === "libraryDetail")
+      active.value = library.backFromLibraryDetail();
   }
 
   function blockCopy(event: ClipboardEvent) {
@@ -128,12 +128,14 @@ export function useNovelDesk() {
   }
 
   onMounted(() => {
-    void onBackButtonPress(() => handleBackNavigation()).then((unlisten) => {
-      if (disposed) void unlisten.unregister();
-      else stopBackListener = unlisten;
-    }).catch(() => {
-      // The Android app plugin is unavailable in browser and desktop builds.
-    });
+    void onBackButtonPress(() => handleBackNavigation())
+      .then((unlisten) => {
+        if (disposed) void unlisten.unregister();
+        else stopBackListener = unlisten;
+      })
+      .catch(() => {
+        // The Android app plugin is unavailable in browser and desktop builds.
+      });
     void auth.refreshAuthStatus().then(() => auth.loadAccountProfile());
     document.addEventListener("copy", blockCopy);
   });

@@ -1,9 +1,6 @@
 <template>
   <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
     <section class="modal glass chapter-modal">
-      <button class="close-button" title="关闭" @click="emit('close')">
-        <X :size="20" />
-      </button>
       <header
         class="chapter-hero"
         :class="{ 'has-cover': Boolean(novel?.novelCover) }"
@@ -170,7 +167,6 @@ import {
   LoaderCircle,
   LockKeyhole,
   LockKeyholeOpen,
-  X,
 } from "lucide-vue-next";
 import type { Chapter, ChapterMode, ChapterVolume, Novel } from "../types";
 
@@ -292,7 +288,7 @@ function toggleChapter(id: number, checked: boolean) {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: 1000;
   display: grid;
   padding: 18px;
   background: rgba(91, 49, 39, 0.24);
@@ -304,10 +300,12 @@ function toggleChapter(id: number, checked: boolean) {
   padding: 28px;
   border-radius: 20px;
   background: rgba(255, 249, 245, 0.8);
+  display: flex;
+  flex-direction: column;
 }
 .chapter-modal {
   width: min(760px, 100%);
-  max-height: calc(100vh - 50px);
+  max-height: 80%;
   overflow: auto;
 }
 .chapter-hero {
@@ -343,15 +341,9 @@ function toggleChapter(id: number, checked: boolean) {
   position: relative;
   z-index: 1;
   max-height: 72px;
-  /* margin: 16px 0 0 !important; */
-  /* padding: 10px 12px; */
   overflow: auto;
   font-size: 14px;
-  /* border: 1px solid rgba(255, 255, 255, 0.72); */
-  /* border-radius: 9px; */
   color: white;
-  /* background: rgba(255, 249, 245, 0.9); */
-  /* box-shadow: 0 5px 13px rgba(73, 39, 30, 0.12); */
 }
 .modal h2 {
   margin: 0 0 5px;
@@ -465,8 +457,8 @@ function toggleChapter(id: number, checked: boolean) {
   display: flex;
   flex: 1;
   flex-direction: column;
-  /* height: auto; */
-  height: 50vh;
+  height: auto;
+  /* height: 50vh; */
   max-height: 260px;
   min-height: 100px;
   padding-right: 5px;
@@ -573,16 +565,8 @@ function toggleChapter(id: number, checked: boolean) {
 }
 
 @media (max-width: 760px) {
-  .chapter-modal {
-    max-height: calc(100vh - 20px);
-    padding: 21px;
-  }
   .chapter-hero {
-    margin: -21px -21px 15px;
-    padding: 20px 55px 18px 21px;
-  }
-  .chapter-list {
-    max-height: calc(100vh - 260px);
+    display: none;
   }
 }
 </style>

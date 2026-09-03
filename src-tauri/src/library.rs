@@ -26,6 +26,21 @@ struct LocalBookDetail {
     novel_id: Option<i64>,
     author: String,
     description: String,
+    type_name: Option<String>,
+    tags: Vec<String>,
+    is_finished: Option<bool>,
+    score: Option<f64>,
+    chapter_count: Option<i64>,
+    character_count: Option<i64>,
+    view_count: Option<i64>,
+    mark_count: Option<i64>,
+    point_count: Option<i64>,
+    favorite_count: Option<i64>,
+    ticket_count: Option<i64>,
+    allow_download: Option<bool>,
+    latest_chapter_title: Option<String>,
+    latest_chapter_time: Option<String>,
+    last_update_time: Option<String>,
     cover: Option<String>,
     image_directory: String,
     audio_tracks: Vec<LocalAudioTrack>,
@@ -63,6 +78,22 @@ struct StoredBookMetadata {
     title: Option<String>,
     author: Option<String>,
     description: Option<String>,
+    type_name: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    is_finished: Option<bool>,
+    score: Option<f64>,
+    chapter_count: Option<i64>,
+    character_count: Option<i64>,
+    view_count: Option<i64>,
+    mark_count: Option<i64>,
+    point_count: Option<i64>,
+    favorite_count: Option<i64>,
+    ticket_count: Option<i64>,
+    allow_download: Option<bool>,
+    latest_chapter_title: Option<String>,
+    latest_chapter_time: Option<String>,
+    last_update_time: Option<String>,
     downloaded_text_chapter_ids: Option<Vec<i64>>,
     downloaded_audio_chapter_ids: Option<Vec<i64>>,
 }
@@ -338,16 +369,59 @@ async fn update_content_dictionary(
 /// * `app` - Tauri application handle used to resolve the platform data path.
 ///
 /// # Errors
-/// Returns an error when the platform data directory cannot be resolved or
-/// created.
+/// Returns the application library directory, using the public Android
+/// Downloads folder and the private application-data folder on desktop.
+///
+/// Returns an error when the directory cannot be resolved or created.
 fn library_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    #[cfg(target_os = "android")]
+    let directory = PathBuf::from("/storage/emulated/0/Download/SF Novel Flow");
+    #[cfg(not(target_os = "android"))]
     let directory = app
         .path()
         .app_data_dir()
         .map_err(|error| format!("无法解析应用数据目录：{error}"))?
         .join("library");
+
+    #[cfg(target_os = "android")]
+    migrate_legacy_android_library(app, &directory)?;
     fs::create_dir_all(&directory).map_err(|error| format!("无法创建本地书库目录：{error}"))?;
     Ok(directory)
+}
+
+/// Moves an existing private Android library into the public download folder once.
+#[cfg(target_os = "android")]
+fn migrate_legacy_android_library(app: &tauri::AppHandle, target: &PathBuf) -> Result<(), String> {
+    if target.exists() {
+        return Ok(());
+    }
+    let legacy = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("无法解析旧书库目录：{error}"))?
+        .join("library");
+    if !legacy.is_dir() {
+        return Ok(());
+    }
+    fs::create_dir_all(target).map_err(|error| format!("无法创建外部书库目录：{error}"))?;
+    copy_directory_contents(&legacy, target)
+        .map_err(|error| format!("无法迁移旧书库到外部目录：{error}"))
+}
+
+#[cfg(target_os = "android")]
+fn copy_directory_contents(source: &PathBuf, target: &PathBuf) -> std::io::Result<()> {
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if source_path.is_dir() {
+            fs::create_dir_all(&target_path)?;
+            copy_directory_contents(&source_path, &target_path)?;
+        } else {
+            fs::copy(source_path, target_path)?;
+        }
+    }
+    Ok(())
 }
 
 /// Resolves the native settings file without accepting a renderer-controlled
@@ -735,6 +809,21 @@ fn get_local_book(app: tauri::AppHandle, name: String) -> Result<LocalBookDetail
         description: metadata
             .description
             .unwrap_or_else(|| "暂无简介".to_string()),
+        type_name: metadata.type_name,
+        tags: metadata.tags,
+        is_finished: metadata.is_finished,
+        score: metadata.score,
+        chapter_count: metadata.chapter_count,
+        character_count: metadata.character_count,
+        view_count: metadata.view_count,
+        mark_count: metadata.mark_count,
+        point_count: metadata.point_count,
+        favorite_count: metadata.favorite_count,
+        ticket_count: metadata.ticket_count,
+        allow_download: metadata.allow_download,
+        latest_chapter_title: metadata.latest_chapter_title,
+        latest_chapter_time: metadata.latest_chapter_time,
+        last_update_time: metadata.last_update_time,
         cover,
         image_directory: directory.join("imgs").to_string_lossy().into_owned(),
         audio_tracks,
@@ -780,6 +869,29 @@ fn get_local_chapter(
 struct LocalExport {
     href: String,
     file_name: String,
+}
+
+/// Ensures Android can write the public download directory used by the library.
+#[tauri::command]
+async fn ensure_external_storage_access(app: tauri::AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        let result = app
+            .state::<AndroidSfacgAuth<tauri::Wry>>()
+            .mobile_plugin_handle
+            .run_mobile_plugin_async::<Value>("ensureExternalStorageAccess", ())
+            .await
+            .map_err(|error| format!("无法检查 Android 外部存储权限：{error}"))?;
+        return Ok(result
+            .get("granted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false));
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(true)
+    }
 }
 
 /// Returns plain text without local Markdown formatting for TXT export.
@@ -964,12 +1076,15 @@ fn write_epub_export(
 /// # Errors
 /// Returns an error for unsupported formats, missing text chapters, or export failures.
 #[tauri::command]
-fn export_local_book(
+async fn export_local_book(
     app: tauri::AppHandle,
     name: String,
     format: String,
     output_path: String,
 ) -> Result<LocalExport, String> {
+    if !ensure_external_storage_access(app.clone()).await? {
+        return Err("请在系统设置中允许本应用管理所有文件，然后重试导出".to_string());
+    }
     if !matches!(format.as_str(), "epub" | "markdown" | "txt" | "audio") {
         return Err("不支持的导出格式".to_string());
     }
@@ -996,19 +1111,28 @@ fn export_local_book(
         "audio" => format!("{name}-有声.zip"),
         _ => format!("{name}.txt"),
     };
-    let target = PathBuf::from(output_path.trim());
     let expected_extension = match format.as_str() {
         "epub" => "epub",
         "markdown" | "audio" => "zip",
         _ => "txt",
     };
-    if !target.is_absolute()
-        || target.file_name().is_none()
-        || target
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|value| value.eq_ignore_ascii_case(expected_extension))
-            == false
+    let requested_path = output_path.trim();
+    let is_document_uri = requested_path.starts_with("content://");
+    let target = if is_document_uri {
+        app.path()
+            .temp_dir()
+            .map_err(|error| format!("无法解析导出临时目录：{error}"))?
+            .join(format!(".sf-export-{}.{}", Uuid::new_v4(), expected_extension))
+    } else {
+        PathBuf::from(requested_path)
+    };
+    if !is_document_uri
+        && (!target.is_absolute()
+            || target.file_name().is_none()
+            || !target
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case(expected_extension)))
     {
         return Err(format!("导出文件必须使用 .{expected_extension} 扩展名"));
     }
@@ -1081,8 +1205,31 @@ fn export_local_book(
                 .map_err(|error| format!("无法写入 TXT 导出：{error}"))?;
         }
     }
+    if is_document_uri {
+        #[cfg(target_os = "android")]
+        {
+            let write_result = app
+                .state::<AndroidSfacgAuth<tauri::Wry>>()
+                .mobile_plugin_handle
+                .run_mobile_plugin_async::<Value>(
+                    "writeExportToUri",
+                    serde_json::json!({
+                        "sourcePath": target.to_string_lossy(),
+                        "uri": requested_path,
+                    }),
+                )
+                .await
+                .map_err(|error| format!("无法写入系统保存位置：{error}"));
+            let _ = fs::remove_file(&target);
+            write_result?;
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            return Err("当前平台不支持 content:// 导出位置".to_string());
+        }
+    }
     Ok(LocalExport {
-        href: target.to_string_lossy().into_owned(),
+        href: requested_path.to_string(),
         file_name,
     })
 }

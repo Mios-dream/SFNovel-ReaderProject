@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inject } from "vue";
 import { BookOpen, LoaderCircle, Search, Sparkles } from "lucide-vue-next";
 import recommendationOne from "../assets/image/header_cover/正派团宠惊坐起，反派竟是我自己.jpg";
 import recommendationTwo from "../assets/image/header_cover/变成狐娘的我被真龙圣女捕获了.jpg";
@@ -9,20 +10,16 @@ import recommendationSix from "../assets/image/header_cover/夜魔女王就是�
 import recommendationSeven from "../assets/image/header_cover/因为我是开武器店的大叔.jpg";
 import recommendationEight from "../assets/image/header_cover/剩女怎么可能是男孩子.jpg";
 import NovelCard from "../components/NovelCard.vue";
-import type { Novel } from "../types";
+import PageFrame from "../components/PageFrame.vue";
+import { deskInjectionKey } from "../deskContext";
 
-defineProps<{
-  query: string;
-  results: Novel[];
-  loading: boolean;
-  searched: boolean;
-  formatDate: (value: string) => string;
-}>();
-const emit = defineEmits<{
-  "update:query": [value: string];
-  search: [];
-  select: [novel: Novel, mode: "text" | "audio"];
-}>();
+function requireDesk() {
+  const desk = inject(deskInjectionKey);
+  if (!desk) throw new Error("Desk context is unavailable");
+  return desk;
+}
+
+const desk = requireDesk();
 
 const recommendationImages = [
   recommendationOne,
@@ -41,65 +38,94 @@ const recommendationImage =
 </script>
 
 <template>
-  <section class="hero glass">
-    <div class="hero-copy">
-      <span class="pill"><Sparkles :size="14" />菠萝包轻小说</span>
-      <h2>把小说，安静地收进<br />自己的阅读空间。</h2>
-      <p>搜索书名，将公开章节或已购章节保存为 Markdown 文件。</p>
-    </div>
-    <div class="hero-art">
-      <img :src="recommendationImage" alt="今日推荐作品封面" /><span
-        class="hero-sticker"
-        >今日推荐</span
+  <PageFrame>
+    <main class="discover-page">
+      <section class="hero glass">
+        <div class="hero-copy">
+          <span class="pill"><Sparkles :size="14" />菠萝包轻小说</span>
+          <h2>把小说，安静地收进<br />自己的阅读空间。</h2>
+          <p>搜索书名，将公开章节或已购章节保存为 Markdown 文件。</p>
+        </div>
+        <div class="hero-art">
+          <img :src="recommendationImage" alt="今日推荐作品封面" /><span
+            class="hero-sticker"
+            >今日推荐</span
+          >
+        </div>
+      </section>
+
+      <form class="search-box glass" @submit.prevent="desk.search">
+        <Search :size="22" />
+        <input
+          :value="desk.query.value"
+          autocomplete="off"
+          placeholder="输入书名、作者或关键词"
+          aria-label="搜索作品"
+          @input="desk.query.value = ($event.target as HTMLInputElement).value"
+        />
+        <button
+          class="primary-button"
+          type="submit"
+          :disabled="desk.loading.value"
+        >
+          <LoaderCircle
+            v-if="desk.loading.value"
+            class="spin"
+            :size="18"
+          /><span>{{ desk.loading.value ? "搜索中" : "搜索" }}</span>
+        </button>
+      </form>
+
+      <section class="section-head">
+        <div>
+          <p class="eyebrow">SEARCH RESULTS</p>
+          <h2>
+            {{
+              desk.searched.value
+                ? `找到 ${desk.results.value.length} 个作品`
+                : "从一部作品开始"
+            }}
+          </h2>
+        </div>
+        <p
+          v-if="desk.searched.value && desk.results.value.length"
+          class="subtle"
+        >
+          点击作品查看可用操作
+        </p>
+      </section>
+      <div v-if="!desk.searched.value" class="empty-state">
+        <Search :size="28" />
+        <p>输入小说名称，开始搜索</p>
+      </div>
+      <div
+        v-else-if="!desk.loading.value && !desk.results.value.length"
+        class="empty-state"
       >
-    </div>
-  </section>
-
-  <form class="search-box glass" @submit.prevent="emit('search')">
-    <Search :size="22" />
-    <input
-      :value="query"
-      autocomplete="off"
-      placeholder="输入书名、作者或关键词"
-      aria-label="搜索作品"
-      @input="emit('update:query', ($event.target as HTMLInputElement).value)"
-    />
-    <button class="primary-button" type="submit" :disabled="loading">
-      <LoaderCircle v-if="loading" class="spin" :size="18" /><span>{{
-        loading ? "搜索中" : "搜索"
-      }}</span>
-    </button>
-  </form>
-
-  <section class="section-head">
-    <div>
-      <p class="eyebrow">SEARCH RESULTS</p>
-      <h2>
-        {{ searched ? `找到 ${results.length} 个作品` : "从一部作品开始" }}
-      </h2>
-    </div>
-    <p v-if="searched && results.length" class="subtle">点击作品查看可用操作</p>
-  </section>
-  <div v-if="!searched" class="empty-state">
-    <Search :size="28" />
-    <p>输入小说名称，开始搜索</p>
-  </div>
-  <div v-else-if="!loading && !results.length" class="empty-state">
-    <BookOpen :size="28" />
-    <p>没有找到匹配的作品</p>
-  </div>
-  <div v-else class="novel-grid">
-    <NovelCard
-      v-for="novel in results"
-      :key="`${novel.novelId}-${novel.bookshelfType || 'novel'}`"
-      :novel="novel"
-      :format-date="formatDate"
-      @select="(novel, mode) => emit('select', novel, mode)"
-    />
-  </div>
+        <BookOpen :size="28" />
+        <p>没有找到匹配的作品</p>
+      </div>
+      <div v-else class="novel-grid">
+        <NovelCard
+          v-for="novel in desk.results.value"
+          :key="`${novel.novelId}-${novel.bookshelfType || 'novel'}`"
+          :novel="novel"
+          :format-date="desk.formatDate"
+          @select="desk.openChapterPicker"
+        />
+      </div>
+    </main>
+  </PageFrame>
 </template>
 
 <style scoped>
+.discover-page {
+  min-width: 0;
+  height: 100%;
+  padding: 18px 42px 28px 2px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
 .hero {
   position: relative;
   display: flex;
@@ -283,6 +309,11 @@ const recommendationImage =
 }
 
 @media (max-width: 760px) {
+  .discover-page {
+    height: auto;
+    padding: 10px 0 0;
+    overflow: visible;
+  }
   .hero {
     min-height: 235px;
     padding: 25px 21px;

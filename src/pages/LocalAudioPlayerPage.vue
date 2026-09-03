@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import {
+  computed,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
+import { useRouter } from "vue-router";
 import {
   ChevronLeft,
   Headphones,
@@ -12,16 +21,21 @@ import {
   Volume2,
   X,
 } from "lucide-vue-next";
-import type { LocalAudioTrack } from "../types";
+import { deskInjectionKey } from "../deskContext";
 
-const props = defineProps<{
-  bookName: string;
-  author: string;
-  cover?: string;
-  tracks: LocalAudioTrack[];
-  initialTrackIndex?: number;
-}>();
-const emit = defineEmits<{ back: [] }>();
+function requireDesk() {
+  const desk = inject(deskInjectionKey);
+  if (!desk) throw new Error("Desk context is unavailable");
+  return desk;
+}
+
+const desk = requireDesk();
+const router = useRouter();
+const bookName = computed(() => desk.localBook.value?.name || "本地有声书");
+const author = computed(() => desk.localBook.value?.author || "");
+const cover = computed(() => desk.localBook.value?.cover);
+const tracks = computed(() => desk.localBook.value?.audioTracks || []);
+const initialTrackIndex = computed(() => desk.localAudioTrackIndex.value);
 
 const audio = ref<HTMLAudioElement>();
 const trackIndex = ref(0);
@@ -32,45 +46,57 @@ const seeking = ref(false);
 const duration = ref(0);
 const volume = ref(0.8);
 const playbackRate = ref(1);
-const mobileSettingsOpen = ref(false);
-const playlistOpen = ref(false);
-const currentTrack = computed(() => props.tracks[trackIndex.value]);
+type MobileDrawer = "settings" | "playlist";
+
+const mobileDrawer = ref<MobileDrawer | null>(null);
+const mobileSettingsOpen = computed(() => mobileDrawer.value === "settings");
+const playlistOpen = computed(() => mobileDrawer.value === "playlist");
+const compactViewport = ref(
+  typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 800px)").matches,
+);
+const currentTrack = computed(() => tracks.value[trackIndex.value]);
+
+let compactViewportQuery: MediaQueryList | undefined;
+
+function syncCompactViewport() {
+  compactViewport.value = compactViewportQuery?.matches ?? false;
+  if (!compactViewport.value) closeMobileDrawers();
+}
+
+onMounted(() => {
+  compactViewportQuery = window.matchMedia("(max-width: 800px)");
+  syncCompactViewport();
+  compactViewportQuery.addEventListener("change", syncCompactViewport);
+  if (!desk.localBook.value?.audioTracks.length) {
+    void router.replace("/library");
+    return;
+  }
+  desk.navigate("audioPlayer");
+});
+
+onBeforeUnmount(() => {
+  compactViewportQuery?.removeEventListener("change", syncCompactViewport);
+});
 
 function closeMobileDrawers() {
-  mobileSettingsOpen.value = false;
-  playlistOpen.value = false;
+  mobileDrawer.value = null;
 }
 
 function toggleMobileSettings() {
-  if (mobileSettingsOpen.value) closeMobileDrawers();
-  else {
-    playlistOpen.value = false;
-    mobileSettingsOpen.value = true;
-  }
+  mobileDrawer.value = mobileSettingsOpen.value ? null : "settings";
 }
 
 function openMobilePlaylist() {
-  mobileSettingsOpen.value = false;
-  playlistOpen.value = true;
+  mobileDrawer.value = "playlist";
 }
-/**
- * Converts a playback duration into the compact minutes-and-seconds label.
- *
- * @param seconds Duration in seconds; invalid or negative values become zero.
- * @returns A user-facing `m:ss` duration string.
- */
+
 const formatTime = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 };
 
-/**
- * Starts playback of the currently selected native asset track.
- *
- * @returns A promise settled after the browser media element accepts or
- * rejects playback; rejection leaves the player paused.
- */
 async function play() {
   if (!audio.value) return;
   try {
@@ -81,36 +107,18 @@ async function play() {
   }
 }
 
-/**
- * Pauses the current audio element and updates the reactive playback state.
- *
- * @returns No value.
- */
 function pause() {
   audio.value?.pause();
   playing.value = false;
 }
 
-/**
- * Toggles between play and pause using the current media state.
- *
- * @returns No value; playback is started asynchronously when needed.
- */
 function togglePlayback() {
   if (playing.value) pause();
   else void play();
 }
 
-/**
- * Selects a bounded track index and resets position metadata for the track.
- *
- * @param index Requested track index, clamped to the available track range.
- * @param shouldPlay Whether the selected track should start after the DOM
- * audio source has updated.
- * @returns No value.
- */
 function selectTrack(index: number, shouldPlay = playing.value) {
-  trackIndex.value = Math.min(Math.max(0, index), props.tracks.length - 1);
+  trackIndex.value = Math.min(Math.max(0, index), tracks.value.length - 1);
   currentTime.value = 0;
   timelinePosition.value = 0;
   seeking.value = false;
@@ -120,34 +128,18 @@ function selectTrack(index: number, shouldPlay = playing.value) {
   });
 }
 
-/**
- * Selects the previous track, wrapping from the first track to the last.
- *
- * @returns No value.
- */
 function previous() {
   selectTrack(
-    trackIndex.value > 0 ? trackIndex.value - 1 : props.tracks.length - 1,
+    trackIndex.value > 0 ? trackIndex.value - 1 : tracks.value.length - 1,
   );
 }
 
-/**
- * Selects the next track, wrapping from the last track to the first.
- *
- * @returns No value.
- */
 function next() {
   selectTrack(
-    trackIndex.value < props.tracks.length - 1 ? trackIndex.value + 1 : 0,
+    trackIndex.value < tracks.value.length - 1 ? trackIndex.value + 1 : 0,
   );
 }
 
-/**
- * Applies a range-input position immediately to the media element.
- *
- * @param event Input event emitted by the timeline range control.
- * @returns No value; invalid numeric input is ignored.
- */
 function updateTimeline(event: Event) {
   const value = Number((event.target as HTMLInputElement).value);
   if (!Number.isFinite(value)) return;
@@ -156,21 +148,11 @@ function updateTimeline(event: Event) {
   if (audio.value) audio.value.currentTime = value;
 }
 
-/**
- * Marks timeline dragging as active and captures the current position.
- *
- * @returns No value.
- */
 function startSeeking() {
   seeking.value = true;
   timelinePosition.value = currentTime.value;
 }
 
-/**
- * Commits the dragged timeline position and ends seeking mode.
- *
- * @returns No value; does nothing when no seek operation is active.
- */
 function finishSeeking() {
   if (!seeking.value) return;
   if (audio.value) audio.value.currentTime = timelinePosition.value;
@@ -178,44 +160,22 @@ function finishSeeking() {
   seeking.value = false;
 }
 
-/**
- * Synchronizes the reactive position with the media element clock.
- *
- * @returns No value; updates are skipped while the user is dragging.
- */
 function syncPlaybackTime() {
   if (!audio.value || seeking.value) return;
   currentTime.value = audio.value.currentTime;
   timelinePosition.value = audio.value.currentTime;
 }
 
-/**
- * Reads the loaded media duration and refreshes the displayed timeline.
- *
- * @returns No value.
- */
 function updateDuration() {
   duration.value = audio.value?.duration || 0;
   syncPlaybackTime();
 }
 
-/**
- * Applies the volume slider value to the media element.
- *
- * @param event Input event emitted by the volume range control.
- * @returns No value.
- */
 function changeVolume(event: Event) {
   volume.value = Number((event.target as HTMLInputElement).value);
   if (audio.value) audio.value.volume = volume.value;
 }
 
-/**
- * Sets the media playback rate for the current and future tracks.
- *
- * @param rate Playback multiplier selected by the user.
- * @returns No value.
- */
 function setPlaybackRate(rate: number) {
   playbackRate.value = rate;
   if (audio.value) audio.value.playbackRate = rate;
@@ -227,9 +187,9 @@ watch(playbackRate, (value) => {
   if (audio.value) audio.value.playbackRate = value;
 });
 watch(
-  () => props.initialTrackIndex,
+  () => initialTrackIndex.value,
   (index) => {
-    if (!props.tracks.length) return;
+    if (!tracks.value.length) return;
     selectTrack(index || 0, false);
   },
   { immediate: true },
@@ -238,8 +198,14 @@ watch(
 
 <template>
   <section class="audio-player-page">
-    <button class="back-button" @click="emit('back')">
-      <ChevronLeft :size="17" />{{ bookName }}
+    <div class="audio-backdrop" aria-hidden="true">
+      <img v-if="cover" :src="cover" alt="" />
+    </div>
+    <button
+      class="back-button"
+      @click="router.push(`/library/${encodeURIComponent(bookName)}`)"
+    >
+      <ChevronLeft :size="17" />
     </button>
     <div
       v-if="mobileSettingsOpen || playlistOpen"
@@ -254,7 +220,6 @@ watch(
           <Headphones v-else :size="66" />
         </div>
         <div class="book-meta">
-          <p>本地有声书</p>
           <h2>{{ bookName }}</h2>
           <span>{{ author }}</span>
         </div>
@@ -353,100 +318,122 @@ watch(
             </button>
           </div>
         </div>
-        <section v-if="mobileSettingsOpen" class="mobile-player-settings">
-          <div class="drawer-heading">
-            <strong>播放设置</strong>
-            <button title="关闭播放设置" @click="closeMobileDrawers">
-              <X :size="19" />
-            </button>
-          </div>
-          <label>
-            <Volume2 :size="18" />
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              :value="volume"
-              aria-label="音量"
-              @input="changeVolume"
-            />
-            <span>{{ Math.round(volume * 100) }}%</span>
-          </label>
-          <div class="mobile-rate-options" aria-label="播放速度">
-            <button
-              v-for="rate in [1, 1.25, 1.5, 2]"
-              :key="rate"
-              :class="{ active: playbackRate === rate }"
-              @click="setPlaybackRate(rate)"
-            >
-              {{ rate }}x
-            </button>
-          </div>
-        </section>
       </div>
-      <aside class="track-section" :class="{ 'queue-open': playlistOpen }">
-        <button
-          class="track-heading"
-          :aria-expanded="playlistOpen"
-          @click="playlistOpen ? closeMobileDrawers() : openMobilePlaylist()"
-        >
-          <span><ListMusic :size="19" />播放队列</span
-          ><small>{{ tracks.length }} 章</small
-          ><X class="drawer-close" :size="19" />
-        </button>
-        <div class="track-list">
-          <button
-            v-for="(track, index) in tracks"
-            :key="track.href"
-            :class="{ active: index === trackIndex }"
-            @click="selectTrack(index, true)"
-          >
-            <span>{{ String(index + 1).padStart(3, "0") }}</span
-            ><strong>{{ track.title }}</strong
-            ><Play v-if="index === trackIndex && !playing" :size="16" /><Pause
-              v-else-if="index === trackIndex"
-              :size="16"
-            />
-          </button>
-        </div>
-      </aside>
     </section>
+    <section v-if="mobileSettingsOpen" class="mobile-player-settings">
+      <div class="drawer-heading">
+        <strong>播放设置</strong>
+        <button title="关闭播放设置" @click="closeMobileDrawers">
+          <X :size="19" />
+        </button>
+      </div>
+      <label>
+        <Volume2 :size="18" />
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          :value="volume"
+          aria-label="音量"
+          @input="changeVolume"
+        />
+        <span>{{ Math.round(volume * 100) }}%</span>
+      </label>
+      <div class="mobile-rate-options" aria-label="播放速度">
+        <button
+          v-for="rate in [1, 1.25, 1.5, 2]"
+          :key="rate"
+          :class="{ active: playbackRate === rate }"
+          @click="setPlaybackRate(rate)"
+        >
+          {{ rate }}x
+        </button>
+      </div>
+    </section>
+    <aside
+      v-show="playlistOpen || !compactViewport"
+      class="track-section"
+      :class="{ 'queue-open': playlistOpen }"
+      :aria-hidden="compactViewport && !playlistOpen"
+    >
+      <button
+        class="track-heading"
+        :aria-expanded="playlistOpen"
+        @click="playlistOpen ? closeMobileDrawers() : openMobilePlaylist()"
+      >
+        <span><ListMusic :size="19" />播放队列</span
+        ><small>{{ tracks.length }} 章</small
+        ><X class="drawer-close" :size="19" />
+      </button>
+      <div class="track-list">
+        <button
+          v-for="(track, index) in tracks"
+          :key="track.href"
+          :class="{ active: index === trackIndex }"
+          @click="selectTrack(index, true)"
+        >
+          <span>{{ String(index + 1).padStart(3, "0") }}</span
+          ><strong>{{ track.title }}</strong
+          ><Play v-if="index === trackIndex && !playing" :size="16" /><Pause
+            v-else-if="index === trackIndex"
+            :size="16"
+          />
+        </button>
+      </div>
+    </aside>
   </section>
 </template>
 
 <style scoped>
+/* Shared layout and playback controls */
 .audio-player-page {
+  box-sizing: border-box;
+  position: relative;
   display: flex;
-  height: 100%;
+  height: 100dvh;
   min-height: 0;
   flex-direction: column;
   padding: 5px 8px 10px;
   overflow: hidden;
+  isolation: isolate;
+  background: #5f4a46;
+}
+.audio-backdrop {
+  position: absolute;
+  z-index: 0;
+  inset: -32px;
+  overflow: hidden;
+  background: linear-gradient(145deg, #8e6258, #413944);
+}
+.audio-backdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(24px);
+  opacity: 0.88;
+  transform: scale(1.08);
 }
 .back-button {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  margin-bottom: 16px;
-  padding: 0;
   border: 0;
-  color: #94675c;
-  background: none;
   font-size: 12px;
   font-weight: 600;
 }
 .music-player {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  position: relative;
+  z-index: 1;
+  display: flex;
   height: auto;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
-  border: 1px solid rgba(224, 176, 154, 0.8);
-  border-radius: 8px;
-  background: rgba(255, 250, 247, 0.78);
-  /* box-shadow: 0 18px 42px rgba(137, 76, 55, 0.13); */
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
 }
 .player-main {
   display: flex;
@@ -455,12 +442,6 @@ watch(
   flex-direction: column;
   align-items: center;
   padding: clamp(18px, 3vh, 34px) clamp(24px, 6vw, 78px) 18px;
-  border-right: 1px solid rgba(187, 132, 111, 0.2);
-  background: linear-gradient(
-    150deg,
-    rgba(255, 255, 255, 0.68),
-    rgba(255, 236, 226, 0.65)
-  );
 }
 .cover-frame {
   display: grid;
@@ -605,18 +586,10 @@ watch(
   color: #fff;
   background: var(--theme-color);
 }
-.mobile-player-settings,
-.mobile-settings-action,
-.mobile-playlist-action,
-.playlist-backdrop {
-  display: none;
-}
 .track-section {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  padding: 24px 0 0;
-  background: rgba(255, 253, 251, 0.6);
 }
 .track-heading {
   display: flex;
@@ -641,28 +614,9 @@ watch(
   color: #ad877a;
   font-size: 12px;
 }
-.drawer-close {
-  display: none;
-}
-.drawer-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  color: #69453d;
-  font-size: 16px;
-}
-.drawer-heading button {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 50%;
-  color: #895c51;
-  background: rgba(255, 242, 234, 0.9);
-  place-items: center;
-}
 .track-list {
+  min-height: 0;
+  flex: 1 1 auto;
   overflow-y: auto;
   border-top: 1px solid rgba(187, 132, 111, 0.15);
 }
@@ -704,51 +658,130 @@ watch(
     transform: translateY(-2px);
   }
 }
+
+/* Desktop layout: centered player with a persistent queue panel. */
+@media (min-width: 801px) {
+  .back-button {
+    min-height: 40px;
+    width: fit-content;
+    margin: 0 0 12px 4px;
+    padding: 0 13px 0 8px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 11px;
+    color: rgba(255, 250, 247, 0.95);
+    background: rgba(57, 39, 40, 0.24);
+    box-shadow: 0 8px 20px rgba(32, 22, 29, 0.12);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .player-main {
+    width: min(620px, calc(100% - 380px));
+    border: 1px solid rgba(255, 255, 255, 0.42);
+    border-radius: 24px;
+    background: rgba(255, 249, 246, 0.7);
+    box-shadow: 0 20px 50px rgba(34, 24, 31, 0.24);
+    backdrop-filter: blur(24px) saturate(1.08);
+    -webkit-backdrop-filter: blur(24px) saturate(1.08);
+  }
+  .mobile-player-settings,
+  .mobile-settings-action,
+  .mobile-playlist-action,
+  .playlist-backdrop,
+  .drawer-close {
+    display: none;
+  }
+  .track-section {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+    width: min(320px, 29vw);
+    overflow: hidden;
+    padding: 24px 0 0;
+    border: 1px solid rgba(255, 255, 255, 0.38);
+    border-radius: 20px;
+    background: rgba(255, 250, 247, 0.62);
+    box-shadow: 0 15px 36px rgba(34, 24, 31, 0.16);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+  }
+}
+
+/* Mobile layout: touch controls and bottom-sheet drawers. */
 @media (max-width: 800px) {
   .audio-player-page {
-    min-height: calc(100dvh - env(safe-area-inset-top));
-    /* padding: 0 4px calc(92px + env(safe-area-inset-bottom)); */
-    overflow: visible;
+    height: 100dvh;
+    min-height: 0;
+    max-height: 100dvh;
+    padding: calc(8px + max(env(safe-area-inset-top), 24px)) 10px
+      calc(10px + max(env(safe-area-inset-bottom), 24px));
+  }
+  .audio-backdrop {
+    position: fixed;
+    inset: 0;
   }
   .back-button {
-    min-height: 42px;
-    margin-bottom: 8px;
+    display: flex;
+    height: 42px;
+    width: 42px;
+    justify-content: center;
+    align-items: center;
+    margin: 0 0 10px;
+    padding: 8px 12px 8px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    border-radius: 50%;
+    color: #fff;
+    background: rgba(69, 40, 34, 0.22);
+    backdrop-filter: blur(13px);
+    -webkit-backdrop-filter: blur(13px);
   }
   .music-player {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
+    align-items: center;
     height: auto;
     min-height: 0;
-    overflow: visible;
+    overflow: hidden;
     border: 0;
     background: none;
   }
   .player-main {
-    flex: 1 1 auto;
-    border: 1px solid rgba(224, 176, 154, 0.8);
-    border-radius: 8px;
-    border-right: 0;
-    background: linear-gradient(
-      150deg,
-      rgba(255, 255, 255, 0.76),
-      rgba(255, 236, 226, 0.7)
-    );
+    box-sizing: border-box;
+    width: min(640px, 100%);
+    max-height: 100%;
+    flex: 0 1 auto;
+    margin: auto 0;
+    overflow: hidden;
+    /* overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    border-radius: 24px;
+    background: rgba(255, 248, 242, 0.66);
+    box-shadow: 0 18px 35px rgba(86, 47, 38, 0.2);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px); */
   }
   .track-section {
     position: fixed;
+    top: auto;
     right: 0;
     bottom: 0;
     left: 0;
     z-index: 16;
-    height: min(70dvh, 510px);
+    width: 100%;
+    max-width: none;
+    height: auto;
+    max-height: min(70dvh, 510px);
     min-height: 0;
     padding: 0;
-    border: 1px solid rgba(224, 176, 154, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.62);
     border-bottom: 0;
-    border-radius: 14px 14px 0 0;
-    background: rgba(255, 250, 247, 0.98);
+    border-radius: 22px 22px 0 0;
+    background: rgba(255, 250, 247, 0.88);
     box-shadow: 0 -12px 32px rgba(91, 54, 44, 0.16);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
     pointer-events: none;
     transform: translateY(100%);
     transition: transform 0.24s ease;
@@ -789,11 +822,63 @@ watch(
   .track-heading small {
     margin-left: auto;
   }
+  .drawer-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2px;
+    color: #69453d;
+    font-size: 16px;
+  }
+  .drawer-heading button {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    border: 0;
+    border-radius: 50%;
+    color: #895c51;
+    background: rgba(255, 242, 234, 0.9);
+    place-items: center;
+  }
   .track-list {
     padding-bottom: env(safe-area-inset-bottom);
   }
   .cover-frame {
-    width: min(220px, 52vw);
+    width: min(232px, 54vw);
+    border-width: 10px;
+    border-radius: 16px;
+    box-shadow: 0 20px 38px rgba(93, 49, 38, 0.3);
+  }
+  .book-meta {
+    margin-top: 18px;
+  }
+  .book-meta p {
+    color: #9a5545;
+    font-weight: 600;
+  }
+  .book-meta h2 {
+    color: #593b35;
+    font-size: clamp(22px, 6vw, 28px);
+  }
+  .now-playing {
+    margin-top: 22px;
+    padding: 14px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.58);
+    border-radius: 17px;
+    background: rgba(255, 255, 255, 0.34);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.45);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .now-playing p {
+    color: #a65a49;
+    font-weight: 600;
+  }
+  .now-playing h3 {
+    color: #5f4038;
+  }
+  .now-playing span {
+    color: #946c60;
   }
   .control-row {
     grid-template-columns: 1fr auto 1fr;
@@ -862,12 +947,11 @@ watch(
     padding: 20px 18px calc(18px + env(safe-area-inset-bottom));
     border: 1px solid rgba(187, 132, 111, 0.16);
     border-bottom: 0;
-    border-radius: 14px 14px 0 0;
-    background: rgba(255, 250, 247, 0.98);
+    border-radius: 22px 22px 0 0;
+    background: rgba(255, 250, 247, 0.88);
     box-shadow: 0 -12px 32px rgba(91, 54, 44, 0.16);
-  }
-  .drawer-heading {
-    margin-bottom: 2px;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
   }
   .mobile-player-settings label {
     display: flex;
@@ -905,29 +989,6 @@ watch(
   .mobile-rate-options button.active {
     color: #fff;
     background: var(--theme-color);
-  }
-}
-@media (max-width: 500px) {
-  .player-main {
-    padding: 20px 18px 26px;
-  }
-  .cover-frame {
-    width: min(190px, 56vw);
-    border-width: 7px;
-  }
-  .book-meta h2 {
-    font-size: 21px;
-  }
-  .now-playing {
-    margin-top: 23px;
-  }
-  .playback-controls {
-    gap: 14px;
-  }
-  .mobile-settings-action button,
-  .mobile-playlist-action button {
-    width: 34px;
-    height: 34px;
   }
 }
 </style>

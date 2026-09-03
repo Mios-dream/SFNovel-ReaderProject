@@ -12,13 +12,11 @@ import { localAssetSource, type Notify } from "./deskShared";
 
 type ExportFormat = "epub" | "markdown" | "txt" | "audio";
 type UseDeskLibraryOptions = {
-  active: Ref<ViewName>;
   libraryDetailReturnView: Ref<ViewName>;
   notify: Notify;
 };
 
 export function useDeskLibrary({
-  active,
   libraryDetailReturnView,
   notify,
 }: UseDeskLibraryOptions) {
@@ -59,10 +57,10 @@ export function useDeskLibrary({
     confirmBook.value = undefined;
   }
 
-  async function openLibraryBook(book: Book) {
+  async function loadLocalBook(name: string) {
     try {
       const bookDetail = await invoke<LocalBookDetail>("get_local_book", {
-        name: book.name,
+        name,
       });
       bookDetail.cover = localAssetSource(bookDetail.cover);
       bookDetail.epubHref = localAssetSource(bookDetail.epubHref);
@@ -71,11 +69,10 @@ export function useDeskLibrary({
         href: localAssetSource(track.href) || "",
       }));
       localBook.value = bookDetail;
-      libraryDetailReturnView.value =
-        active.value === "libraryDetail" ? "library" : active.value;
-      active.value = "libraryDetail";
+      return bookDetail;
     } catch (error) {
       notify(error instanceof Error ? error.message : "无法读取本地书籍详情");
+      return undefined;
     }
   }
 
@@ -87,7 +84,7 @@ export function useDeskLibrary({
         "get_local_chapter",
         { name: book.name, chapterId },
       );
-      active.value = "reader";
+      return localChapter.value;
     } catch (error) {
       notify(error instanceof Error ? error.message : "无法读取本地章节");
     }
@@ -102,7 +99,6 @@ export function useDeskLibrary({
       Math.max(0, trackIndex),
       localBook.value.audioTracks.length - 1,
     );
-    active.value = "audioPlayer";
   }
 
   async function readOnline() {
@@ -125,7 +121,8 @@ export function useDeskLibrary({
         filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
       });
       if (!selectedPath) return;
-      const outputPath = selectedPath.toLowerCase().endsWith(`.${extension}`)
+      const isDocumentUri = selectedPath.startsWith("content://");
+      const outputPath = isDocumentUri || selectedPath.toLowerCase().endsWith(`.${extension}`)
         ? selectedPath
         : `${selectedPath}.${extension}`;
       const result = await invoke<{ href: string; fileName: string }>(
@@ -142,7 +139,7 @@ export function useDeskLibrary({
 
   function backFromLibraryDetail() {
     const target = libraryDetailReturnView.value;
-    active.value = target === "libraryDetail" ? "library" : target;
+    return target === "libraryDetail" ? "library" : target;
   }
 
   onMounted(() => {
@@ -158,9 +155,9 @@ export function useDeskLibrary({
     localAudioTrackIndex,
     exportingFormat,
     refreshLibrary,
+    loadLocalBook,
     deleteBook,
     confirmDeleteBook,
-    openLibraryBook,
     openLocalChapter,
     openLocalAudioPlayer,
     readOnline,

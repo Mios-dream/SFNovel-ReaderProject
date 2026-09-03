@@ -51,6 +51,7 @@ pub fn run() {
             get_local_book,
             get_local_chapter,
             delete_local_book,
+            ensure_external_storage_access,
             export_local_book,
             create_text_download,
             create_audio_download,
