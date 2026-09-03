@@ -1,4 +1,5 @@
 name: Publish Release
+run-name: Publish Release ${{ github.ref_name }}
 
 on:
   push:
