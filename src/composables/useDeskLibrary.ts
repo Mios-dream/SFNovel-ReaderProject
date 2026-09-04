@@ -102,6 +102,7 @@ export function useDeskLibrary({
         },
       );
       chapter.pages = chapter.pages.map((page) => localAssetSource(page) || "");
+      localChapter.value = undefined;
       localComicChapter.value = chapter;
       return chapter;
     } catch (error) {
@@ -113,11 +114,13 @@ export function useDeskLibrary({
     const book = localBook.value;
     if (!book) return;
     try {
-      localChapter.value = await invoke<LocalChapterContent>(
+      const chapter = await invoke<LocalChapterContent>(
         "get_local_chapter",
         { name: book.name, chapterId },
       );
-      return localChapter.value;
+      localComicChapter.value = undefined;
+      localChapter.value = chapter;
+      return chapter;
     } catch (error) {
       notify(error instanceof Error ? error.message : "无法读取本地章节");
     }

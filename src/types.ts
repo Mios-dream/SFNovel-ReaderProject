@@ -5,6 +5,7 @@ export type ViewName =
   | "library"
   | "libraryDetail"
   | "reader"
+  | "comicReader"
   | "audioPlayer";
 export type ChapterMode = "text" | "audio" | "comic";
 

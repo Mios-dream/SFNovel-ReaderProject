@@ -19,6 +19,8 @@ watch(
   (view) => {
     if (view === "reader" && route.path !== "/reader")
       void router.push("/reader");
+    if (view === "comicReader" && route.path !== "/comic-reader")
+      void router.push("/comic-reader");
     if (view === "audioPlayer" && route.path !== "/audio")
       void router.push("/audio");
     if (
@@ -32,6 +34,7 @@ watch(
       (view === "discover" || view === "bookshelf" || view === "library") &&
       (route.path.startsWith("/library/") ||
         route.path === "/reader" ||
+        route.path === "/comic-reader" ||
         route.path === "/audio")
     ) {
       void router.push(`/${view}`);

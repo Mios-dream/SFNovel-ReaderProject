@@ -117,7 +117,11 @@ export function useNovelDesk() {
       library.confirmBook.value = undefined;
       return;
     }
-    if (active.value === "reader" || active.value === "audioPlayer") {
+    if (
+      active.value === "reader" ||
+      active.value === "comicReader" ||
+      active.value === "audioPlayer"
+    ) {
       active.value = "libraryDetail";
       return;
     }

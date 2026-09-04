@@ -280,8 +280,8 @@ async function readComicChapter(chapterId: number) {
   directoryOpen.value = false;
   await desk.openLocalComicChapter(chapterId);
   if (desk.localComicChapter.value) {
-    desk.navigate("reader");
-    await router.push("/reader");
+    desk.navigate("comicReader");
+    await router.push("/comic-reader");
   }
 }
 
