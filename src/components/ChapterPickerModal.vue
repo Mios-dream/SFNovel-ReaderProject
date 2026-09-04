@@ -30,44 +30,9 @@
         </p>
       </header>
       <div v-if="loading" class="chapter-loading">
-        <LoaderCircle class="spin" :size="24" />正在读取书籍详情
+        <LoaderCircle class="spin" :size="24" />正在读取章节目录
       </div>
       <template v-else>
-        <div
-          v-if="hasAudio || hasComic"
-          class="chapter-tabs"
-          role="tablist"
-          aria-label="下载类型"
-        >
-          <button
-            v-if="mode !== 'comic'"
-            class="chapter-tab"
-            :class="{ active: mode === 'text' }"
-            role="tab"
-            :aria-selected="mode === 'text'"
-            @click="emit('change-mode', 'text')"
-          >
-            <BookOpen :size="16" />下载章节</button
-          ><button
-            v-if="hasAudio"
-            class="chapter-tab"
-            :class="{ active: mode === 'audio' }"
-            role="tab"
-            :aria-selected="mode === 'audio'"
-            @click="emit('change-mode', 'audio')"
-          >
-            <Headphones :size="16" />下载有声小说</button
-          ><button
-            v-if="hasComic"
-            class="chapter-tab"
-            :class="{ active: mode === 'comic' }"
-            role="tab"
-            :aria-selected="mode === 'comic'"
-            @click="emit('change-mode', 'comic')"
-          >
-            <Image :size="16" />下载漫画
-          </button>
-        </div>
         <button
           class="select-all"
           :disabled="!selectableIds.length"
@@ -227,8 +192,6 @@ const props = defineProps<{
   novel?: Novel;
   mode: ChapterMode;
   loading: boolean;
-  hasAudio: boolean;
-  hasComic: boolean;
   volumes: ChapterVolume[];
   audioChapters: Chapter[];
   comicChapters: Chapter[];
@@ -239,7 +202,6 @@ const emit = defineEmits<{
   close: [];
   "update:selectedIds": [value: number[]];
   toggleAll: [];
-  "change-mode": [value: ChapterMode];
   confirm: [];
 }>();
 
@@ -455,34 +417,6 @@ function toggleChapter(id: number, checked: boolean) {
   color: #fff;
   background: rgba(255, 246, 241, 0.22);
   backdrop-filter: blur(5px);
-}
-.chapter-tabs {
-  display: flex;
-  gap: 7px;
-  margin: 12px 0 6px;
-  padding: 5px;
-  border-radius: 10px;
-  background: #f8e5da;
-}
-.chapter-tab {
-  display: inline-flex;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 0;
-  min-height: 35px;
-  border: 0;
-  border-radius: 7px;
-  color: #986d60;
-  background: transparent;
-  font-size: 12px;
-  font-weight: 600;
-}
-.chapter-tab.active {
-  color: #fff;
-  background: var(--theme-color);
-  box-shadow: 0 3px 8px rgba(165, 79, 49, 0.2);
 }
 .chapter-loading {
   display: grid;

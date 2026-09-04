@@ -19,8 +19,6 @@ if (!desk) throw new Error("Desk context is unavailable");
     :novel="desk.chapterNovel.value"
     :mode="desk.chapterMode.value"
     :loading="desk.chapterLoading.value"
-    :has-audio="desk.chapterHasAudio.value"
-    :has-comic="desk.chapterHasComic.value"
     :volumes="desk.chapterVolumes.value"
     :audio-chapters="desk.audioChapters.value"
     :comic-chapters="desk.comicChapters.value"
@@ -28,7 +26,6 @@ if (!desk) throw new Error("Desk context is unavailable");
     :format-date="desk.formatDate"
     @close="desk.chapterModalOpen.value = false"
     @update:selected-ids="desk.selectedChapterIds.value = $event"
-    @change-mode="desk.changeChapterMode"
     @toggle-all="desk.toggleAllChapters"
     @confirm="desk.confirmChapterDownload"
   />

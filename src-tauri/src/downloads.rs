@@ -1448,10 +1448,11 @@ fn resume_download_job(app: tauri::AppHandle, job_id: String) -> Result<NativeJo
             cancelled,
         ));
     } else if spec.kind == "comic" {
+        let comic_id = spec.source_id.unwrap_or(spec.novel_id);
         tauri::async_runtime::spawn(run_comic_download(
             app,
             job_id,
-            spec.novel_id,
+            comic_id,
             spec.title,
             spec.chapter_ids,
             cancelled,

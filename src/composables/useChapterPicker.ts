@@ -19,8 +19,6 @@ export function useChapterPicker({
   const chapterModalOpen = ref(false);
   const chapterLoading = ref(false);
   const chapterMode = ref<ChapterMode>("text");
-  const chapterHasAudio = ref(false);
-  const chapterHasComic = ref(false);
   const chapterNovel = ref<Novel>();
   const chapterVolumes = ref<ChapterVolume[]>([]);
   const audioChapters = ref<Chapter[]>([]);
@@ -35,40 +33,37 @@ export function useChapterPicker({
     chapterVolumes.value = [];
     audioChapters.value = [];
     comicChapters.value = [];
-    chapterHasAudio.value = false;
-    chapterHasComic.value = false;
     selectedChapterIds.value = [];
     try {
-      const [info, volumes, audio, comic] = await Promise.all([
-        invoke<Partial<Novel>>("get_novel_details", {
-          novelId: novel.novelId,
-        }).catch(() => ({})),
-        mode === "text"
-          ? invoke<ChapterVolume[]>("get_chapter_volumes", {
+      // Text and audio entries use the novel detail endpoint for the header
+      // description. Comics have a separate identity and must never call
+      // `/novels/{id}`.
+      const info =
+        mode === "comic"
+          ? {}
+          : await invoke<Partial<Novel>>("get_novel_details", {
               novelId: novel.novelId,
-            }).catch(() => [])
-          : Promise.resolve([] as ChapterVolume[]),
-        auth.value.authenticated
-          ? invoke<{ chapters: Chapter[] }>("get_audio_chapters", {
-              novelId: novel.novelId,
-            }).catch(() => ({ chapters: [] as Chapter[] }))
-          : Promise.resolve({ chapters: [] as Chapter[] }),
-        novel.bookshelfType === "comic"
-          ? invoke<{ chapters: Chapter[] }>("get_comic_chapters", {
-              comicId: novel.novelId,
-            }).catch(() => ({ chapters: [] as Chapter[] }))
-          : Promise.resolve({ chapters: [] as Chapter[] }),
-      ]);
+            }).catch(() => ({}));
       chapterNovel.value = { ...novel, ...info };
-      chapterVolumes.value = volumes;
-      audioChapters.value = audio.chapters;
-      comicChapters.value = comic.chapters;
-      chapterHasAudio.value = audio.chapters.length > 0;
-      chapterHasComic.value = comic.chapters.length > 0;
-      if (mode === "audio" && !chapterHasAudio.value)
-        chapterMode.value = "text";
-      if (mode === "comic" && !chapterHasComic.value)
-        chapterModalOpen.value = false;
+      if (mode === "text") {
+        chapterVolumes.value = await invoke<ChapterVolume[]>(
+          "get_chapter_volumes",
+          { novelId: novel.novelId },
+        );
+      } else if (mode === "audio") {
+        if (!auth.value.authenticated) throw new Error("请先登录再下载有声内容");
+        const audio = await invoke<{ chapters: Chapter[] }>(
+          "get_audio_chapters",
+          { novelId: novel.novelId },
+        );
+        audioChapters.value = audio.chapters;
+      } else {
+        const comic = await invoke<{ chapters: Chapter[] }>(
+          "get_comic_chapters",
+          { comicId: novel.novelId },
+        );
+        comicChapters.value = comic.chapters;
+      }
       selectDownloadableChapters();
     } catch (error) {
       chapterModalOpen.value = false;
@@ -101,13 +96,6 @@ export function useChapterPicker({
 
   function selectDownloadableChapters() {
     selectedChapterIds.value = allChapterIds().filter((id) => isDownloadable(id));
-  }
-
-  function changeChapterMode(mode: ChapterMode) {
-    if (mode === "audio" && !chapterHasAudio.value) return;
-    if (mode === "comic" && !chapterHasComic.value) return;
-    chapterMode.value = mode;
-    selectDownloadableChapters();
   }
 
   function toggleAllChapters() {
@@ -152,15 +140,12 @@ export function useChapterPicker({
     chapterModalOpen,
     chapterLoading,
     chapterMode,
-    chapterHasAudio,
-    chapterHasComic,
     chapterNovel,
     chapterVolumes,
     audioChapters,
     comicChapters,
     selectedChapterIds,
     openChapterPicker,
-    changeChapterMode,
     toggleAllChapters,
     confirmChapterDownload,
   };
