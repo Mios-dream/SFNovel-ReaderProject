@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
-import { computed, inject, onMounted } from "vue";
-import { ChevronLeft } from "lucide-vue-next";
+import { computed, inject, onMounted, ref } from "vue";
+import { ChevronLeft, Images, ListTree, X } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 import { deskInjectionKey } from "../deskContext";
 
@@ -19,6 +19,8 @@ const bookName = computed(() => desk.localBook.value?.name || "本地阅读");
 const imageDirectory = computed(
   () => desk.localBook.value?.imageDirectory || "",
 );
+const comicChapters = computed(() => desk.localBook.value?.comicChapters || []);
+const comicDirectoryOpen = ref(false);
 
 type ChapterPart =
   | { type: "text"; value: string }
@@ -59,16 +61,31 @@ onMounted(() => {
   }
   desk.navigate("reader");
 });
+
+async function openComicChapter(chapterId: number) {
+  await desk.openLocalComicChapter(chapterId);
+  comicDirectoryOpen.value = false;
+}
 </script>
 
 <template>
   <article v-if="chapter || comicChapter" class="reader">
-    <button
-      class="back-button"
-      @click="router.push(`/library/${encodeURIComponent(bookName)}`)"
-    >
-      <ChevronLeft :size="17" />{{ bookName }}
-    </button>
+    <header class="reader-toolbar">
+      <button
+        class="back-button"
+        @click="router.push(`/library/${encodeURIComponent(bookName)}`)"
+      >
+        <ChevronLeft :size="17" />{{ bookName }}
+      </button>
+      <button
+        v-if="comicChapter"
+        class="comic-directory-button"
+        title="漫画目录"
+        @click="comicDirectoryOpen = true"
+      >
+        <ListTree :size="18" />
+      </button>
+    </header>
     <!-- <header>
       <FileText :size="19" /><span>{{ chapter.volume }}</span>
       <h2>{{ chapter.title }}</h2>
@@ -88,6 +105,29 @@ onMounted(() => {
       <h1>{{ comicChapter?.title }}</h1>
       <img v-for="(page, index) in comicChapter?.pages" :key="page" class="comic-page-image" :src="page" :alt="`第 ${index + 1} 页`" />
     </div>
+    <div
+      v-if="comicDirectoryOpen"
+      class="comic-directory-backdrop"
+      @click.self="comicDirectoryOpen = false"
+    >
+      <section class="comic-directory-panel" role="dialog" aria-modal="true" aria-label="漫画目录">
+        <header>
+          <div><small>本地漫画</small><h2>章节目录</h2></div>
+          <button title="关闭目录" @click="comicDirectoryOpen = false"><X :size="19" /></button>
+        </header>
+        <button
+          v-for="chapterItem in comicChapters"
+          :key="chapterItem.id"
+          class="comic-directory-item"
+          :class="{ active: chapterItem.id === comicChapter?.id }"
+          @click="openComicChapter(chapterItem.id)"
+        >
+          <img v-if="chapterItem.cover" :src="chapterItem.cover" :alt="`${chapterItem.title} 首图`" />
+          <Images v-else :size="26" />
+          <strong>{{ chapterItem.title }}</strong>
+        </button>
+      </section>
+    </div>
   </article>
 </template>
 
@@ -99,6 +139,11 @@ onMounted(() => {
   padding: 10px 24px 64px;
   margin: 0 auto;
   background: #f8f6f0;
+}
+.reader-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .back-button {
   display: inline-flex;
@@ -150,6 +195,17 @@ h2 {
   margin: 20px auto;
   object-fit: contain;
 }
+.comic-directory-button {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e7d8c9;
+  border-radius: 6px;
+  color: #805f67;
+  background: #fffaf5;
+}
 .comic-reader-content {
   display: flex;
   flex-direction: column;
@@ -169,6 +225,82 @@ h2 {
   height: auto;
   object-fit: contain;
 }
+.comic-directory-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(42, 34, 37, 0.45);
+}
+.comic-directory-panel {
+  display: flex;
+  width: min(390px, 100%);
+  height: 100%;
+  flex-direction: column;
+  overflow-y: auto;
+  background: #fffdf8;
+  box-shadow: -12px 0 36px rgba(54, 37, 39, 0.22);
+}
+.comic-directory-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 20px 15px;
+  border-bottom: 1px solid #eee5da;
+}
+.comic-directory-panel small {
+  color: #aa8b78;
+  font-size: 11px;
+}
+.comic-directory-panel h2 {
+  margin: 4px 0 0;
+  color: #5d4541;
+  font-family: KaTongFont, "Microsoft YaHei", sans-serif;
+  font-size: 21px;
+}
+.comic-directory-panel header button {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  color: #765c57;
+  background: #f7eee5;
+}
+.comic-directory-item {
+  display: flex;
+  min-height: 78px;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 20px;
+  border: 0;
+  border-bottom: 1px solid #f0eae1;
+  color: #4e403c;
+  background: transparent;
+  text-align: left;
+}
+.comic-directory-item:hover,
+.comic-directory-item.active {
+  background: #fff4ea;
+}
+.comic-directory-item img {
+  width: 72px;
+  height: 48px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  object-fit: cover;
+}
+.comic-directory-item strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 @media (max-width: 760px) {
   .reader {
     min-height: 100dvh;
@@ -177,6 +309,9 @@ h2 {
   .back-button {
     min-height: 40px;
     margin-bottom: 12px;
+  }
+  .comic-directory-panel {
+    width: min(100%, 420px);
   }
   .chapter-content {
     padding: 0px;

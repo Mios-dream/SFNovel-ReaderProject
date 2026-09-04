@@ -11,7 +11,7 @@ import type {
 } from "../types";
 import { localAssetSource, type Notify } from "./deskShared";
 
-type ExportFormat = "epub" | "markdown" | "txt" | "audio";
+type ExportFormat = "epub" | "markdown" | "txt" | "audio" | "comic";
 type UseDeskLibraryOptions = {
   libraryDetailReturnView: Ref<ViewName>;
   notify: Notify;
@@ -64,13 +64,24 @@ export function useDeskLibrary({
       const bookDetail = await invoke<LocalBookDetail>("get_local_book", {
         name,
       });
-      bookDetail.cover = localAssetSource(bookDetail.cover);
+      for (const media of [
+        bookDetail.novel,
+        bookDetail.audio,
+        bookDetail.comic,
+      ]) {
+        if (media) media.cover = localAssetSource(media.cover);
+      }
       bookDetail.epubHref = localAssetSource(bookDetail.epubHref);
       bookDetail.audioTracks = bookDetail.audioTracks.map((track) => ({
         ...track,
         href: localAssetSource(track.href) || "",
       }));
-      bookDetail.comicChapters = bookDetail.comicChapters || [];
+      bookDetail.comicChapters = (bookDetail.comicChapters || []).map(
+        (chapter) => ({
+          ...chapter,
+          cover: localAssetSource(chapter.cover),
+        }),
+      );
       localBook.value = bookDetail;
       return bookDetail;
     } catch (error) {
@@ -83,10 +94,13 @@ export function useDeskLibrary({
     const book = localBook.value;
     if (!book) return;
     try {
-      const chapter = await invoke<LocalComicChapter>("get_local_comic_chapter", {
-        name: book.name,
-        chapterId,
-      });
+      const chapter = await invoke<LocalComicChapter>(
+        "get_local_comic_chapter",
+        {
+          name: book.name,
+          chapterId,
+        },
+      );
       chapter.pages = chapter.pages.map((page) => localAssetSource(page) || "");
       localComicChapter.value = chapter;
       return chapter;
@@ -120,10 +134,19 @@ export function useDeskLibrary({
     );
   }
 
-  async function readOnline() {
-    const novelId = localBook.value?.novelId;
-    if (!novelId) return;
-    await openUrl(`https://book.sfacg.com/Novel/${novelId}/`);
+  async function readOnline(mode: "novel" | "audio" | "comic") {
+    const book = localBook.value;
+    const work = book?.[mode];
+    if (!work) return;
+    const url =
+      mode === "comic"
+        ? work.onlinePath
+          ? `https://manhua.sfacg.com/mh/${work.onlinePath}/`
+          : `https://manhua.sfacg.com/mh/${work.id}/`
+        : mode === "audio"
+          ? `https://i.sfacg.com/consume/book/?nid=${work.catalogId || work.id}`
+          : `https://book.sfacg.com/Novel/${work.id}/`;
+    await openUrl(url);
   }
 
   async function exportBook(format: ExportFormat) {
@@ -131,9 +154,16 @@ export function useDeskLibrary({
     if (!book) return;
     exportingFormat.value = format;
     try {
-      const extension = format === "epub" ? "epub" : format === "txt" ? "txt" : "zip";
+      const extension =
+        format === "epub" ? "epub" : format === "txt" ? "txt" : "zip";
       const suffix =
-        format === "markdown" ? "-Markdown" : format === "audio" ? "-有声" : "";
+        format === "markdown"
+          ? "-Markdown"
+          : format === "audio"
+            ? "-有声"
+            : format === "comic"
+              ? "-漫画"
+              : "";
       const selectedPath = await save({
         title: "选择导出位置",
         defaultPath: `${book.name}${suffix}.${extension}`,
@@ -141,9 +171,10 @@ export function useDeskLibrary({
       });
       if (!selectedPath) return;
       const isDocumentUri = selectedPath.startsWith("content://");
-      const outputPath = isDocumentUri || selectedPath.toLowerCase().endsWith(`.${extension}`)
-        ? selectedPath
-        : `${selectedPath}.${extension}`;
+      const outputPath =
+        isDocumentUri || selectedPath.toLowerCase().endsWith(`.${extension}`)
+          ? selectedPath
+          : `${selectedPath}.${extension}`;
       const result = await invoke<{ href: string; fileName: string }>(
         "export_local_book",
         { name: book.name, format, outputPath },

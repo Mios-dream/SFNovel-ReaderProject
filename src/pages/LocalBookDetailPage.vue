@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref, watch } from "vue";
+import type { LocalWorkMetadata } from "../types";
 import { useRoute, useRouter } from "vue-router";
 import {
   BookOpen,
@@ -33,6 +34,9 @@ const route = useRoute();
 const router = useRouter();
 const book = computed(() => desk.localBook.value);
 const exporting = desk.exportingFormat;
+type MediaType = "novel" | "audio" | "comic";
+type ChapterMode = "text" | "audio" | "comic";
+const mediaTypes: MediaType[] = ["novel", "audio", "comic"];
 
 const textChapterCount = computed(() =>
   (book.value?.chapterVolumes ?? []).reduce(
@@ -42,18 +46,37 @@ const textChapterCount = computed(() =>
 );
 const audioChapterCount = computed(() => book.value?.audioTracks.length ?? 0);
 const comicChapterCount = computed(() => book.value?.comicChapters.length ?? 0);
-const firstTextChapterId = computed(
-  () => book.value?.chapterVolumes[0]?.chapters[0]?.id,
-);
-const chapterMode = ref<"text" | "audio" | "comic">(
-  textChapterCount.value ? "text" : audioChapterCount.value ? "audio" : "comic",
-);
-const desktopContentTab = ref<"novel" | "audio" | "comic">(
+const selectedMediaType = ref<MediaType>(
   textChapterCount.value
     ? "novel"
     : audioChapterCount.value
       ? "audio"
-      : comicChapterCount.value ? "comic" : "novel",
+      : "comic",
+);
+const emptyWork: LocalWorkMetadata = {
+  id: 0,
+  title: "未命名作品",
+  author: "未知作者",
+  description: "",
+  tags: [],
+};
+const currentWork = computed<LocalWorkMetadata>(
+  () => book.value?.[selectedMediaType.value] ?? emptyWork,
+);
+const firstTextChapterId = computed(
+  () => book.value?.chapterVolumes[0]?.chapters[0]?.id,
+);
+const chapterMode = ref<ChapterMode>(
+  textChapterCount.value ? "text" : audioChapterCount.value ? "audio" : "comic",
+);
+const desktopContentTab = ref<MediaType>(
+  textChapterCount.value
+    ? "novel"
+    : audioChapterCount.value
+      ? "audio"
+      : comicChapterCount.value
+        ? "comic"
+        : "novel",
 );
 const desktopDirectoryCount = computed(() =>
   desktopContentTab.value === "novel"
@@ -62,22 +85,29 @@ const desktopDirectoryCount = computed(() =>
       ? audioChapterCount.value
       : comicChapterCount.value,
 );
-const detailMode = ref<"novel" | "comic">("novel");
+const mobileSwitchMediaTypes = computed(() =>
+  mediaTypes.filter((media) => media !== selectedMediaType.value),
+);
 const directoryOpen = ref(false);
 const exportModalOpen = ref(false);
 const descriptionExpanded = ref(false);
 const descriptionModalOpen = ref(false);
 const desktopDirectoryElement = ref<HTMLElement>();
 const primaryActionLabel = computed(() =>
-  textChapterCount.value ? "开始阅读" : audioChapterCount.value ? "播放有声" : "阅读漫画",
+  selectedMediaType.value === "comic"
+    ? "阅读漫画"
+    : selectedMediaType.value === "audio"
+      ? "播放有声"
+      : textChapterCount.value
+        ? "开始阅读"
+        : "播放有声",
 );
 const localStatusLabel = computed(() => {
-  if (book.value?.isFinished == null) return "";
-  return book.value.isFinished ? "已完结" : "连载中";
+  if (currentWork.value.isFinished == null) return "";
+  return currentWork.value.isFinished ? "已完结" : "连载中";
 });
 const desktopBookFacts = computed(() => {
-  const currentBook = book.value;
-  if (!currentBook) return [];
+  const currentBook = currentWork.value;
 
   const facts: Array<{ label: string; value: string; title?: string }> = [];
   const updatedAt = currentBook.latestChapterTime || currentBook.lastUpdateTime;
@@ -98,6 +128,78 @@ const desktopBookFacts = computed(() => {
   }
   return facts;
 });
+
+function preferredMediaType(): MediaType {
+  if (book.value?.novel) return "novel";
+  if (book.value?.audio) return "audio";
+  if (book.value?.comic) return "comic";
+
+  return textChapterCount.value
+    ? "novel"
+    : audioChapterCount.value
+      ? "audio"
+      : "comic";
+}
+
+function hasCachedMedia(media: MediaType) {
+  return Boolean(book.value?.[media]);
+}
+
+function mediaTitle(media: MediaType) {
+  return media === "novel"
+    ? "小说原著"
+    : media === "audio"
+      ? "有声小说"
+      : "漫画改编";
+}
+
+function mediaDescription(media: MediaType) {
+  if (media === "novel") {
+    return textChapterCount.value
+      ? `${textChapterCount.value} 个本地章节`
+      : "暂无本地章节";
+  }
+  if (media === "audio") {
+    return audioChapterCount.value
+      ? `${audioChapterCount.value} 条本地音轨`
+      : "暂无本地音轨";
+  }
+  return comicChapterCount.value
+    ? `${comicChapterCount.value} 个本地章节`
+    : "暂无本地漫画章节";
+}
+
+const canExportCurrentMedia = computed(() =>
+  selectedMediaType.value === "comic"
+    ? comicChapterCount.value > 0
+    : selectedMediaType.value === "audio"
+      ? audioChapterCount.value > 0
+      : textChapterCount.value > 0,
+);
+
+function exportCurrentMedia() {
+  if (canExportCurrentMedia.value) exportModalOpen.value = true;
+}
+
+function exportFormat(format: "epub" | "markdown" | "txt" | "audio" | "comic") {
+  exportModalOpen.value = false;
+  desk.exportBook(format);
+}
+
+const exportActionLabel = computed(() =>
+  selectedMediaType.value === "comic"
+    ? "导出漫画"
+    : selectedMediaType.value === "audio"
+      ? "导出有声"
+      : "导出小说",
+);
+
+function setMediaType(media: MediaType) {
+  selectedMediaType.value = media;
+  desktopContentTab.value = media;
+  descriptionExpanded.value = false;
+  descriptionModalOpen.value = false;
+}
 
 function formatMetric(value?: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
@@ -144,12 +246,9 @@ async function loadRouteBook() {
       return;
     }
   }
-  chapterMode.value = textChapterCount.value ? "text" : audioChapterCount.value ? "audio" : "comic";
-  desktopContentTab.value = textChapterCount.value
-    ? "novel"
-    : audioChapterCount.value
-      ? "audio"
-      : comicChapterCount.value ? "comic" : "novel";
+  const media = preferredMediaType();
+  chapterMode.value = media === "novel" ? "text" : media;
+  setMediaType(media);
   desk.navigate("libraryDetail");
 }
 
@@ -187,39 +286,61 @@ async function readComicChapter(chapterId: number) {
 }
 
 function startReading() {
+  if (selectedMediaType.value === "comic" && comicChapterCount.value) {
+    void readComicChapter(book.value!.comicChapters[0].id);
+    return;
+  }
+  if (selectedMediaType.value === "audio" && audioChapterCount.value) {
+    void playAudio(0);
+    return;
+  }
   if (firstTextChapterId.value) {
     void readChapter(firstTextChapterId.value);
     return;
   }
   if (audioChapterCount.value) void playAudio(0);
-  else if (comicChapterCount.value) void readComicChapter(book.value!.comicChapters[0].id);
+  else if (comicChapterCount.value)
+    void readComicChapter(book.value!.comicChapters[0].id);
 }
 
-function openDirectory(mode: "text" | "audio" | "comic" = "text") {
+function openDirectory(mode?: ChapterMode) {
+  const selectedMode: ChapterMode =
+    mode ??
+    (selectedMediaType.value === "novel" ? "text" : selectedMediaType.value);
   chapterMode.value =
-    mode === "audio" && audioChapterCount.value
-      ? "audio"
-      : textChapterCount.value
-        ? "text"
-        : audioChapterCount.value ? "audio" : "comic";
+    selectedMode === "comic" && comicChapterCount.value
+      ? "comic"
+      : selectedMode === "audio" && audioChapterCount.value
+        ? "audio"
+        : textChapterCount.value
+          ? "text"
+          : audioChapterCount.value
+            ? "audio"
+            : "comic";
   directoryOpen.value = true;
 }
 
-function focusDesktopDirectory(mode: "text" | "audio" | "comic" = "text") {
-  if (mode === "audio" && audioChapterCount.value) {
-    desktopContentTab.value = "audio";
+function focusDesktopDirectory(mode?: ChapterMode) {
+  const selectedMode: ChapterMode =
+    mode ??
+    (selectedMediaType.value === "novel" ? "text" : selectedMediaType.value);
+  if (selectedMode === "audio" && audioChapterCount.value) {
+    setMediaType("audio");
     chapterMode.value = "audio";
-  } else if (textChapterCount.value) {
-    desktopContentTab.value = "novel";
+  } else if (selectedMode === "comic" && comicChapterCount.value) {
+    setMediaType("comic");
+    chapterMode.value = "comic";
+  } else if (selectedMode === "text" && textChapterCount.value) {
+    setMediaType("novel");
     chapterMode.value = "text";
   } else if (audioChapterCount.value) {
-    desktopContentTab.value = "audio";
+    setMediaType("audio");
     chapterMode.value = "audio";
   } else if (comicChapterCount.value) {
-    desktopContentTab.value = "comic";
+    setMediaType("comic");
     chapterMode.value = "comic";
   } else {
-    desktopContentTab.value = "novel";
+    setMediaType("novel");
   }
   desktopDirectoryElement.value?.scrollIntoView({
     behavior: "smooth",
@@ -227,23 +348,24 @@ function focusDesktopDirectory(mode: "text" | "audio" | "comic" = "text") {
   });
 }
 
-function selectDesktopContentTab(tab: "novel" | "audio" | "comic") {
+function selectDesktopContentTab(tab: MediaType) {
   if (tab === "novel") {
     if (!textChapterCount.value) return;
     chapterMode.value = "text";
   } else if (tab === "audio") {
     if (!audioChapterCount.value) return;
     chapterMode.value = "audio";
-  } else if (!comicChapterCount.value) return;
-  desktopContentTab.value = tab;
+  } else {
+    if (!comicChapterCount.value) return;
+    chapterMode.value = "comic";
+  }
+  setMediaType(tab);
 }
 
-function openAudioDetail() {
-  if (audioChapterCount.value) void playAudio(0);
-}
-
-function openComicDetail() {
-  detailMode.value = "comic";
+function selectMobileMedia(media: MediaType) {
+  if (!hasCachedMedia(media)) return;
+  setMediaType(media);
+  chapterMode.value = media === "novel" ? "text" : media;
   directoryOpen.value = false;
 }
 
@@ -255,20 +377,12 @@ watch(
 </script>
 
 <template>
-  <section
-    v-if="book"
-    class="detail-page"
-    :class="{ 'comic-page': detailMode === 'comic' }"
-  >
-    <section
-      v-if="detailMode === 'novel'"
-      class="book-hero"
-      :class="{ 'without-cover': !book.cover }"
-    >
+  <section v-if="book" class="detail-page">
+    <section class="book-hero" :class="{ 'without-cover': !currentWork.cover }">
       <div
-        v-if="book.cover"
+        v-if="currentWork.cover"
         class="hero-art"
-        :style="{ backgroundImage: `url('${book.cover}')` }"
+        :style="{ backgroundImage: `url('${currentWork.cover}')` }"
         aria-hidden="true"
       />
       <div class="hero-shade" />
@@ -280,59 +394,66 @@ watch(
       </header>
 
       <div class="hero-copy">
-        <h2>{{ book.name }}</h2>
+        <h2>{{ currentWork.title }}</h2>
         <div class="hero-meta-row">
-          <span class="hero-author">{{ book.author || "未知作者" }}</span>
+          <span class="hero-author">{{ currentWork.author }}</span>
           <span
-            v-if="book.score != null"
+            v-if="currentWork.score != null"
             class="hero-score"
-            :class="scoreToneClass(book.score)"
+            :class="scoreToneClass(currentWork.score)"
           >
             <Star :size="14" fill="currentColor" />
-            <strong>{{ book.score.toFixed(1) }}</strong>
+            <strong>{{ currentWork.score.toFixed(1) }}</strong>
           </span>
         </div>
       </div>
     </section>
 
-    <section v-if="detailMode === 'novel'" class="desktop-book-workbench">
+    <section class="desktop-book-workbench">
       <section class="desktop-book-hero-layout">
         <section class="desktop-cover-card glass">
-          <div class="desktop-cover" :class="{ 'without-cover': !book.cover }">
+          <div
+            class="desktop-cover"
+            :class="{ 'without-cover': !currentWork.cover }"
+          >
             <img
-              v-if="book.cover"
-              :src="book.cover"
-              :alt="`${book.name} 封面`"
+              v-if="currentWork.cover"
+              :src="currentWork.cover"
+              :alt="`${currentWork.title} 封面`"
             />
             <BookOpen v-else :size="54" />
           </div>
         </section>
         <section class="desktop-book-overview glass">
           <div class="desktop-book-copy">
-            <h2>{{ book.name }}</h2>
-            <p class="desktop-author">{{ book.author || "未知作者" }}</p>
+            <h2>{{ currentWork.title }}</h2>
+            <p class="desktop-author">{{ currentWork.author }}</p>
             <div class="desktop-tags" aria-label="作品标签">
               <span
                 v-if="localStatusLabel"
                 class="status-tag"
-                :class="{ finished: book.isFinished }"
+                :class="{ finished: currentWork.isFinished }"
                 >{{ localStatusLabel }}</span
               >
-              <span v-if="book.typeName">分类 · {{ book.typeName }}</span>
-              <span v-for="tag in book.tags" :key="tag">{{ tag }}</span>
+              <span v-if="currentWork.typeName"
+                >分类 · {{ currentWork.typeName }}</span
+              >
+              <span v-for="tag in currentWork.tags" :key="tag">{{ tag }}</span>
             </div>
             <button
               class="desktop-description-preview"
-              :disabled="!book.description"
+              :disabled="!currentWork.description"
               @click="descriptionModalOpen = true"
             >
-              <span> {{ book.description || "暂无本地简介" }}</span>
+              <span> {{ currentWork.description || "暂无本地简介" }}</span>
             </button>
 
             <div class="desktop-primary-actions">
               <button
                 class="desktop-start-reading"
-                :disabled="!textChapterCount && !audioChapterCount"
+                :disabled="
+                  !textChapterCount && !audioChapterCount && !comicChapterCount
+                "
                 @click="startReading"
               >
                 <Play :size="18" fill="currentColor" />{{ primaryActionLabel }}
@@ -345,50 +466,56 @@ watch(
               </button>
             </div>
             <div class="desktop-secondary-actions" aria-label="本地作品操作">
-              <button v-if="book.novelId" @click="desk.continueDownload">
+              <button
+                v-if="currentWork.id"
+                @click="desk.continueDownload(selectedMediaType)"
+              >
                 <Download :size="16" />补充下载
               </button>
-              <button v-if="book.novelId" @click="desk.readOnline">
+              <button
+                v-if="currentWork.id"
+                @click="desk.readOnline(selectedMediaType)"
+              >
                 <ExternalLink :size="16" />在线查看
               </button>
               <button
-                :disabled="
-                  Boolean(exporting) ||
-                  (!textChapterCount && !audioChapterCount)
-                "
-                @click="exportModalOpen = true"
+                :disabled="Boolean(exporting) || !canExportCurrentMedia"
+                @click="exportCurrentMedia"
               >
-                <FileDown :size="16" />{{ exporting ? "正在导出" : "导出内容" }}
+                <FileDown :size="16" />{{
+                  exporting ? "正在导出" : exportActionLabel
+                }}
               </button>
             </div>
           </div>
         </section>
         <aside class="desktop-book-facts glass" aria-label="作品状态">
           <div
-            v-if="book.score != null"
             class="desktop-score-card"
-            :class="scoreToneClass(book.score)"
+            :class="scoreToneClass(currentWork.score)"
           >
             <div>
               <small>源站评分</small>
-              <strong>{{ book.score.toFixed(1) }}</strong>
+              <strong>{{
+                currentWork.score != null ? currentWork.score.toFixed(1) : "0.0"
+              }}</strong>
             </div>
             <span><Star :size="15" fill="currentColor" />仅作参考</span>
           </div>
           <div class="desktop-key-metrics" aria-label="作品核心数据">
             <div>
               <BookOpen :size="16" />
-              <strong>{{ formatMetric(book.characterCount) }}</strong>
+              <strong>{{ formatMetric(currentWork.characterCount) }}</strong>
               <span>字数</span>
             </div>
             <div>
               <Ticket :size="16" />
-              <strong>{{ formatMetric(book.ticketCount) }}</strong>
+              <strong>{{ formatMetric(currentWork.ticketCount) }}</strong>
               <span>月票</span>
             </div>
             <div>
               <Heart :size="16" fill="currentColor" />
-              <strong>{{ formatMetric(book.markCount) }}</strong>
+              <strong>{{ formatMetric(currentWork.markCount) }}</strong>
               <span>点赞</span>
             </div>
           </div>
@@ -443,7 +570,14 @@ watch(
           @click="selectDesktopContentTab('comic')"
         >
           <Images :size="23" />
-          <span><strong>漫画</strong><small>{{ comicChapterCount ? `${comicChapterCount} 个章节` : '尚无本地漫画章节' }}</small></span>
+          <span
+            ><strong>漫画</strong
+            ><small>{{
+              comicChapterCount
+                ? `${comicChapterCount} 个章节`
+                : "尚无本地漫画章节"
+            }}</small></span
+          >
           <ChevronRight :size="18" />
         </button>
         <!-- <div class="desktop-content-tabs" aria-label="已保存内容类型">
@@ -493,9 +627,23 @@ watch(
             ><Play :size="14" fill="currentColor" />
           </button>
         </div>
-        <div v-else-if="desktopContentTab === 'comic' && comicChapterCount" class="desktop-directory-list comic-directory-list">
-          <button v-for="chapter in book.comicChapters" :key="chapter.id" @click="readComicChapter(chapter.id)">
-            <span>{{ chapter.title }}</span><ChevronRight :size="15" />
+        <div
+          v-else-if="desktopContentTab === 'comic' && comicChapterCount"
+          class="desktop-directory-list comic-directory-list"
+        >
+          <button
+            v-for="chapter in book.comicChapters"
+            :key="chapter.id"
+            @click="readComicChapter(chapter.id)"
+          >
+            <img
+              v-if="chapter.cover"
+              :src="chapter.cover"
+              :alt="`${chapter.title} 首图`"
+            />
+            <Images v-else :size="18" />
+            <span>{{ chapter.title }}</span
+            ><ChevronRight :size="15" />
           </button>
         </div>
         <div v-else class="desktop-directory-empty">
@@ -527,71 +675,66 @@ watch(
               <X :size="19" />
             </button>
           </header>
-          <p>{{ book.description || "暂无本地简介" }}</p>
+          <p>{{ currentWork.description || "暂无本地简介" }}</p>
         </section>
       </div>
     </section>
 
-    <section v-if="detailMode === 'novel'" class="book-detail-sheet">
+    <section class="book-detail-sheet">
       <section class="summary-row" aria-label="作品核心数据">
         <div>
           <BookOpen :size="16" />
-          <strong>{{ formatMetric(book.characterCount) }}</strong
+          <strong>{{ formatMetric(currentWork.characterCount) }}</strong
           ><span>字数</span>
         </div>
         <div>
           <Ticket :size="16" />
-          <strong>{{ formatMetric(book.ticketCount) }}</strong
+          <strong>{{ formatMetric(currentWork.ticketCount) }}</strong
           ><span>月票</span>
         </div>
         <div>
           <Heart :size="16" fill="currentColor" />
-          <strong>{{ formatMetric(book.markCount) }}</strong
+          <strong>{{ formatMetric(currentWork.markCount) }}</strong
           ><span>点赞</span>
         </div>
       </section>
 
       <section
-        v-if="localStatusLabel || book.typeName || book.tags.length"
+        v-if="
+          localStatusLabel || currentWork.typeName || currentWork.tags.length
+        "
         class="mobile-book-tags"
         aria-label="作品标签"
       >
         <span
           v-if="localStatusLabel"
           class="status-tag"
-          :class="{ finished: book.isFinished }"
+          :class="{ finished: currentWork.isFinished }"
           >{{ localStatusLabel }}</span
         >
-        <span v-if="book.typeName" class="category-tag"
-          >分类 · {{ book.typeName }}</span
+        <span v-if="currentWork.typeName" class="category-tag"
+          >分类 · {{ currentWork.typeName }}</span
         >
-        <span v-for="tag in book.tags" :key="tag">{{ tag }}</span>
+        <span v-for="tag in currentWork.tags" :key="tag">{{ tag }}</span>
       </section>
 
       <section class="format-switches" aria-label="内容类型">
         <button
-          class="format-switch audio-switch glass"
-          :disabled="!audioChapterCount"
-          @click="openAudioDetail"
+          v-for="media in mobileSwitchMediaTypes"
+          :key="media"
+          class="format-switch glass"
+          :class="`${media}-switch`"
+          :disabled="!hasCachedMedia(media)"
+          @click="selectMobileMedia(media)"
         >
-          <span class="format-icon"><Disc3 :size="23" /></span>
+          <span class="format-icon">
+            <BookOpen v-if="media === 'novel'" :size="23" />
+            <Disc3 v-else-if="media === 'audio'" :size="23" />
+            <Images v-else :size="23" />
+          </span>
           <span class="format-copy"
-            ><strong>有声小说</strong
-            ><small>{{
-              audioChapterCount
-                ? `${audioChapterCount} 条本地音轨`
-                : "暂无本地音轨"
-            }}</small></span
-          >
-          <ChevronRight :size="19" />
-        </button>
-        <button
-          class="format-switch comic-switch glass"
-          @click="openComicDetail"
-        >
-          <span class="format-icon"><Images :size="23" /></span>
-          <span class="format-copy"
-            ><strong>漫画改编</strong><small>探索作品的视觉篇章</small></span
+            ><strong>{{ mediaTitle(media) }}</strong
+            ><small>{{ mediaDescription(media) }}</small></span
           >
           <ChevronRight :size="19" />
         </button>
@@ -603,10 +746,10 @@ watch(
           <h3 id="book-intro-title">内容简介</h3>
         </div>
         <p :class="{ expanded: descriptionExpanded }">
-          {{ book.description || "暂无本地简介" }}
+          {{ currentWork.description || "暂无本地简介" }}
         </p>
         <button
-          v-if="book.description && book.description.length > 104"
+          v-if="currentWork.description && currentWork.description.length > 104"
           class="expand-description"
           @click="descriptionExpanded = !descriptionExpanded"
         >
@@ -617,9 +760,13 @@ watch(
       <button class="mobile-latest-chapter" @click="openDirectory()">
         <span class="latest-badge">最近</span>
         <span class="latest-copy">
-          <strong>{{ book.latestChapterTitle || "暂无最新章节" }}</strong>
+          <strong>{{
+            currentWork.latestChapterTitle || "暂无最新章节"
+          }}</strong>
           <small>{{
-            formatSourceDate(book.latestChapterTime || book.lastUpdateTime)
+            formatSourceDate(
+              currentWork.latestChapterTime || currentWork.lastUpdateTime,
+            )
           }}</small>
         </span>
         <ChevronRight :size="17" />
@@ -629,105 +776,57 @@ watch(
         <button @click="openDirectory()">
           <ListTree :size="17" />已下载目录
         </button>
-        <button v-if="book.novelId" @click="desk.readOnline">
+        <button
+          v-if="currentWork.id"
+          @click="desk.readOnline(selectedMediaType)"
+        >
           <ExternalLink :size="17" />在线查看
         </button>
-        <button v-if="book.novelId" @click="desk.continueDownload">
+        <button
+          v-if="currentWork.id"
+          @click="desk.continueDownload(selectedMediaType)"
+        >
           <Download :size="17" />补充下载
         </button>
         <button
-          :disabled="
-            Boolean(exporting) || (!textChapterCount && !audioChapterCount)
-          "
-          @click="exportModalOpen = true"
+          :disabled="Boolean(exporting) || !canExportCurrentMedia"
+          @click="exportCurrentMedia"
         >
-          <FileDown :size="17" />{{ exporting ? "正在导出" : "导出内容" }}
+          <FileDown :size="17" />{{
+            exporting ? "正在导出" : exportActionLabel
+          }}
         </button>
       </section>
     </section>
 
-    <section v-else class="comic-experience">
-      <div class="comic-backdrop" aria-hidden="true">
-        <img v-if="book.cover" :src="book.cover" alt="" />
-      </div>
-      <header class="detail-navigation comic-navigation">
-        <button
-          class="nav-circle"
-          title="返回小说详情"
-          @click="detailMode = 'novel'"
-        >
-          <ChevronLeft :size="22" />
-        </button>
-        <span class="local-label"><Images :size="14" />漫画改编</span>
-      </header>
-      <main class="comic-detail-sheet">
-        <section class="comic-showcase">
-          <div class="comic-cover-frame">
-            <img
-              v-if="book.cover"
-              :src="book.cover"
-              :alt="`${book.name} 漫画封面`"
-            />
-            <Images v-else :size="52" />
-          </div>
-          <div class="comic-showcase-copy">
-            <span class="comic-edition-label"
-              ><Images :size="14" />漫画改编</span
-            >
-            <h3>{{ book.name }}</h3>
-            <p>{{ book.author || "未知作者" }}</p>
-          </div>
-        </section>
-        <section class="comic-copy">
-          <div class="comic-copy-heading">
-            <span>COMIC ADAPTATION</span>
-            <strong>作品设定</strong>
-          </div>
-          <p>{{ book.description || "暂无本地简介" }}</p>
-        </section>
-        <section class="comic-unavailable">
-          <span class="comic-unavailable-icon"><Images :size="29" /></span>
-          <div>
-            <strong>{{ comicChapterCount ? `已下载 ${comicChapterCount} 个漫画章节` : '漫画章节暂未收录' }}</strong>
-            <p>{{ comicChapterCount ? '选择章节开始阅读。' : '本地尚未下载漫画章节。' }}</p>
-          </div>
-          <button v-if="comicChapterCount" @click="readComicChapter(book.comicChapters[0].id)"><Play :size="17" />开始阅读</button>
-          <button @click="detailMode = 'novel'">
-            <BookOpen :size="17" />返回小说详情
-          </button>
-        </section>
-      </main>
-    </section>
-
     <nav
-      v-if="detailMode === 'novel'"
       class="mobile-reading-bar"
-      :class="{ 'without-download': !book.novelId }"
+      :class="{ 'without-download': !currentWork.id }"
       aria-label="阅读操作"
     >
       <button class="directory-action" @click="openDirectory()">
         <ListTree :size="21" /><span>目录</span>
       </button>
       <button
-        v-if="book.novelId"
+        v-if="currentWork.id"
         class="directory-action"
-        @click="desk.continueDownload"
+        @click="desk.continueDownload(selectedMediaType)"
       >
         <Download :size="21" /><span>下载</span>
       </button>
       <button
         class="directory-action"
-        :disabled="
-          Boolean(exporting) || (!textChapterCount && !audioChapterCount)
-        "
-        title="导出本地内容"
-        @click="exportModalOpen = true"
+        :disabled="Boolean(exporting) || !canExportCurrentMedia"
+        :title="exportActionLabel"
+        @click="exportCurrentMedia"
       >
-        <FileDown :size="21" /><span>导出</span>
+        <FileDown :size="21" /><span>{{ exportActionLabel }}</span>
       </button>
       <button
         class="primary-action"
-        :disabled="!textChapterCount && !audioChapterCount"
+        :disabled="
+          !textChapterCount && !audioChapterCount && !comicChapterCount
+        "
         @click="startReading"
       >
         <Play :size="17" fill="currentColor" />{{ primaryActionLabel }}
@@ -755,23 +854,6 @@ watch(
             <X :size="20" />
           </button>
         </header>
-        <div class="drawer-tabs" aria-label="目录类型">
-          <button
-            :class="{ active: chapterMode === 'text' }"
-            :disabled="!textChapterCount"
-            @click="chapterMode = 'text'"
-          >
-            <BookOpen :size="15" />文字 {{ textChapterCount }}
-          </button>
-          <button
-            :class="{ active: chapterMode === 'audio' }"
-            :disabled="!audioChapterCount"
-            @click="chapterMode = 'audio'"
-          >
-            <Headphones :size="15" />有声 {{ audioChapterCount }}
-          </button>
-          <button :class="{ active: chapterMode === 'comic' }" :disabled="!comicChapterCount" @click="chapterMode = 'comic'"><Images :size="15" />漫画 {{ comicChapterCount }}</button>
-        </div>
         <div
           v-if="chapterMode === 'text' && textChapterCount"
           class="drawer-list"
@@ -807,8 +889,25 @@ watch(
             ><Headphones :size="16" />
           </button>
         </div>
-        <div v-else-if="chapterMode === 'comic' && comicChapterCount" class="drawer-list">
-          <button v-for="chapter in book.comicChapters" :key="chapter.id" @click="readComicChapter(chapter.id)"><strong>{{ chapter.title }}</strong><ChevronRight :size="16" /></button>
+        <div
+          v-else-if="chapterMode === 'comic' && comicChapterCount"
+          class="drawer-list"
+        >
+          <button
+            v-for="chapter in book.comicChapters"
+            :key="chapter.id"
+            class="comic-directory-row"
+            @click="readComicChapter(chapter.id)"
+          >
+            <img
+              v-if="chapter.cover"
+              :src="chapter.cover"
+              :alt="`${chapter.title} 首图`"
+            />
+            <Images v-else :size="21" />
+            <strong>{{ chapter.title }}</strong
+            ><ChevronRight :size="16" />
+          </button>
         </div>
         <div v-else class="drawer-empty">
           <ListTree :size="27" />暂无已下载内容
@@ -818,16 +917,13 @@ watch(
   </section>
   <ExportModal
     :open="exportModalOpen"
+    :media="selectedMediaType"
     :text-chapter-count="textChapterCount"
     :audio-chapter-count="audioChapterCount"
+    :comic-chapter-count="comicChapterCount"
     :exporting="exporting"
     @close="exportModalOpen = false"
-    @export="
-      (format) => {
-        exportModalOpen = false;
-        desk.exportBook(format);
-      }
-    "
+    @export="exportFormat"
   />
 </template>
 
@@ -2033,6 +2129,22 @@ watch(
     color: #8b6826;
   }
 
+  .novel-switch {
+    color: #245e7d;
+    background: rgba(167, 215, 239, 0.52);
+  }
+
+  .novel-switch .format-icon {
+    color: #236c91;
+    background: rgba(239, 250, 255, 0.72);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.78);
+  }
+
+  .novel-switch .format-copy small,
+  .novel-switch > svg {
+    color: #4b7f99;
+  }
+
   .comic-switch {
     color: #433860;
     background: rgba(184, 162, 221, 0.42);
@@ -2129,6 +2241,7 @@ watch(
     color: #fff;
     background: #e86e4c;
     font-size: 10px;
+    white-space: nowrap;
   }
 
   .latest-copy {
@@ -2661,6 +2774,107 @@ watch(
   flex: 0 0 38px;
   color: #ad9f8d;
   font: 11px monospace;
+}
+
+.comic-directory-list button,
+.comic-directory-row {
+  min-height: 62px;
+}
+
+.comic-directory-list img,
+.comic-directory-row img {
+  width: 64px;
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.comic-directory-row {
+  display: flex;
+  width: 100%;
+  min-height: 66px;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 20px;
+  border: 0;
+  border-top: 1px solid #f0ebdf;
+  color: #504a41;
+  background: transparent;
+  text-align: left;
+}
+
+.comic-directory-row strong {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comic-directory-row > svg:last-child {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: #a99f90;
+}
+
+.comic-local-directory {
+  display: flex;
+  width: min(100%, 900px);
+  margin: 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  flex-direction: column;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.comic-local-directory > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 17px;
+  color: #fff;
+}
+
+.comic-local-directory header small {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+}
+
+.comic-local-directory button {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  background: transparent;
+  text-align: left;
+}
+
+.comic-local-directory button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.comic-local-directory img {
+  width: 46px;
+  height: 56px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.comic-local-directory button > strong {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drawer-empty {

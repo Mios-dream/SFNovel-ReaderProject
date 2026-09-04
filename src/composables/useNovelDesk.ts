@@ -64,20 +64,20 @@ export function useNovelDesk() {
     if (view === "bookshelf") void bookshelf.refreshBookshelf();
   }
 
-  function continueDownload() {
+  function continueDownload(mode: "novel" | "audio" | "comic") {
     const book = library.localBook.value;
-    if (!book?.novelId) return;
+    const work = book?.[mode];
+    if (!work) return;
     void chapterPicker.openChapterPicker(
       {
-        novelId: book.novelId,
-        novelName: book.name,
-        authorName: book.author,
-        novelCover: book.cover || "",
+        novelId: mode === "audio" ? work.catalogId || work.id : work.id,
+        mediaId: mode === "audio" ? work.id : undefined,
+        novelName: work.title,
+        authorName: work.author,
+        novelCover: work.cover || "",
         lastUpdateTime: "",
       },
-      book.comicChapters.length && !book.chapterVolumes.length
-        ? "comic"
-        : "text",
+      mode === "novel" ? "text" : mode,
     );
   }
 

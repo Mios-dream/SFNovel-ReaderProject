@@ -1,3 +1,5 @@
+use std::path::Path;
+
 /// A renderer-safe summary of one locally stored book.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,7 +25,29 @@ struct LibraryFormats {
 struct LocalBookDetail {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    novel_id: Option<i64>,
+    novel: Option<LocalWorkMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio: Option<LocalWorkMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    comic: Option<LocalWorkMetadata>,
+    image_directory: String,
+    audio_tracks: Vec<LocalAudioTrack>,
+    epub_href: Option<String>,
+    chapter_volumes: Vec<LocalChapterVolume>,
+    comic_chapters: Vec<LocalComicChapter>,
+}
+
+/// Metadata for exactly one locally saved media type. Each source endpoint owns
+/// its own identity, cover, and descriptive fields.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalWorkMetadata {
+    id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    catalog_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    online_path: Option<String>,
+    title: String,
     author: String,
     description: String,
     type_name: Option<String>,
@@ -42,11 +66,6 @@ struct LocalBookDetail {
     latest_chapter_time: Option<String>,
     last_update_time: Option<String>,
     cover: Option<String>,
-    image_directory: String,
-    audio_tracks: Vec<LocalAudioTrack>,
-    epub_href: Option<String>,
-    chapter_volumes: Vec<LocalChapterVolume>,
-    comic_chapters: Vec<LocalComicChapter>,
 }
 
 /// A locally playable audio track. The renderer converts the validated absolute
@@ -75,8 +94,28 @@ struct LocalChapterSummary {
 #[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct StoredBookMetadata {
-    novel_id: Option<i64>,
-    comic_id: Option<i64>,
+    #[serde(default)]
+    novel: Option<StoredWorkMetadata>,
+    #[serde(default)]
+    audio: Option<StoredWorkMetadata>,
+    #[serde(default)]
+    comic: Option<StoredWorkMetadata>,
+    #[serde(default)]
+    downloaded_text_chapter_ids: Option<Vec<i64>>,
+    #[serde(default)]
+    downloaded_audio_chapter_ids: Option<Vec<i64>>,
+    #[serde(default)]
+    downloaded_comic_chapter_ids: Option<Vec<i64>>,
+}
+
+/// Persisted source metadata for one media type. It intentionally has no
+/// cross-media fallback fields: a comic ID must never be used as a novel ID.
+#[derive(Debug, Deserialize, Serialize, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+struct StoredWorkMetadata {
+    id: Option<i64>,
+    catalog_id: Option<i64>,
+    online_path: Option<String>,
     title: Option<String>,
     author: Option<String>,
     description: Option<String>,
@@ -96,9 +135,6 @@ struct StoredBookMetadata {
     latest_chapter_title: Option<String>,
     latest_chapter_time: Option<String>,
     last_update_time: Option<String>,
-    downloaded_text_chapter_ids: Option<Vec<i64>>,
-    downloaded_audio_chapter_ids: Option<Vec<i64>>,
-    downloaded_comic_chapter_ids: Option<Vec<i64>>,
 }
 
 /// One persisted text chapter from `.novel-flow-chapters.json`.
@@ -137,6 +173,8 @@ struct RequestPolicy {
 struct LocalComicChapter {
     id: i64,
     title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cover: Option<String>,
     pages: Vec<String>,
 }
 
@@ -639,19 +677,11 @@ fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBook>, String>
                 .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|duration| duration.as_secs().to_string())
                 .unwrap_or_else(|| "0".to_string()),
-            cover: entry
-                .path()
-                .join("imgs")
-                .join("cover.jpeg")
-                .is_file()
-                .then(|| {
-                    entry
-                        .path()
-                        .join("imgs")
-                        .join("cover.jpeg")
-                        .to_string_lossy()
-                        .into_owned()
-                }),
+            cover: ["novel-cover.jpeg", "audio-cover.jpeg", "comic-cover.jpeg"]
+                .into_iter()
+                .map(|file_name| entry.path().join("imgs").join(file_name))
+                .find(|cover| cover.is_file())
+                .map(|cover| cover.to_string_lossy().into_owned()),
             formats: LibraryFormats {
                 text,
                 audio,
@@ -799,17 +829,6 @@ fn get_local_book(app: tauri::AppHandle, name: String) -> Result<LocalBookDetail
                 title: chapter.title,
             });
     }
-    let cover = if directory.join("imgs").join("cover.jpeg").is_file() {
-        Some(
-            directory
-                .join("imgs")
-                .join("cover.jpeg")
-                .to_string_lossy()
-                .into_owned(),
-        )
-    } else {
-        None
-    };
     let epub_name = format!("{}.epub", name);
     let epub_href = directory.join(&epub_name).is_file().then(|| {
         directory.join(&epub_name).to_string_lossy().into_owned()
@@ -818,11 +837,36 @@ fn get_local_book(app: tauri::AppHandle, name: String) -> Result<LocalBookDetail
     let comic_chapters = read_local_comic_chapters(&directory)?;
     Ok(LocalBookDetail {
         name,
-        novel_id: metadata.novel_id.or(metadata.comic_id),
+        novel: local_work_metadata(metadata.novel, &directory, "novel-cover.jpeg"),
+        audio: local_work_metadata(metadata.audio, &directory, "audio-cover.jpeg"),
+        comic: local_work_metadata(metadata.comic, &directory, "comic-cover.jpeg"),
+        image_directory: directory.join("imgs").to_string_lossy().into_owned(),
+        audio_tracks,
+        epub_href,
+        chapter_volumes,
+        comic_chapters,
+    })
+}
+
+fn local_work_metadata(
+    metadata: Option<StoredWorkMetadata>,
+    directory: &PathBuf,
+    cover_file: &str,
+) -> Option<LocalWorkMetadata> {
+    let metadata = metadata?;
+    let id = metadata.id?;
+    let cover = directory
+        .join("imgs")
+        .join(cover_file)
+        .is_file()
+        .then(|| directory.join("imgs").join(cover_file).to_string_lossy().into_owned());
+    Some(LocalWorkMetadata {
+        id,
+        catalog_id: metadata.catalog_id,
+        online_path: metadata.online_path,
+        title: metadata.title.unwrap_or_else(|| "未命名作品".to_string()),
         author: metadata.author.unwrap_or_else(|| "未知作者".to_string()),
-        description: metadata
-            .description
-            .unwrap_or_else(|| "暂无简介".to_string()),
+        description: metadata.description.unwrap_or_default(),
         type_name: metadata.type_name,
         tags: metadata.tags,
         is_finished: metadata.is_finished,
@@ -839,11 +883,6 @@ fn get_local_book(app: tauri::AppHandle, name: String) -> Result<LocalBookDetail
         latest_chapter_time: metadata.latest_chapter_time,
         last_update_time: metadata.last_update_time,
         cover,
-        image_directory: directory.join("imgs").to_string_lossy().into_owned(),
-        audio_tracks,
-        epub_href,
-        chapter_volumes,
-        comic_chapters,
     })
 }
 
@@ -875,7 +914,16 @@ fn read_local_comic_chapters(directory: &PathBuf) -> Result<Vec<LocalComicChapte
             .collect::<Vec<_>>();
         pages.sort();
         if !pages.is_empty() {
-            chapters.push(LocalComicChapter { id, title, pages: pages.into_iter().map(|path| path.to_string_lossy().into_owned()).collect() });
+            let pages = pages
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            chapters.push(LocalComicChapter {
+                id,
+                title,
+                cover: pages.first().cloned(),
+                pages,
+            });
         }
     }
     chapters.sort_by_key(|chapter| chapter.id);
@@ -1121,17 +1169,17 @@ fn write_epub_export(
         .map_err(|error| format!("无法完成 EPUB：{error}"))
 }
 
-/// Generates an application-owned EPUB, Markdown ZIP, TXT, or audio ZIP export from one
+/// Generates an application-owned EPUB, Markdown ZIP, TXT, audio ZIP, or comic ZIP export from one
 /// validated local book at a user-selected destination.
 ///
 /// # Arguments
 /// * `app` - Application handle used to resolve the selected book.
 /// * `name` - Exact book directory name previously returned by the library.
-/// * `format` - One of `epub`, `markdown`, `txt`, or `audio`.
+/// * `format` - One of `epub`, `markdown`, `txt`, `audio`, or `comic`.
 /// * `output_path` - Destination chosen through the platform save dialog.
 ///
 /// # Errors
-/// Returns an error for unsupported formats, missing text chapters, or export failures.
+/// Returns an error for unsupported formats, missing local resources, or export failures.
 #[tauri::command]
 async fn export_local_book(
     app: tauri::AppHandle,
@@ -1142,7 +1190,7 @@ async fn export_local_book(
     if !ensure_external_storage_access(app.clone()).await? {
         return Err("请在系统设置中允许本应用管理所有文件，然后重试导出".to_string());
     }
-    if !matches!(format.as_str(), "epub" | "markdown" | "txt" | "audio") {
+    if !matches!(format.as_str(), "epub" | "markdown" | "txt" | "audio" | "comic") {
         return Err("不支持的导出格式".to_string());
     }
     let directory = local_book_directory(&app, &name)?;
@@ -1152,25 +1200,47 @@ async fn export_local_book(
     let mut chapters: Vec<_> = store.chapters.into_values().collect();
     chapters.sort_by_key(|chapter| (chapter.volume_index, chapter.chapter_index, chapter.id));
     let audio_directory = directory.join("audio");
+    let comic_chapters = if format == "comic" {
+        read_local_comic_chapters(&directory)?
+    } else {
+        Vec::new()
+    };
     if format == "audio" {
         if !audio_directory.join("有声目录.m3u8").is_file() {
             return Err("这本书没有可打包的有声章节".to_string());
         }
+    } else if format == "comic" {
+        if comic_chapters.is_empty() {
+            return Err("这本书没有可导出的已下载漫画章节".to_string());
+        }
     } else if chapters.is_empty() {
         return Err("这本书没有可导出的已下载文字章节".to_string());
     }
-    let title = metadata.title.as_deref().unwrap_or(&name);
-    let author = metadata.author.as_deref().unwrap_or("未知作者");
-    let description = metadata.description.as_deref().unwrap_or("");
+    let export_metadata = if format == "audio" {
+        metadata.audio.as_ref()
+    } else if format == "comic" {
+        metadata.comic.as_ref()
+    } else {
+        metadata.novel.as_ref()
+    };
+    let title = export_metadata
+        .and_then(|work| work.title.as_deref())
+        .unwrap_or(&name);
+    let author = export_metadata
+        .and_then(|work| work.author.as_deref())
+        .unwrap_or("未知作者");
+    let description = export_metadata
+        .and_then(|work| work.description.as_deref())
+        .unwrap_or("");
     let file_name = match format.as_str() {
         "epub" => format!("{name}.epub"),
-        "markdown" => format!("{name}-Markdown.zip"),
         "audio" => format!("{name}-有声.zip"),
+        "comic" => format!("{name}-漫画.zip"),
         _ => format!("{name}.txt"),
     };
     let expected_extension = match format.as_str() {
         "epub" => "epub",
-        "markdown" | "audio" => "zip",
+        "markdown" | "audio" | "comic" => "zip",
         _ => "txt",
     };
     let requested_path = output_path.trim();
@@ -1248,7 +1318,49 @@ async fn export_local_book(
                 .finish()
                 .map_err(|error| format!("无法完成有声导出：{error}"))?;
         }
-        _ => {
+        "comic" => {
+            let file = File::create(&target)
+                .map_err(|error| format!("无法创建漫画导出：{error}"))?;
+            let mut archive = ZipWriter::new(file);
+            let options =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            let mut catalog = format!("{title}\n{author}\n\n{description}\n\n");
+            for (chapter_index, chapter) in comic_chapters.iter().enumerate() {
+                catalog.push_str(&format!("{:03}. {}\n", chapter_index + 1, chapter.title));
+                for (page_index, page) in chapter.pages.iter().enumerate() {
+                    let extension = Path::new(page)
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or("jpg")
+                        .to_ascii_lowercase();
+                    archive
+                        .start_file(
+                            format!(
+                                "comic/{:03}/{:03}.{extension}",
+                                chapter_index + 1,
+                                page_index + 1
+                            ),
+                            options,
+                        )
+                        .map_err(|error| format!("无法创建漫画归档条目：{error}"))?;
+                    let bytes = fs::read(page)
+                        .map_err(|error| format!("无法读取漫画页面：{error}"))?;
+                    archive
+                        .write_all(&bytes)
+                        .map_err(|error| format!("无法写入漫画导出：{error}"))?;
+                }
+            }
+            archive
+                .start_file("目录.txt", options)
+                .map_err(|error| format!("无法创建漫画目录：{error}"))?;
+            archive
+                .write_all(catalog.as_bytes())
+                .map_err(|error| format!("无法写入漫画目录：{error}"))?;
+            archive
+                .finish()
+                .map_err(|error| format!("无法完成漫画导出：{error}"))?;
+        }
+        "txt" => {
             let mut text = format!("{title}\n{author}\n\n{description}\n\n");
             for chapter in &chapters {
                 text.push_str(&format!(
@@ -1261,6 +1373,7 @@ async fn export_local_book(
             fs::write(&target, format!("\u{feff}{text}"))
                 .map_err(|error| format!("无法写入 TXT 导出：{error}"))?;
         }
+        _ => return Err("不支持的导出格式".to_string()),
     }
     if is_document_uri {
         #[cfg(target_os = "android")]
@@ -1299,7 +1412,9 @@ async fn export_local_book(
 /// # Errors
 /// Returns an error if an existing metadata file cannot be decoded.
 fn metadata_novel_id(directory: &PathBuf) -> Result<Option<i64>, String> {
-    Ok(read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?.novel_id)
+    Ok(read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?
+        .novel
+        .and_then(|work| work.id))
 }
 
 /// Deletes one local book directory after validating it remains below the app library root.

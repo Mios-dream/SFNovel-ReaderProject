@@ -41,6 +41,8 @@ async fn clear_sf_api_nonce() {
 #[serde(rename_all = "camelCase")]
 struct SearchNovel {
     novel_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    media_id: Option<i64>,
     novel_name: String,
     author_name: String,
     novel_cover: String,
@@ -122,6 +124,8 @@ struct NativeJobState {
 struct NativeJobSpec {
     kind: String,
     novel_id: i64,
+    #[serde(default)]
+    source_id: Option<i64>,
     title: String,
     chapter_ids: Vec<i64>,
 }
@@ -1258,6 +1262,13 @@ async fn search_novels(query: String) -> Result<Vec<SearchNovel>, String> {
                 .to_string();
             results.push(SearchNovel {
                 novel_id,
+                media_id: if kind == "audio" {
+                    item.get("albumId").and_then(Value::as_i64)
+                } else if kind == "comic" {
+                    item.get("comicId").and_then(Value::as_i64)
+                } else {
+                    None
+                },
                 novel_name: name,
                 author_name: item
                     .get("authorName")
@@ -1574,6 +1585,13 @@ async fn get_bookshelf(
                 };
                 items.push(SearchNovel {
                     novel_id,
+                    media_id: if kind == "audio" {
+                        record.get("albumId").and_then(Value::as_i64)
+                    } else if kind == "comic" {
+                        record.get("comicId").and_then(Value::as_i64)
+                    } else {
+                        None
+                    },
                     novel_name: record
                         .get("novelName")
                         .or_else(|| record.get("comicName"))

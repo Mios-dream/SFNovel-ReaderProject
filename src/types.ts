@@ -10,6 +10,8 @@ export type ChapterMode = "text" | "audio" | "comic";
 
 export type Novel = {
   novelId: number;
+  /** Source-specific ID: an album ID for audio and comic ID for comics. */
+  mediaId?: number;
   novelName: string;
   authorName: string;
   novelCover: string;
@@ -73,11 +75,18 @@ export type LocalChapterVolume = {
   volume: string;
   chapters: Array<Omit<LocalChapter, "volume">>;
 };
-export type LocalComicChapter = { id: number; title: string; pages: string[] };
+export type LocalComicChapter = {
+  id: number;
+  title: string;
+  cover?: string;
+  pages: string[];
+};
 export type LocalAudioTrack = { title: string; href: string };
-export type LocalBookDetail = {
-  name: string;
-  novelId?: number;
+export type LocalWorkMetadata = {
+  id: number;
+  catalogId?: number;
+  onlinePath?: string;
+  title: string;
   author: string;
   description: string;
   typeName?: string;
@@ -96,6 +105,12 @@ export type LocalBookDetail = {
   latestChapterTime?: string;
   lastUpdateTime?: string;
   cover?: string;
+};
+export type LocalBookDetail = {
+  name: string;
+  novel?: LocalWorkMetadata;
+  audio?: LocalWorkMetadata;
+  comic?: LocalWorkMetadata;
   imageDirectory: string;
   audioTracks: LocalAudioTrack[];
   epubHref?: string;

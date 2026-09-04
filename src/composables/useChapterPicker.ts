@@ -130,6 +130,7 @@ export function useChapterPicker({
         : chapterMode.value === "audio"
           ? await invoke<Job>("create_audio_download", {
               novelId: novel.novelId,
+              albumId: novel.mediaId,
               title: novel.novelName,
               chapterIds: selectedChapterIds.value,
             })

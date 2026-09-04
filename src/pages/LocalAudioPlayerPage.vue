@@ -31,9 +31,11 @@ function requireDesk() {
 
 const desk = requireDesk();
 const router = useRouter();
-const bookName = computed(() => desk.localBook.value?.name || "本地有声书");
-const author = computed(() => desk.localBook.value?.author || "");
-const cover = computed(() => desk.localBook.value?.cover);
+const bookName = computed(
+  () => desk.localBook.value?.audio?.title || desk.localBook.value?.name || "本地有声书",
+);
+const author = computed(() => desk.localBook.value?.audio?.author || "");
+const cover = computed(() => desk.localBook.value?.audio?.cover);
 const tracks = computed(() => desk.localBook.value?.audioTracks || []);
 const initialTrackIndex = computed(() => desk.localAudioTrackIndex.value);
 

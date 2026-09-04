@@ -162,18 +162,19 @@ async fn run_text_download(
         fs::create_dir_all(&directory).map_err(|error| format!("无法创建本地书籍目录：{error}"))?;
         let mut metadata =
             read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?;
-        metadata.novel_id = Some(novel_id);
-        metadata.title = Some(title.clone());
-        metadata
+        let novel_metadata = metadata.novel.get_or_insert_with(Default::default);
+        novel_metadata.id = Some(novel_id);
+        novel_metadata.title = Some(title.clone());
+        novel_metadata
             .author
             .get_or_insert_with(|| "未知作者".to_string());
-        metadata
+        novel_metadata
             .description
             .get_or_insert_with(|| "暂无简介".to_string());
         let _ = enrich_local_book(
             &client,
             &directory,
-            &mut metadata,
+            novel_metadata,
             novel_id,
             cookie.as_deref(),
         )
@@ -373,7 +374,7 @@ fn safe_audio_name(value: &str) -> String {
 async fn enrich_local_book(
     client: &SfacgHttpClient,
     directory: &std::path::PathBuf,
-    metadata: &mut StoredBookMetadata,
+    metadata: &mut StoredWorkMetadata,
     novel_id: i64,
     cookie: Option<&str>,
 ) -> Result<(), String> {
@@ -382,7 +383,7 @@ async fn enrich_local_book(
             &format!("/novels/{novel_id}"),
             &[(
                 "expand",
-                "intro,typeName,sysTags,chapterCount,pointCount,fav,ticket,latestchapter".to_string(),
+                "intro,typeName,sysTags,chapterCount,pointCount,fav,ticket,latestchapter,bigNovelCover".to_string(),
             )],
             cookie,
         )
@@ -469,14 +470,16 @@ async fn enrich_local_book(
         .filter(|value| !value.trim().is_empty())
         .map(ToString::to_string);
     let Some(cover_url) = detail
-        .get("novelCover")
+        .get("expand")
+        .and_then(|expand| expand.get("bigNovelCover"))
         .and_then(Value::as_str)
+        .or_else(|| detail.get("novelCover").and_then(Value::as_str))
         .filter(|value| !value.trim().is_empty())
         .map(ToString::to_string)
     else {
         return Ok(());
     };
-    let cover = directory.join("imgs").join("cover.jpeg");
+    let cover = directory.join("imgs").join("novel-cover.jpeg");
     if cover.is_file() {
         return Ok(());
     }
@@ -506,11 +509,173 @@ async fn enrich_local_book(
     Ok(())
 }
 
+/// Fetches the audio catalog payload itself rather than reusing novel details.
+/// The audio service is the source of truth for an album's name, author,
+/// description, and artwork when it exposes those fields.
+async fn enrich_local_audio_book(
+    client: &SfacgHttpClient,
+    directory: &std::path::PathBuf,
+    metadata: &mut StoredWorkMetadata,
+    novel_id: i64,
+    album_id: Option<i64>,
+    cookie: &str,
+) -> Result<(), String> {
+    if let Some(album_id) = album_id {
+        let detail = client
+            .get_data_with_cookie(
+                &format!("/albums/{album_id}"),
+                &[("expand", "intro,typeName,sysTags,latestchapter".to_string())],
+                Some(cookie),
+            )
+            .await?;
+        let text = |keys: &[&str]| {
+            keys.iter().find_map(|key| {
+                detail
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .map(ToString::to_string)
+                    .or_else(|| {
+                        detail
+                            .get("expand")
+                            .and_then(|expand| expand.get(*key))
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.trim().is_empty())
+                            .map(ToString::to_string)
+                    })
+            })
+        };
+        metadata.id = Some(album_id);
+        metadata.catalog_id = Some(novel_id);
+        metadata.title = text(&["name", "albumName", "novelName"]).or_else(|| metadata.title.clone());
+        metadata.author = text(&["authorName", "author", "anchorName"]).or_else(|| metadata.author.clone());
+        metadata.description = text(&["intro", "description", "content"]).or_else(|| metadata.description.clone());
+        metadata.type_name = text(&["typeName", "categoryName"]).or_else(|| metadata.type_name.clone());
+        metadata.last_update_time = text(&["lastUpdateTime", "updateTime"]).or_else(|| metadata.last_update_time.clone());
+        metadata.is_finished = detail.get("isFinished").or_else(|| detail.get("isFinish")).and_then(Value::as_bool).or(metadata.is_finished);
+        metadata.view_count = detail.get("visitTimes").or_else(|| detail.get("viewTimes")).and_then(Value::as_i64).or(metadata.view_count);
+        if let Some(tags) = detail.get("sysTags").or_else(|| detail.get("tags")).or_else(|| detail.get("expand").and_then(|expand| expand.get("sysTags"))).and_then(Value::as_array) {
+            metadata.tags = tags.iter().filter_map(|tag| tag.as_str().or_else(|| tag.get("tagName").and_then(Value::as_str)).map(str::trim).filter(|value| !value.is_empty()).map(ToString::to_string)).take(8).collect();
+        }
+        let cover_url = if let Some(cover_url) = text(&["coverBig"]) {
+            cover_url
+        } else if let Some(cover_url) = fetch_novel_big_cover(client, novel_id, cookie).await.ok().flatten() {
+            cover_url
+        } else if let Some(cover_url) = text(&["coverMedium", "coverSmall", "albumCover", "cover"]) {
+            cover_url
+        } else {
+            return Ok(());
+        };
+        return save_audio_cover(client, directory, &cover_url, cookie).await;
+    }
+    let response = client
+        .client
+        .get("https://i.sfacg.com/ajax/ashx/Common.ashx")
+        .query(&[("op", "getAudioInfo"), ("nid", &novel_id.to_string())])
+        .header(reqwest::header::COOKIE, cookie)
+        .header("Accept", "application/json, text/javascript, */*; q=0.01")
+        .header("X-Requested-With", "XMLHttpRequest")
+        .header(reqwest::header::REFERER, "https://i.sfacg.com/consume/book/")
+        .send()
+        .await
+        .map_err(|error| format!("无法连接 SF 有声信息接口：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("SF 有声信息接口被拒绝：{error}"))?
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("SF 有声信息格式无效：{error}"))?;
+    if response.get("status").and_then(Value::as_i64) != Some(200) {
+        return Err("SF 有声信息接口未返回可用内容".to_string());
+    }
+    let data = response
+        .get("data")
+        .ok_or_else(|| "SF 有声信息接口未返回详情".to_string())?;
+    let text = |keys: &[&str]| {
+        keys.iter().find_map(|key| {
+            data.get(*key)
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(ToString::to_string)
+        })
+    };
+    metadata.id = Some(novel_id);
+    metadata.catalog_id = Some(novel_id);
+    metadata.title = text(&["AlbumName", "NovelName", "Title"]).or_else(|| metadata.title.clone());
+    metadata.author = text(&["AuthorName", "Author", "AnchorName"]).or_else(|| metadata.author.clone());
+    metadata.description = text(&["Intro", "Description", "Content"]).or_else(|| metadata.description.clone());
+    metadata.type_name = text(&["TypeName", "CategoryName"]).or_else(|| metadata.type_name.clone());
+    metadata.last_update_time = text(&["LastUpdateTime", "UpdateTime"]).or_else(|| metadata.last_update_time.clone());
+    let cover_url = if let Some(cover_url) = fetch_novel_big_cover(client, novel_id, cookie).await.ok().flatten() {
+        cover_url
+    } else if let Some(cover_url) = text(&["CoverBig", "AlbumCover", "CoverMedium", "CoverSmall", "Cover"]) {
+        cover_url
+    } else {
+        return Ok(());
+    };
+    save_audio_cover(client, directory, &cover_url, cookie).await
+}
+
+/// Resolves the un-cropped large cover used by the mobile work header. The
+/// audio player endpoint may expose a circular/trimmed `NovelCover`, so it is
+/// deliberately excluded from this lookup.
+async fn fetch_novel_big_cover(
+    client: &SfacgHttpClient,
+    novel_id: i64,
+    cookie: &str,
+) -> Result<Option<String>, String> {
+    let detail = client
+        .get_data_with_cookie(
+            &format!("/novels/{novel_id}"),
+            &[("expand", "bigNovelCover".to_string())],
+            Some(cookie),
+        )
+        .await?;
+    Ok(detail
+        .get("expand")
+        .and_then(|expand| expand.get("bigNovelCover"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string))
+}
+
+async fn save_audio_cover(
+    client: &SfacgHttpClient,
+    directory: &std::path::PathBuf,
+    cover_url: &str,
+    cookie: &str,
+) -> Result<(), String> {
+    let cover = directory.join("imgs").join("audio-cover.jpeg");
+    let source = if cover_url.starts_with("http://") || cover_url.starts_with("https://") {
+        cover_url.to_string()
+    } else {
+        format!("https://i.sfacg.com/{}", cover_url.trim_start_matches('/'))
+    };
+    let payload = client
+        .client
+        .get(source)
+        .header(reqwest::header::REFERER, "https://i.sfacg.com/consume/book/")
+        .header(reqwest::header::COOKIE, cookie)
+        .send()
+        .await
+        .map_err(|error| format!("无法下载有声封面：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("有声封面下载被拒绝：{error}"))?
+        .bytes()
+        .await
+        .map_err(|error| format!("无法读取有声封面：{error}"))?;
+    let parent = cover.parent().ok_or_else(|| "封面目录无效".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("无法创建封面目录：{error}"))?;
+    let partial = cover.with_extension("jpeg.part");
+    fs::write(&partial, payload).map_err(|error| format!("无法写入有声封面：{error}"))?;
+    fs::rename(&partial, &cover).map_err(|error| format!("无法完成有声封面写入：{error}"))?;
+    Ok(())
+}
+
 /// Fetches comic metadata from the SF comic endpoint and persists artwork.
 async fn enrich_local_comic_book(
     client: &SfacgHttpClient,
     directory: &std::path::PathBuf,
-    metadata: &mut StoredBookMetadata,
+    metadata: &mut StoredWorkMetadata,
     comic_id: i64,
     cookie: Option<&str>,
 ) -> Result<(), String> {
@@ -538,7 +703,8 @@ async fn enrich_local_comic_book(
                 })
         })
     };
-    metadata.comic_id = Some(comic_id);
+    metadata.id = Some(comic_id);
+    metadata.online_path = text(&["folderName"]);
     metadata.title = text(&["comicName", "novelName"]).or_else(|| metadata.title.clone());
     metadata.author = text(&["authorName", "author"]).or_else(|| metadata.author.clone());
     metadata.description = text(&["intro", "description", "content"]).or_else(|| metadata.description.clone());
@@ -558,8 +724,8 @@ async fn enrich_local_comic_book(
     {
         metadata.tags = tags.iter().filter_map(|tag| tag.as_str().or_else(|| tag.get("tagName").and_then(Value::as_str)).map(str::trim).filter(|v| !v.is_empty()).map(ToString::to_string)).take(8).collect();
     }
-    let Some(cover_url) = text(&["comicCover", "coverBig", "coverMedium", "coverSmall", "novelCover"]) else { return Ok(()); };
-    let cover = directory.join("imgs").join("cover.jpeg");
+    let Some(cover_url) = text(&["coverBig", "comicCover", "coverMedium", "coverSmall", "novelCover"]) else { return Ok(()); };
+    let cover = directory.join("imgs").join("comic-cover.jpeg");
     if cover.is_file() { return Ok(()); }
     let source = if cover_url.starts_with("http://") || cover_url.starts_with("https://") { cover_url } else { format!("https://manhua.sfacg.com{}", if cover_url.starts_with('/') { cover_url } else { format!("/{cover_url}") }) };
     let payload = client.client.get(source).header(reqwest::header::REFERER, "https://manhua.sfacg.com/").send().await.map_err(|e| format!("无法下载漫画封面：{e}"))?.error_for_status().map_err(|e| format!("漫画封面下载被拒绝：{e}"))?.bytes().await.map_err(|e| format!("无法读取漫画封面：{e}"))?;
@@ -584,6 +750,7 @@ async fn run_audio_download(
     app: tauri::AppHandle,
     job_id: String,
     novel_id: i64,
+    album_id: Option<i64>,
     title: String,
     chapter_ids: Vec<i64>,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
@@ -611,20 +778,23 @@ async fn run_audio_download(
             .map_err(|error| format!("无法创建有声目录：{error}"))?;
         let mut metadata =
             read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?;
-        metadata.novel_id = Some(novel_id);
-        metadata.title = Some(title.clone());
-        metadata
+        let audio_metadata = metadata.audio.get_or_insert_with(Default::default);
+        audio_metadata.id = Some(album_id.unwrap_or(novel_id));
+        audio_metadata.catalog_id = Some(novel_id);
+        audio_metadata.title = Some(title.clone());
+        audio_metadata
             .author
             .get_or_insert_with(|| "未知作者".to_string());
-        metadata
+        audio_metadata
             .description
             .get_or_insert_with(|| "暂无简介".to_string());
-        let _ = enrich_local_book(
+        let _ = enrich_local_audio_book(
             &client,
             &directory,
-            &mut metadata,
+            audio_metadata,
             novel_id,
-            Some(&cookie),
+            album_id,
+            &cookie,
         )
         .await;
         let mut downloaded = metadata
@@ -786,18 +956,19 @@ async fn run_comic_download(
             .map_err(|error| format!("无法创建漫画目录：{error}"))?;
         let mut metadata =
             read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?;
-        metadata.comic_id = Some(comic_id);
-        metadata.title = Some(title.clone());
-        metadata
+        let comic_metadata = metadata.comic.get_or_insert_with(Default::default);
+        comic_metadata.id = Some(comic_id);
+        comic_metadata.title = Some(title.clone());
+        comic_metadata
             .author
             .get_or_insert_with(|| "未知作者".to_string());
-        metadata
+        comic_metadata
             .description
             .get_or_insert_with(|| "暂无简介".to_string());
         let _ = enrich_local_comic_book(
             &client,
             &directory,
-            &mut metadata,
+            comic_metadata,
             comic_id,
             cookie.as_deref(),
         )
@@ -979,6 +1150,7 @@ async fn create_text_download(
             NativeJobSpec {
                 kind: "text".to_string(),
                 novel_id,
+                source_id: None,
                 title: title.clone(),
                 chapter_ids: chapter_ids.clone(),
             },
@@ -1009,6 +1181,7 @@ async fn create_text_download(
 async fn create_audio_download(
     app: tauri::AppHandle,
     novel_id: i64,
+    album_id: Option<i64>,
     title: String,
     chapter_ids: Vec<i64>,
 ) -> Result<NativeJob, String> {
@@ -1063,6 +1236,7 @@ async fn create_audio_download(
             NativeJobSpec {
                 kind: "audio".to_string(),
                 novel_id,
+                source_id: album_id,
                 title: title.clone(),
                 chapter_ids: chapter_ids.clone(),
             },
@@ -1072,6 +1246,7 @@ async fn create_audio_download(
         app,
         id,
         novel_id,
+        album_id,
         title,
         chapter_ids,
         cancelled,
@@ -1151,6 +1326,7 @@ async fn create_comic_download(
             NativeJobSpec {
                 kind: "comic".to_string(),
                 novel_id: comic_id,
+                source_id: Some(comic_id),
                 title: title.clone(),
                 chapter_ids: chapter_ids.clone(),
             },
@@ -1245,6 +1421,7 @@ fn resume_download_job(app: tauri::AppHandle, job_id: String) -> Result<NativeJo
         .map(|spec| NativeJobSpec {
             kind: spec.kind.clone(),
             novel_id: spec.novel_id,
+            source_id: spec.source_id,
             title: spec.title.clone(),
             chapter_ids: spec.chapter_ids.clone(),
         })
@@ -1265,6 +1442,7 @@ fn resume_download_job(app: tauri::AppHandle, job_id: String) -> Result<NativeJo
             app,
             job_id,
             spec.novel_id,
+            spec.source_id,
             spec.title,
             spec.chapter_ids,
             cancelled,
