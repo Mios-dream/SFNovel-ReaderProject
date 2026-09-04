@@ -7,8 +7,11 @@ import {
   EyeOff,
   Images,
   ListTree,
+  MapPin,
   ScrollText,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 import { deskInjectionKey } from "../deskContext";
@@ -24,6 +27,7 @@ type DisplayMode = "vertical" | "paged";
 const desk = requireDesk();
 const router = useRouter();
 const readerElement = ref<HTMLElement>();
+const pageViewport = ref<HTMLElement>();
 const comicChapter = computed(() => desk.localComicChapter.value);
 const book = computed(() => desk.localBook.value);
 const bookName = computed(() => book.value?.name || "本地漫画");
@@ -39,10 +43,75 @@ const displayMode = ref<DisplayMode>("vertical");
 const pageIndex = ref(0);
 const chapterLoading = ref(false);
 const pageCount = computed(() => comicChapter.value?.pages.length || 0);
-const currentPage = computed(() => comicChapter.value?.pages[pageIndex.value]);
-const slideDirection = ref<"forward" | "back">("forward");
+const carouselOffset = ref(0);
+const carouselTransitioning = ref(false);
+const imageScale = ref(1);
+const imageOffset = ref({ x: 0, y: 0 });
 let flipPointerStart: { x: number; y: number } | undefined;
 let ignoreNextReaderClick = false;
+const activePointers = new Map<number, { x: number; y: number }>();
+let pinchStartDistance = 0;
+let pinchStartScale = 1;
+let panStart:
+  | { x: number; y: number; offsetX: number; offsetY: number }
+  | undefined;
+
+const carouselPages = computed(() => {
+  const pages = comicChapter.value?.pages || [];
+  return [pageIndex.value - 1, pageIndex.value, pageIndex.value + 1].map(
+    (index) => ({ index, src: pages[index] }),
+  );
+});
+
+const imageTransform = computed(
+  () =>
+    `translate3d(${imageOffset.value.x}px, ${imageOffset.value.y}px, 0) scale(${imageScale.value})`,
+);
+
+function resetImageView() {
+  imageScale.value = 1;
+  imageOffset.value = { x: 0, y: 0 };
+}
+
+function resetCarouselPosition() {
+  carouselOffset.value = 0;
+  carouselTransitioning.value = false;
+}
+
+function setImageScale(nextScale: number) {
+  imageScale.value = Math.min(3, Math.max(1, nextScale));
+  if (imageScale.value === 1) imageOffset.value = { x: 0, y: 0 };
+}
+
+function zoomImage(delta: number) {
+  setImageScale(imageScale.value + delta);
+}
+
+function animateCarousel(direction: "forward" | "back") {
+  if (carouselTransitioning.value) return;
+  const pages = comicChapter.value?.pages || [];
+  const target = pageIndex.value + (direction === "forward" ? 1 : -1);
+  if (target < 0 || target >= pages.length) {
+    carouselTransitioning.value = true;
+    carouselOffset.value = 0;
+    window.setTimeout(resetCarouselPosition, 220);
+    return;
+  }
+  carouselTransitioning.value = true;
+  const width = pageViewport.value?.clientWidth || window.innerWidth;
+  carouselOffset.value = direction === "forward" ? -width : width;
+  window.setTimeout(() => {
+    pageIndex.value = target;
+    resetCarouselPosition();
+    resetImageView();
+  }, 240);
+}
+
+function distanceBetweenPointers() {
+  const points = [...activePointers.values()];
+  if (points.length < 2) return 0;
+  return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+}
 
 async function openChapter(chapterId?: number, showLastPage = false) {
   if (!chapterId || chapterLoading.value) return;
@@ -52,6 +121,8 @@ async function openChapter(chapterId?: number, showLastPage = false) {
     pageIndex.value = showLastPage
       ? Math.max(0, (chapter?.pages.length || 1) - 1)
       : 0;
+    resetImageView();
+    resetCarouselPosition();
     directoryOpen.value = false;
     await nextTick();
     readerElement.value?.scrollTo({ top: 0 });
@@ -67,8 +138,7 @@ function goBack() {
 
 function previous() {
   if (displayMode.value === "paged" && pageIndex.value > 0) {
-    slideDirection.value = "back";
-    pageIndex.value -= 1;
+    animateCarousel("back");
     return;
   }
   void openChapter(previousChapter.value?.id, displayMode.value === "paged");
@@ -76,8 +146,7 @@ function previous() {
 
 function next() {
   if (displayMode.value === "paged" && pageIndex.value < pageCount.value - 1) {
-    slideDirection.value = "forward";
-    pageIndex.value += 1;
+    animateCarousel("forward");
     return;
   }
   void openChapter(nextChapter.value?.id);
@@ -96,6 +165,7 @@ function handleReaderScroll() {
 
 function setDisplayMode(mode: DisplayMode) {
   displayMode.value = mode;
+  resetImageView();
   controlsVisible.value = mode === "vertical";
   void nextTick(() => {
     readerElement.value?.scrollTo({ top: 0 });
@@ -115,23 +185,89 @@ function handleReaderClick(event: MouseEvent) {
 }
 
 function handleFlipPointerDown(event: PointerEvent) {
-  if (displayMode.value !== "paged") return;
+  if (displayMode.value !== "paged" || carouselTransitioning.value) return;
+  activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  event.currentTarget instanceof HTMLElement &&
+    event.currentTarget.setPointerCapture(event.pointerId);
+  if (activePointers.size >= 2) {
+    pinchStartDistance = distanceBetweenPointers();
+    pinchStartScale = imageScale.value;
+    panStart = undefined;
+    return;
+  }
   flipPointerStart = { x: event.clientX, y: event.clientY };
+  carouselOffset.value = 0;
+  if (imageScale.value > 1) {
+    panStart = {
+      x: event.clientX,
+      y: event.clientY,
+      offsetX: imageOffset.value.x,
+      offsetY: imageOffset.value.y,
+    };
+  }
+}
+
+function handleFlipPointerMove(event: PointerEvent) {
+  if (displayMode.value !== "paged" || !activePointers.has(event.pointerId))
+    return;
+  activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (activePointers.size >= 2) {
+    const distance = distanceBetweenPointers();
+    if (pinchStartDistance > 0)
+      setImageScale(pinchStartScale * (distance / pinchStartDistance));
+    return;
+  }
+  if (panStart && imageScale.value > 1) {
+    imageOffset.value = {
+      x: panStart.offsetX + event.clientX - panStart.x,
+      y: panStart.offsetY + event.clientY - panStart.y,
+    };
+  } else if (imageScale.value === 1 && activePointers.size === 1) {
+    carouselOffset.value =
+      event.clientX - (flipPointerStart?.x || event.clientX);
+  }
 }
 
 function handleFlipPointerUp(event: PointerEvent) {
+  activePointers.delete(event.pointerId);
+  if (activePointers.size) return;
   const start = flipPointerStart;
   flipPointerStart = undefined;
-  if (!start || displayMode.value !== "paged") return;
+  const wasPanning = Boolean(panStart);
+  panStart = undefined;
+  pinchStartDistance = 0;
+  if (
+    !start ||
+    displayMode.value !== "paged" ||
+    imageScale.value > 1 ||
+    wasPanning
+  )
+    return;
   const deltaX = event.clientX - start.x;
   const deltaY = Math.abs(event.clientY - start.y);
-  if (Math.abs(deltaX) < 36 || Math.abs(deltaX) < deltaY * 1.2) return;
+  if (Math.abs(deltaX) < 36 || Math.abs(deltaX) < deltaY * 1.2) {
+    carouselTransitioning.value = true;
+    window.setTimeout(resetCarouselPosition, 180);
+    return;
+  }
   ignoreNextReaderClick = true;
   window.setTimeout(() => {
     ignoreNextReaderClick = false;
   }, 350);
   if (deltaX < 0) next();
   else previous();
+}
+
+function handleFlipPointerCancel(event: PointerEvent) {
+  activePointers.delete(event.pointerId);
+  flipPointerStart = undefined;
+  panStart = undefined;
+  pinchStartDistance = 0;
+  resetCarouselPosition();
+}
+
+function showDirectory() {
+  directoryOpen.value = true;
 }
 
 onMounted(() => {
@@ -169,7 +305,7 @@ onMounted(() => {
         class="icon-button"
         title="漫画目录"
         aria-label="漫画目录"
-        @click="directoryOpen = true"
+        @click="showDirectory"
       >
         <ListTree :size="20" />
       </button>
@@ -189,8 +325,9 @@ onMounted(() => {
         v-else
         class="comic-single-page"
         @pointerdown="handleFlipPointerDown"
+        @pointermove="handleFlipPointerMove"
         @pointerup="handleFlipPointerUp"
-        @pointercancel="flipPointerStart = undefined"
+        @pointercancel="handleFlipPointerCancel"
       >
         <header class="comic-page-chrome comic-page-topbar" @click.stop>
           <button
@@ -203,14 +340,38 @@ onMounted(() => {
           </button>
           <strong>{{ comicChapter.title }}</strong>
         </header>
-        <Transition :name="`comic-slide-${slideDirection}`" mode="out-in">
-          <img
-            v-if="currentPage"
-            :key="currentPage"
-            :src="currentPage"
-            :alt="`第 ${pageIndex + 1} 页`"
-          />
-        </Transition>
+        <div
+          ref="pageViewport"
+          class="comic-image-viewport"
+          @wheel.prevent="
+            setImageScale(imageScale + ($event.deltaY < 0 ? 0.15 : -0.15))
+          "
+        >
+          <div
+            class="comic-carousel-track"
+            :class="{ transitioning: carouselTransitioning }"
+            :style="{
+              transform: `translate3d(calc(-33.333333% + ${carouselOffset}px), 0, 0)`,
+            }"
+          >
+            <div
+              v-for="page in carouselPages"
+              :key="page.index"
+              class="comic-carousel-slide"
+            >
+              <img
+                v-if="page.src"
+                class="comic-paged-image"
+                :src="page.src"
+                :alt="`第 ${page.index + 1} 页`"
+                :style="{ transform: imageTransform }"
+                @dblclick.stop="
+                  imageScale > 1 ? resetImageView() : setImageScale(2)
+                "
+              />
+            </div>
+          </div>
+        </div>
         <div
           class="comic-page-chrome comic-page-bottom-meta"
           aria-label="书名和页数"
@@ -237,24 +398,21 @@ onMounted(() => {
       >
         <ChevronLeft :size="21" />
       </button>
-      <div class="display-switch" aria-label="漫画显示模式">
-        <button
-          :class="{ active: displayMode === 'vertical' }"
-          title="竖屏显示"
-          aria-label="竖屏显示"
-          @click="setDisplayMode('vertical')"
-        >
-          <ScrollText :size="18" />
-        </button>
-        <button
-          :class="{ active: displayMode === 'paged' }"
-          title="翻页显示"
-          aria-label="翻页显示"
-          @click="setDisplayMode('paged')"
-        >
-          <Columns2 :size="18" />
-        </button>
-      </div>
+      <button
+        class="icon-button mode-toggle"
+        :title="
+          displayMode === 'vertical' ? '切换到翻页显示' : '切换到竖屏显示'
+        "
+        :aria-label="
+          displayMode === 'vertical' ? '切换到翻页显示' : '切换到竖屏显示'
+        "
+        @click="
+          setDisplayMode(displayMode === 'vertical' ? 'paged' : 'vertical')
+        "
+      >
+        <ScrollText v-if="displayMode === 'vertical'" :size="18" />
+        <Columns2 v-else :size="18" />
+      </button>
       <button
         class="icon-button"
         title="隐藏阅读菜单"
@@ -262,6 +420,26 @@ onMounted(() => {
         @click="controlsVisible = false"
       >
         <EyeOff :size="19" />
+      </button>
+      <button
+        v-if="displayMode === 'paged'"
+        class="icon-button"
+        title="放大图片"
+        aria-label="放大图片"
+        :disabled="imageScale >= 3"
+        @click="zoomImage(0.25)"
+      >
+        <ZoomIn :size="19" />
+      </button>
+      <button
+        v-if="displayMode === 'paged'"
+        class="icon-button"
+        title="缩小图片"
+        aria-label="缩小图片"
+        :disabled="imageScale <= 1"
+        @click="zoomImage(-0.25)"
+      >
+        <ZoomOut :size="19" />
       </button>
       <button
         class="icon-button"
@@ -289,12 +467,14 @@ onMounted(() => {
       aria-modal="true"
       aria-label="漫画目录"
     >
-      <header>
-        <div>
-          <small>本地漫画</small>
+      <header class="directory-header">
+        <div class="directory-title">
+          <small>{{ bookName }}</small>
           <h2>章节目录</h2>
         </div>
         <button
+          class="directory-close"
+          type="button"
           title="关闭目录"
           aria-label="关闭目录"
           @click="directoryOpen = false"
@@ -302,19 +482,30 @@ onMounted(() => {
           <X :size="19" />
         </button>
       </header>
-      <button
-        v-for="item in chapters"
-        :key="item.id"
-        class="directory-item"
-        :class="{ active: item.id === comicChapter?.id }"
-        @click="openChapter(item.id)"
-      >
-        <img
-          v-if="item.cover"
-          :src="item.cover"
-          :alt="`${item.title} 首图`"
-        /><Images v-else :size="24" /><strong>{{ item.title }}</strong>
-      </button>
+      <section class="directory-volume">
+        <h3>全部章节</h3>
+        <button
+          v-for="item in chapters"
+          :key="item.id"
+          class="directory-item directory-chapter"
+          :class="{ active: item.id === comicChapter?.id }"
+          @click="openChapter(item.id)"
+        >
+          <MapPin
+            v-if="item.id === comicChapter?.id"
+            class="directory-current-icon"
+            :size="17"
+            aria-hidden="true"
+          />
+          <img
+            v-if="item.cover"
+            :src="item.cover"
+            :alt="`${item.title} 首图`"
+          /><Images v-else :size="24" />
+
+          <strong>{{ item.title }}</strong>
+        </button>
+      </section>
     </section>
   </div>
 </template>
@@ -333,7 +524,6 @@ onMounted(() => {
   min-height: 100%;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
   margin: 0 auto;
 }
 .comic-page-image {
@@ -341,6 +531,8 @@ onMounted(() => {
   width: min(100%, 760px);
   height: auto;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  cursor: default;
+  pointer-events: none;
 }
 .comic-floating-bar {
   position: fixed;
@@ -391,7 +583,6 @@ onMounted(() => {
   white-space: nowrap;
 }
 .icon-button,
-.display-switch button,
 .directory-panel header button {
   display: inline-flex;
   width: 40px;
@@ -404,23 +595,12 @@ onMounted(() => {
   background: transparent;
 }
 .icon-button:hover,
-.display-switch button:hover,
-.display-switch button.active {
+.icon-button.active {
   color: var(--theme-color-dark);
   background: var(--theme-color-light);
 }
 .icon-button:disabled {
   opacity: 0.32;
-}
-.display-switch {
-  display: flex;
-  overflow: hidden;
-  border: 1px solid var(--theme-color-light);
-  border-radius: 6px;
-  background: var(--background-color);
-}
-.display-switch button {
-  border-radius: 0;
 }
 .comic-stage.paged {
   box-sizing: border-box;
@@ -438,31 +618,32 @@ onMounted(() => {
   justify-content: center;
   gap: 10px;
   overflow: hidden;
-  touch-action: pan-y;
+  touch-action: none;
 }
-.comic-slide-forward-enter-active,
-.comic-slide-forward-leave-active,
-.comic-slide-back-enter-active,
-.comic-slide-back-leave-active {
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease;
+.comic-image-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
-.comic-slide-forward-enter-from {
-  opacity: 0;
-  transform: translateX(18px);
+.comic-carousel-track {
+  display: flex;
+  width: 300%;
+  height: 100%;
+  transform: translate3d(-33.333333%, 0, 0);
+  will-change: transform;
 }
-.comic-slide-forward-leave-to {
-  opacity: 0;
-  transform: translateX(-18px);
+.comic-carousel-track.transitioning {
+  transition: transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-.comic-slide-back-enter-from {
-  opacity: 0;
-  transform: translateX(-18px);
-}
-.comic-slide-back-leave-to {
-  opacity: 0;
-  transform: translateX(18px);
+.comic-carousel-slide {
+  display: flex;
+  width: 33.333333%;
+  height: 100%;
+  flex: 0 0 33.333333%;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 .comic-page-chrome {
   position: absolute;
@@ -531,6 +712,15 @@ onMounted(() => {
   cursor: default;
   pointer-events: none;
 }
+.comic-paged-image {
+  width: auto;
+  max-width: 100%;
+  pointer-events: none;
+  user-select: none;
+  touch-action: none;
+  will-change: transform;
+}
+
 .comic-single-page span {
   color: white;
   font-size: 12px;
@@ -540,34 +730,51 @@ onMounted(() => {
   z-index: 20;
   inset: 0;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   background: rgba(16, 12, 25, 0.62);
 }
 .directory-panel {
-  width: min(390px, 100%);
+  width: min(390px, 88vw);
   height: 100%;
   overflow-y: auto;
-  background: #302842;
-  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.35);
+  background: #fff;
+  box-shadow: 12px 0 36px rgba(54, 37, 39, 0.22);
 }
-.directory-panel > header {
+.directory-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 22px 20px 15px;
-  border-bottom: 1px solid rgba(238, 226, 255, 0.14);
+  min-height: 62px;
+  /* padding: max(10px, env(safe-area-inset-top)) 14px 0; */
+  border-bottom: 1px solid #ececec;
+  font-family: KaTongFont;
+}
+.directory-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  color: var(--theme-color-dark);
+  background: transparent;
+}
+.directory-close {
+  width: 38px;
+  height: 38px;
+}
+.directory-close:hover {
+  background: var(--theme-color-light);
+}
+.directory-title {
+  padding: 18px 20px 12px;
 }
 .directory-panel small {
-  color: #c6b5dd;
+  color: #8a8a8a;
   font-size: 11px;
 }
 .directory-panel h2 {
   margin: 4px 0 0;
-  color: #fff;
+  color: #242424;
   font-size: 21px;
-}
-.directory-panel header button {
-  background: rgba(255, 255, 255, 0.1);
 }
 .directory-item {
   display: flex;
@@ -575,16 +782,20 @@ onMounted(() => {
   min-height: 76px;
   align-items: center;
   gap: 12px;
-  padding: 9px 20px;
+  padding: 9px 30px;
   border: 0;
-  border-bottom: 1px solid rgba(238, 226, 255, 0.1);
-  color: #f8f5ff;
+  border-bottom: 1px solid #eeeeee;
+  color: #3f3f3f;
   background: transparent;
   text-align: left;
 }
-.directory-item:hover,
+.directory-item:hover {
+  background: #f7f7f7;
+}
 .directory-item.active {
-  background: rgba(210, 183, 238, 0.16);
+  color: #e64e36;
+  /* background: var(--theme-color-light); */
+  font-weight: 600;
 }
 .directory-item img {
   width: 72px;
@@ -592,12 +803,25 @@ onMounted(() => {
   flex: 0 0 auto;
   border-radius: 4px;
   object-fit: cover;
+  border: 1px solid #eaeaea;
 }
 .directory-item strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.directory-current-icon {
+  flex: 0 0 auto;
+}
+.directory-volume {
+  padding: 13px 0 4px;
+}
+.directory-volume h3 {
+  margin: 0;
+  padding: 0 20px 8px;
+  color: #242424;
+  font-size: 16px;
 }
 @media (max-width: 760px) {
   .comic-stage {
@@ -608,6 +832,12 @@ onMounted(() => {
   }
   .comic-single-page img {
     max-height: 100dvh;
+    cursor: default;
+    pointer-events: none;
+  }
+  .comic-single-page .comic-paged-image {
+    cursor: default;
+    pointer-events: none;
   }
 }
 </style>

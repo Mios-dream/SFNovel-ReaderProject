@@ -17,6 +17,7 @@ import {
   ListTree,
   ScrollText,
   X,
+  MapPin,
 } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 import { deskInjectionKey } from "../deskContext";
@@ -374,6 +375,10 @@ function handleFlipPointerUp(event: PointerEvent) {
   }, 350);
 }
 
+function showDirectory() {
+  directoryOpen.value = true;
+}
+
 onMounted(() => {
   if (!book.value || !chapter.value) void router.replace("/library");
   else {
@@ -424,7 +429,7 @@ onBeforeUnmount(() => {
         class="icon-button"
         title="章节目录"
         aria-label="章节目录"
-        @click="directoryOpen = true"
+        @click="showDirectory"
       >
         <ListTree :size="20" />
       </button>
@@ -499,24 +504,15 @@ onBeforeUnmount(() => {
       >
         <ChevronLeft :size="21" />
       </button>
-      <div class="display-switch" aria-label="阅读显示模式">
-        <button
-          :class="{ active: displayMode === 'vertical' }"
-          title="竖屏显示"
-          aria-label="竖屏显示"
-          @click="setDisplayMode('vertical')"
-        >
-          <ScrollText :size="18" />
-        </button>
-        <button
-          :class="{ active: displayMode === 'paged' }"
-          title="翻页显示"
-          aria-label="翻页显示"
-          @click="setDisplayMode('paged')"
-        >
-          <Columns2 :size="18" />
-        </button>
-      </div>
+      <button
+        class="icon-button mode-toggle"
+        :title="displayMode === 'vertical' ? '切换到翻页显示' : '切换到竖屏显示'"
+        :aria-label="displayMode === 'vertical' ? '切换到翻页显示' : '切换到竖屏显示'"
+        @click="setDisplayMode(displayMode === 'vertical' ? 'paged' : 'vertical')"
+      >
+        <ScrollText v-if="displayMode === 'vertical'" :size="18" />
+        <Columns2 v-else :size="18" />
+      </button>
       <button
         class="icon-button"
         title="隐藏阅读菜单"
@@ -552,12 +548,14 @@ onBeforeUnmount(() => {
       aria-modal="true"
       aria-label="小说目录"
     >
-      <header>
-        <div>
-          <small>本地小说</small>
+      <header class="directory-header">
+        <div class="directory-title">
+          <small>{{ bookName }}</small>
           <h2>章节目录</h2>
         </div>
         <button
+          class="directory-close"
+          type="button"
           title="关闭目录"
           aria-label="关闭目录"
           @click="directoryOpen = false"
@@ -574,9 +572,16 @@ onBeforeUnmount(() => {
         <button
           v-for="item in volume.chapters"
           :key="item.id"
+          class="directory-chapter"
           :class="{ active: item.id === chapter?.id }"
           @click="openChapter(item.id)"
         >
+          <MapPin
+            v-if="item.id === chapter?.id"
+            class="directory-current-icon"
+            :size="17"
+            aria-hidden="true"
+          />
           {{ item.title }}
         </button>
       </section>
@@ -667,7 +672,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .icon-button,
-.display-switch button,
 .directory-panel header button {
   display: inline-flex;
   width: 40px;
@@ -680,23 +684,12 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 .icon-button:hover,
-.display-switch button:hover,
-.display-switch button.active {
+.icon-button.active {
   color: var(--theme-color-dark);
   background: var(--theme-color-light);
 }
 .icon-button:disabled {
   opacity: 0.32;
-}
-.display-switch {
-  display: flex;
-  overflow: hidden;
-  border: 1px solid var(--theme-color-light);
-  border-radius: 6px;
-  background: var(--background-color);
-}
-.display-switch button {
-  border-radius: 0;
 }
 .paged-reader {
   overflow: hidden;
@@ -851,34 +844,51 @@ onBeforeUnmount(() => {
   z-index: 20;
   inset: 0;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   background: rgba(42, 34, 37, 0.45);
 }
 .directory-panel {
-  width: min(390px, 100%);
+  width: min(390px, 88vw);
   height: 100%;
   overflow-y: auto;
-  background: #fffdf8;
-  box-shadow: -12px 0 36px rgba(54, 37, 39, 0.22);
+  background: #fff;
+  box-shadow: 12px 0 36px rgba(54, 37, 39, 0.22);
 }
-.directory-panel > header {
+.directory-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 22px 20px 15px;
-  border-bottom: 1px solid #eee5da;
+  min-height: 62px;
+  padding: max(10px, env(safe-area-inset-top)) 14px 0;
+  border-bottom: 1px solid #ececec;
+}
+.directory-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  color: var(--theme-color-dark);
+  background: transparent;
+}
+.directory-close {
+  width: 38px;
+  height: 38px;
+}
+.directory-close:hover {
+  background: var(--theme-color-light);
+}
+.directory-title {
+  padding: 0;
+  font-family: KaTongFont;
 }
 .directory-panel small {
-  color: #aa8b78;
+  color: #8a8a8a;
   font-size: 11px;
 }
 .directory-panel h2 {
   margin: 4px 0 0;
-  color: #5d4541;
+  color: #242424;
   font-size: 21px;
-}
-.directory-panel header button {
-  background: #f7eee5;
 }
 .directory-volume {
   padding: 13px 0 4px;
@@ -886,23 +896,34 @@ onBeforeUnmount(() => {
 .directory-volume h3 {
   margin: 0;
   padding: 0 20px 8px;
-  color: #9a756a;
-  font-size: 12px;
+  color: #242424;
+  font-size: 16px;
 }
-.directory-volume button {
-  display: block;
+.directory-chapter {
+  display: flex;
   width: 100%;
-  padding: 12px 20px;
+  min-height: 48px;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 20px 12px 34px;
   border: 0;
-  border-top: 1px solid #f0eae1;
-  color: #4e403c;
+  border-top: 1px solid #eeeeee;
+  color: #3f3f3f;
   background: transparent;
   text-align: left;
 }
-.directory-volume button.active {
-  color: #8d503e;
-  background: #fff4ea;
+.directory-chapter:hover {
+  background: #f7f7f7;
 }
+.directory-chapter.active {
+  color: #e64e36;
+  /* background: var(--theme-color-light); */
+  font-weight: 600;
+}
+.directory-current-icon {
+  flex: 0 0 auto;
+}
+
 @media (max-width: 760px) {
   .chapter-content {
     border: 0;
