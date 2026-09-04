@@ -14,6 +14,7 @@ function requireDesk() {
 const desk = requireDesk();
 const router = useRouter();
 const chapter = computed(() => desk.localChapter.value);
+const comicChapter = computed(() => desk.localComicChapter.value);
 const bookName = computed(() => desk.localBook.value?.name || "本地阅读");
 const imageDirectory = computed(
   () => desk.localBook.value?.imageDirectory || "",
@@ -52,7 +53,7 @@ const chapterParts = computed<ChapterPart[]>(() => {
 });
 
 onMounted(() => {
-  if (!desk.localBook.value || !desk.localChapter.value) {
+  if (!desk.localBook.value || (!desk.localChapter.value && !desk.localComicChapter.value)) {
     void router.replace("/library");
     return;
   }
@@ -61,7 +62,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <article v-if="chapter" class="reader">
+  <article v-if="chapter || comicChapter" class="reader">
     <button
       class="back-button"
       @click="router.push(`/library/${encodeURIComponent(bookName)}`)"
@@ -72,7 +73,7 @@ onMounted(() => {
       <FileText :size="19" /><span>{{ chapter.volume }}</span>
       <h2>{{ chapter.title }}</h2>
     </header> -->
-    <div class="chapter-content">
+    <div v-if="chapter" class="chapter-content">
       <template v-for="(part, index) in chapterParts" :key="index">
         <img
           v-if="part.type === 'image'"
@@ -82,6 +83,10 @@ onMounted(() => {
         />
         <span v-else class="chapter-text">{{ part.value }}</span>
       </template>
+    </div>
+    <div v-else class="comic-reader-content">
+      <h1>{{ comicChapter?.title }}</h1>
+      <img v-for="(page, index) in comicChapter?.pages" :key="page" class="comic-page-image" :src="page" :alt="`第 ${index + 1} 页`" />
     </div>
   </article>
 </template>
@@ -143,6 +148,25 @@ h2 {
   max-width: 100%;
   max-height: 80vh;
   margin: 20px auto;
+  object-fit: contain;
+}
+.comic-reader-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 40px;
+}
+.comic-reader-content h1 {
+  align-self: stretch;
+  margin: 12px 0;
+  color: #69453d;
+  font-size: 21px;
+}
+.comic-page-image {
+  display: block;
+  width: min(100%, 760px);
+  height: auto;
   object-fit: contain;
 }
 @media (max-width: 760px) {

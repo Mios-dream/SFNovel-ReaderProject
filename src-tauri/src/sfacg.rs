@@ -194,6 +194,34 @@ struct NativeAuthSession {
     user_name: String,
 }
 
+/// Native-only comic chapter record. The public comic site supplies chapter
+/// folders only on its web endpoint, so these values never leave the native
+/// download boundary except for renderer-safe availability metadata.
+struct NativeComicChapter {
+    id: i64,
+    title: String,
+    is_vip: bool,
+    is_unlocked: bool,
+}
+
+/// Renderer-safe comic catalog used by the chapter picker.
+#[derive(Debug, Serialize)]
+struct ComicCatalog {
+    title: String,
+    chapters: Vec<ComicChapterSummary>,
+}
+
+/// One comic chapter without page URLs or source folder information.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ComicChapterSummary {
+    id: i64,
+    title: String,
+    is_vip: bool,
+    is_unlocked: bool,
+    downloaded: bool,
+}
+
 #[derive(Deserialize, Serialize)]
 struct PersistedAuthSession {
     cookie: String,
@@ -750,6 +778,145 @@ impl SfacgHttpClient {
         Ok((title, chapters))
     }
 
+    /// Lists comic chapters from the SF comic site. The documented App API
+    /// provides the comic identity and folder name, while the comic site's
+    /// public page is the available catalog API for chapter IDs.
+    ///
+    /// An authenticated session is forwarded only to the SF comic site so its
+    /// VIP markers and access rules match the user's account.
+    async fn comic_catalog(
+        &self,
+        comic_id: i64,
+        cookie: Option<&str>,
+    ) -> Result<(String, Vec<NativeComicChapter>), String> {
+        validate_novel_id(comic_id)?;
+        let detail = self.get_data(&format!("/comics/{comic_id}"), &[]).await?;
+        let title = detail
+            .get("comicName")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "SF 漫画接口未返回作品名称".to_string())?
+            .to_string();
+        let folder = detail
+            .get("folderName")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "SF 漫画接口未返回目录标识".to_string())?;
+        let mut request = self
+            .client
+            .get(format!("https://manhua.sfacg.com/mh/{folder}/"))
+            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml");
+        if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        let html = request
+            .send()
+            .await
+            .map_err(|error| format!("无法读取 SF 漫画目录：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("SF 漫画目录请求被拒绝：{error}"))?
+            .text()
+            .await
+            .map_err(|error| format!("SF 漫画目录格式无效：{error}"))?;
+        let chapters = parse_comic_catalog(&html, folder)?;
+        if chapters.is_empty() {
+            return Err("该漫画没有可用章节".to_string());
+        }
+        Ok((title, chapters))
+    }
+
+    /// Resolves image URLs for one comic chapter using the authenticated SF
+    /// web session when present. The URLs are consumed only by the native
+    /// downloader.
+    async fn comic_chapter_images(
+        &self,
+        comic_id: i64,
+        chapter_id: i64,
+        cookie: Option<&str>,
+    ) -> Result<Vec<String>, String> {
+        validate_novel_id(comic_id)?;
+        if chapter_id <= 0 {
+            return Err("漫画章节编号无效".to_string());
+        }
+        let detail = self.get_data(&format!("/comics/{comic_id}"), &[]).await?;
+        let folder = detail
+            .get("folderName")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "SF 漫画接口未返回目录标识".to_string())?;
+        let chapter_url = format!("https://manhua.sfacg.com/mh/{folder}/{chapter_id}/");
+        let mut chapter_request = self
+            .client
+            .get(&chapter_url)
+            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml");
+        if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
+            chapter_request = chapter_request.header(reqwest::header::COOKIE, cookie);
+        }
+        let html = chapter_request
+            .send()
+            .await
+            .map_err(|error| format!("无法读取 SF 漫画章节：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("SF 漫画章节请求被拒绝：{error}"))?
+            .text()
+            .await
+            .map_err(|error| format!("SF 漫画章节格式无效：{error}"))?;
+        let source_comic_id = extract_js_number(&html, "c")
+            .ok_or_else(|| "该漫画章节当前不可下载".to_string())?;
+        let source_chapter_id = extract_js_number(&html, "chapId")
+            .ok_or_else(|| "该漫画章节当前不可下载".to_string())?;
+        let serial = extract_js_string(&html, "fn")
+            .ok_or_else(|| "SF 漫画章节未返回资源标识".to_string())?;
+        let path = extract_js_string(&html, "nv")
+            .ok_or_else(|| "SF 漫画章节未返回资源路径".to_string())?;
+        let mut images_request = self
+            .client
+            .get("https://manhua.sfacg.com/ajax/Common.ashx")
+            .query(&[
+                ("op", "getPics"),
+                ("cid", &source_comic_id.to_string()),
+                ("chapId", &source_chapter_id.to_string()),
+                ("serial", serial.as_str()),
+                ("path", path.as_str()),
+            ])
+            .header(reqwest::header::REFERER, chapter_url)
+            .header(reqwest::header::ACCEPT, "application/json, text/javascript, */*; q=0.01")
+            .header("X-Requested-With", "XMLHttpRequest");
+        if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
+            images_request = images_request.header(reqwest::header::COOKIE, cookie);
+        }
+        let payload = images_request
+            .send()
+            .await
+            .map_err(|error| format!("无法读取 SF 漫画图片接口：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("SF 漫画图片接口被拒绝：{error}"))?
+            .json::<Value>()
+            .await
+            .map_err(|error| format!("SF 漫画图片接口格式无效：{error}"))?;
+        if payload.get("status").and_then(Value::as_i64) != Some(200) {
+            return Err(payload
+                .get("msg")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("该漫画章节当前不可下载")
+                .to_string());
+        }
+        let images = payload
+            .get("data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "SF 漫画图片接口未返回图片".to_string())?
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|url| url.starts_with("https://"))
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if images.is_empty() {
+            return Err("该漫画章节没有可下载图片".to_string());
+        }
+        Ok(images)
+    }
+
     /// Fetches and extracts a public SF web chapter from `#ChapterBody`.
     ///
     /// # Arguments
@@ -950,6 +1117,94 @@ fn security_header(nonce: &str) -> Result<String, String> {
     ))
 }
 
+/// Extracts one numeric variable from the inline script emitted by the comic
+/// chapter page. The values originate from a fixed SF page, never from the
+/// renderer, and are used solely to call the matching image endpoint.
+fn extract_js_number(html: &str, variable: &str) -> Option<i64> {
+    let marker = format!("var {variable} =");
+    let value = html.split(&marker).nth(1)?.split(';').next()?.trim();
+    value.parse().ok()
+}
+
+/// Extracts one quoted inline JavaScript variable from a comic chapter page.
+fn extract_js_string(html: &str, variable: &str) -> Option<String> {
+    let marker = format!("var {variable} =");
+    let value = html.split(&marker).nth(1)?.split(';').next()?.trim();
+    value
+        .strip_prefix('"')?
+        .strip_suffix('"')
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+/// Parses the chapter anchors exposed by a public SF comic work page.
+fn parse_comic_catalog(html: &str, folder: &str) -> Result<Vec<NativeComicChapter>, String> {
+    let marker = format!("href=\"/mh/{folder}/");
+    let mut remaining = html;
+    let mut chapters = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    while let Some(position) = remaining.find(&marker) {
+        remaining = &remaining[position + marker.len()..];
+        let Some(id_end) = remaining.find('/') else { break };
+        let Ok(id) = remaining[..id_end].parse::<i64>() else {
+            continue;
+        };
+        let Some(anchor_end) = remaining[id_end..].find("</a>") else {
+            continue;
+        };
+        let anchor = &remaining[id_end..id_end + anchor_end];
+        let Some(title_start) = anchor.find('>') else {
+            continue;
+        };
+        let title = strip_html_tags(anchor[title_start + 1..].trim());
+        if title.is_empty() || title == "点击浏览" || !seen.insert(id) {
+            continue;
+        }
+        let is_vip = title.starts_with("VIP");
+        let anchor_markup = &remaining[id_end..id_end + anchor_end];
+        let is_unlocked = !is_vip || comic_anchor_is_unlocked(anchor_markup);
+        chapters.push(NativeComicChapter { id, title, is_vip, is_unlocked });
+    }
+    if chapters.is_empty() {
+        return Err("SF 漫画目录格式无效".to_string());
+    }
+    chapters.reverse();
+    Ok(chapters)
+}
+
+/// Reads explicit ownership markers emitted by the authenticated comic catalog.
+/// Login presence alone is not an entitlement signal: an account may be logged
+/// in without owning a particular VIP chapter.
+fn comic_anchor_is_unlocked(anchor: &str) -> bool {
+    let normalized = anchor.to_ascii_lowercase();
+    [
+        "data-has=\"true\"",
+        "data-has=true",
+        "data-has='true'",
+        "data-isunlocked=\"true\"",
+        "data-isunlocked=true",
+        "data-isunlocked='true'",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(&marker.to_ascii_lowercase()))
+}
+
+/// Removes simple HTML tags from an anchor title without treating response
+/// text as executable markup.
+fn strip_html_tags(value: &str) -> String {
+    let mut output = String::new();
+    let mut in_tag = false;
+    for character in value.chars() {
+        match character {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => output.push(character),
+            _ => {}
+        }
+    }
+    output.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Searches public SF novels and converts upstream records to renderer DTOs.
 ///
 /// # Arguments
@@ -1012,6 +1267,10 @@ async fn search_novels(query: String) -> Result<Vec<SearchNovel>, String> {
                 novel_cover: item
                     .get("novelCover")
                     .or_else(|| item.get("coverBig"))
+                    .or_else(|| item.get("comicCover"))
+                    .or_else(|| item.get("coverMedium"))
+                    .or_else(|| item.get("coverSmall"))
+                    .or_else(|| item.get("cover"))
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
@@ -1216,6 +1475,40 @@ async fn get_audio_chapters(app: tauri::AppHandle, novel_id: i64) -> Result<Audi
     })
 }
 
+/// Lists comic chapters and joins local completion state. VIP ownership is read
+/// only from explicit markers in the authenticated catalog; a login cookie by
+/// itself is never treated as chapter ownership.
+#[tauri::command]
+async fn get_comic_chapters(app: tauri::AppHandle, comic_id: i64) -> Result<ComicCatalog, String> {
+    validate_novel_id(comic_id)?;
+    #[cfg(target_os = "android")]
+    sync_android_auth_session(&app).await?;
+    let cookie = current_session_cookie(&app).ok();
+    let client = SfacgHttpClient::new()?;
+    let (title, chapters) = client.comic_catalog(comic_id, cookie.as_deref()).await?;
+    let book_directory = library_directory(&app)?.join(safe_library_name(&title));
+    let metadata =
+        read_json_or_default::<StoredBookMetadata>(&book_directory.join(".novel-flow.json"))?;
+    let downloaded = metadata
+        .downloaded_comic_chapter_ids
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    Ok(ComicCatalog {
+        title,
+        chapters: chapters
+            .into_iter()
+            .map(|chapter| ComicChapterSummary {
+                id: chapter.id,
+                title: chapter.title,
+                is_vip: chapter.is_vip,
+                is_unlocked: chapter.is_unlocked,
+                downloaded: downloaded.contains(&chapter.id),
+            })
+            .collect(),
+    })
+}
+
 /// Synchronizes the authenticated user's SF bookshelf through the native request layer.
 ///
 /// The `force_refresh` parameter is accepted for API parity with the old renderer
@@ -1297,6 +1590,9 @@ async fn get_bookshelf(
                         .get("novelCover")
                         .or_else(|| record.get("coverBig"))
                         .or_else(|| record.get("comicCover"))
+                        .or_else(|| record.get("coverMedium"))
+                        .or_else(|| record.get("coverSmall"))
+                        .or_else(|| record.get("cover"))
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string(),

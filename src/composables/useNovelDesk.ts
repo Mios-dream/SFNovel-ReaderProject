@@ -75,7 +75,9 @@ export function useNovelDesk() {
         novelCover: book.cover || "",
         lastUpdateTime: "",
       },
-      "text",
+      book.comicChapters.length && !book.chapterVolumes.length
+        ? "comic"
+        : "text",
     );
   }
 

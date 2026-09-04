@@ -6,7 +6,7 @@ export type ViewName =
   | "libraryDetail"
   | "reader"
   | "audioPlayer";
-export type ChapterMode = "text" | "audio";
+export type ChapterMode = "text" | "audio" | "comic";
 
 export type Novel = {
   novelId: number;
@@ -26,7 +26,7 @@ export type Novel = {
 export type Job = {
   id: string;
   title: string;
-  kind: "text" | "audio";
+  kind: "text" | "audio" | "comic";
   status: "queued" | "downloading" | "paused" | "done" | "error" | "cancelled";
   progress: number;
   message: string;
@@ -73,6 +73,7 @@ export type LocalChapterVolume = {
   volume: string;
   chapters: Array<Omit<LocalChapter, "volume">>;
 };
+export type LocalComicChapter = { id: number; title: string; pages: string[] };
 export type LocalAudioTrack = { title: string; href: string };
 export type LocalBookDetail = {
   name: string;
@@ -99,6 +100,7 @@ export type LocalBookDetail = {
   audioTracks: LocalAudioTrack[];
   epubHref?: string;
   chapterVolumes: LocalChapterVolume[];
+  comicChapters: LocalComicChapter[];
 };
 export type LocalChapterContent = LocalChapter & { content: string };
 

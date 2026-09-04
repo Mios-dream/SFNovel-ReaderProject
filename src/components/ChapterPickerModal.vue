@@ -12,9 +12,9 @@
       >
         <div class="chapter-hero-content">
           <span class="modal-icon"
-            ><Headphones v-if="mode === 'audio'" :size="22" /><BookOpen
-              v-else
-              :size="22"
+            ><Headphones v-if="mode === 'audio'" :size="22" /><Image
+              v-else-if="mode === 'comic'"
+              :size="22" /><BookOpen v-else :size="22"
           /></span>
           <div>
             <h2>{{ novel?.novelName }}</h2>
@@ -34,12 +34,13 @@
       </div>
       <template v-else>
         <div
-          v-if="hasAudio"
+          v-if="hasAudio || hasComic"
           class="chapter-tabs"
           role="tablist"
           aria-label="下载类型"
         >
           <button
+            v-if="mode !== 'comic'"
             class="chapter-tab"
             :class="{ active: mode === 'text' }"
             role="tab"
@@ -48,13 +49,23 @@
           >
             <BookOpen :size="16" />下载章节</button
           ><button
+            v-if="hasAudio"
             class="chapter-tab"
             :class="{ active: mode === 'audio' }"
             role="tab"
             :aria-selected="mode === 'audio'"
             @click="emit('change-mode', 'audio')"
           >
-            <Headphones :size="16" />下载有声小说
+            <Headphones :size="16" />下载有声小说</button
+          ><button
+            v-if="hasComic"
+            class="chapter-tab"
+            :class="{ active: mode === 'comic' }"
+            role="tab"
+            :aria-selected="mode === 'comic'"
+            @click="emit('change-mode', 'comic')"
+          >
+            <Image :size="16" />下载漫画
           </button>
         </div>
         <button
@@ -123,7 +134,7 @@
                 ></label
               >
             </div></template
-          ><template v-else
+          ><template v-else-if="mode === 'audio'"
             ><label
               v-for="chapter in audioChapters"
               :key="chapter.id"
@@ -145,6 +156,40 @@
                 ><CheckCircle2 :size="15" />已下载</span
               ></label
             ></template
+          ><template v-else
+            ><label
+              v-for="chapter in comicChapters"
+              :key="chapter.id"
+              :class="{
+                downloaded: chapter.downloaded,
+                locked: chapter.isVip && !chapter.isUnlocked,
+              }"
+              ><input
+                :checked="selectedIds.includes(chapter.id)"
+                :disabled="!canDownload(chapter)"
+                type="checkbox"
+                :value="chapter.id"
+                @change="
+                  toggleChapter(
+                    chapter.id,
+                    ($event.target as HTMLInputElement).checked,
+                  )
+                "
+              /><span class="chapter-title">{{ chapter.title }}</span
+              ><span v-if="chapter.downloaded" class="chapter-state downloaded"
+                ><CheckCircle2 :size="15" />已下载</span
+              ><span
+                v-else-if="chapter.isVip"
+                class="chapter-state vip"
+                :class="{ unlocked: chapter.isUnlocked }"
+                ><LockKeyholeOpen
+                  v-if="chapter.isUnlocked"
+                  :size="15"
+                /><LockKeyhole v-else :size="15" />{{
+                  chapter.isUnlocked ? "已解锁" : "VIP 章节"
+                }}</span
+              ></label
+            ></template
           >
         </div>
         <button
@@ -152,7 +197,13 @@
           :disabled="!selectedCount"
           @click="emit('confirm')"
         >
-          {{ mode === "audio" ? "下载选中有声内容" : "下载选中章节" }}
+          {{
+            mode === "audio"
+              ? "下载选中有声内容"
+              : mode === "comic"
+                ? "下载选中漫画"
+                : "下载选中章节"
+          }}
         </button></template
       >
     </section>
@@ -164,6 +215,7 @@ import {
   BookOpen,
   CheckCircle2,
   Headphones,
+  Image,
   LoaderCircle,
   LockKeyhole,
   LockKeyholeOpen,
@@ -176,8 +228,10 @@ const props = defineProps<{
   mode: ChapterMode;
   loading: boolean;
   hasAudio: boolean;
+  hasComic: boolean;
   volumes: ChapterVolume[];
   audioChapters: Chapter[];
+  comicChapters: Chapter[];
   selectedIds: number[];
   formatDate: (value: string) => string;
 }>();
@@ -196,10 +250,10 @@ type SelectableChapter = (TextChapter | Chapter) & {
   isUnlocked?: boolean;
 };
 
-// 文本和有声章节统一转换为可选择结构，模板无需区分两种目录来源。
+// 文本、有声和漫画章节统一转换为可选择结构，模板无需区分目录来源。
 /**
  * 判断章节是否允许加入下载任务。
- * @param chapter 待判断的文本或有声章节。
+ * @param chapter 待判断的文本、有声或漫画章节。
  * @returns 未下载且已解锁（或免费）时返回 true。
  */
 function canDownload(chapter: SelectableChapter) {
@@ -209,7 +263,9 @@ function canDownload(chapter: SelectableChapter) {
 const allChapters = computed<SelectableChapter[]>(() =>
   props.mode === "text"
     ? props.volumes.flatMap((volume) => volume.chapters)
-    : props.audioChapters,
+    : props.mode === "audio"
+      ? props.audioChapters
+      : props.comicChapters,
 );
 const selectableIds = computed(() =>
   allChapters.value

@@ -41,25 +41,26 @@ const textChapterCount = computed(() =>
   ),
 );
 const audioChapterCount = computed(() => book.value?.audioTracks.length ?? 0);
+const comicChapterCount = computed(() => book.value?.comicChapters.length ?? 0);
 const firstTextChapterId = computed(
   () => book.value?.chapterVolumes[0]?.chapters[0]?.id,
 );
-const chapterMode = ref<"text" | "audio">(
-  textChapterCount.value ? "text" : "audio",
+const chapterMode = ref<"text" | "audio" | "comic">(
+  textChapterCount.value ? "text" : audioChapterCount.value ? "audio" : "comic",
 );
 const desktopContentTab = ref<"novel" | "audio" | "comic">(
   textChapterCount.value
     ? "novel"
     : audioChapterCount.value
       ? "audio"
-      : "novel",
+      : comicChapterCount.value ? "comic" : "novel",
 );
 const desktopDirectoryCount = computed(() =>
   desktopContentTab.value === "novel"
     ? textChapterCount.value
     : desktopContentTab.value === "audio"
       ? audioChapterCount.value
-      : 0,
+      : comicChapterCount.value,
 );
 const detailMode = ref<"novel" | "comic">("novel");
 const directoryOpen = ref(false);
@@ -68,7 +69,7 @@ const descriptionExpanded = ref(false);
 const descriptionModalOpen = ref(false);
 const desktopDirectoryElement = ref<HTMLElement>();
 const primaryActionLabel = computed(() =>
-  textChapterCount.value ? "开始阅读" : "播放有声",
+  textChapterCount.value ? "开始阅读" : audioChapterCount.value ? "播放有声" : "阅读漫画",
 );
 const localStatusLabel = computed(() => {
   if (book.value?.isFinished == null) return "";
@@ -143,12 +144,12 @@ async function loadRouteBook() {
       return;
     }
   }
-  chapterMode.value = textChapterCount.value ? "text" : "audio";
+  chapterMode.value = textChapterCount.value ? "text" : audioChapterCount.value ? "audio" : "comic";
   desktopContentTab.value = textChapterCount.value
     ? "novel"
     : audioChapterCount.value
       ? "audio"
-      : "novel";
+      : comicChapterCount.value ? "comic" : "novel";
   desk.navigate("libraryDetail");
 }
 
@@ -176,25 +177,35 @@ async function playAudio(trackIndex: number) {
   }
 }
 
+async function readComicChapter(chapterId: number) {
+  directoryOpen.value = false;
+  await desk.openLocalComicChapter(chapterId);
+  if (desk.localComicChapter.value) {
+    desk.navigate("reader");
+    await router.push("/reader");
+  }
+}
+
 function startReading() {
   if (firstTextChapterId.value) {
     void readChapter(firstTextChapterId.value);
     return;
   }
   if (audioChapterCount.value) void playAudio(0);
+  else if (comicChapterCount.value) void readComicChapter(book.value!.comicChapters[0].id);
 }
 
-function openDirectory(mode: "text" | "audio" = "text") {
+function openDirectory(mode: "text" | "audio" | "comic" = "text") {
   chapterMode.value =
     mode === "audio" && audioChapterCount.value
       ? "audio"
       : textChapterCount.value
         ? "text"
-        : "audio";
+        : audioChapterCount.value ? "audio" : "comic";
   directoryOpen.value = true;
 }
 
-function focusDesktopDirectory(mode: "text" | "audio" = "text") {
+function focusDesktopDirectory(mode: "text" | "audio" | "comic" = "text") {
   if (mode === "audio" && audioChapterCount.value) {
     desktopContentTab.value = "audio";
     chapterMode.value = "audio";
@@ -204,6 +215,9 @@ function focusDesktopDirectory(mode: "text" | "audio" = "text") {
   } else if (audioChapterCount.value) {
     desktopContentTab.value = "audio";
     chapterMode.value = "audio";
+  } else if (comicChapterCount.value) {
+    desktopContentTab.value = "comic";
+    chapterMode.value = "comic";
   } else {
     desktopContentTab.value = "novel";
   }
@@ -220,7 +234,7 @@ function selectDesktopContentTab(tab: "novel" | "audio" | "comic") {
   } else if (tab === "audio") {
     if (!audioChapterCount.value) return;
     chapterMode.value = "audio";
-  }
+  } else if (!comicChapterCount.value) return;
   desktopContentTab.value = tab;
 }
 
@@ -425,10 +439,11 @@ watch(
         <button
           class="desktop-content-tab comic-tab glass"
           :class="{ active: desktopContentTab === 'comic' }"
-          disabled
+          :disabled="!comicChapterCount"
+          @click="selectDesktopContentTab('comic')"
         >
           <Images :size="23" />
-          <span><strong>漫画</strong><small>尚无本地漫画章节</small></span>
+          <span><strong>漫画</strong><small>{{ comicChapterCount ? `${comicChapterCount} 个章节` : '尚无本地漫画章节' }}</small></span>
           <ChevronRight :size="18" />
         </button>
         <!-- <div class="desktop-content-tabs" aria-label="已保存内容类型">
@@ -476,6 +491,11 @@ watch(
             <small>{{ String(index + 1).padStart(3, "0") }}</small
             ><span>{{ track.title }}</span
             ><Play :size="14" fill="currentColor" />
+          </button>
+        </div>
+        <div v-else-if="desktopContentTab === 'comic' && comicChapterCount" class="desktop-directory-list comic-directory-list">
+          <button v-for="chapter in book.comicChapters" :key="chapter.id" @click="readComicChapter(chapter.id)">
+            <span>{{ chapter.title }}</span><ChevronRight :size="15" />
           </button>
         </div>
         <div v-else class="desktop-directory-empty">
@@ -668,9 +688,10 @@ watch(
         <section class="comic-unavailable">
           <span class="comic-unavailable-icon"><Images :size="29" /></span>
           <div>
-            <strong>漫画章节暂未收录</strong>
-            <p>漫画资源接入后，会在这里呈现可阅读的分镜目录。</p>
+            <strong>{{ comicChapterCount ? `已下载 ${comicChapterCount} 个漫画章节` : '漫画章节暂未收录' }}</strong>
+            <p>{{ comicChapterCount ? '选择章节开始阅读。' : '本地尚未下载漫画章节。' }}</p>
           </div>
+          <button v-if="comicChapterCount" @click="readComicChapter(book.comicChapters[0].id)"><Play :size="17" />开始阅读</button>
           <button @click="detailMode = 'novel'">
             <BookOpen :size="17" />返回小说详情
           </button>
@@ -749,6 +770,7 @@ watch(
           >
             <Headphones :size="15" />有声 {{ audioChapterCount }}
           </button>
+          <button :class="{ active: chapterMode === 'comic' }" :disabled="!comicChapterCount" @click="chapterMode = 'comic'"><Images :size="15" />漫画 {{ comicChapterCount }}</button>
         </div>
         <div
           v-if="chapterMode === 'text' && textChapterCount"
@@ -784,6 +806,9 @@ watch(
             ><strong>{{ track.title }}</strong
             ><Headphones :size="16" />
           </button>
+        </div>
+        <div v-else-if="chapterMode === 'comic' && comicChapterCount" class="drawer-list">
+          <button v-for="chapter in book.comicChapters" :key="chapter.id" @click="readComicChapter(chapter.id)"><strong>{{ chapter.title }}</strong><ChevronRight :size="16" /></button>
         </div>
         <div v-else class="drawer-empty">
           <ListTree :size="27" />暂无已下载内容

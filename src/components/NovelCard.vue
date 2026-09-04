@@ -12,8 +12,10 @@ defineProps<{
   formatDate: (value: string) => string;
 }>();
 
-// 卡片根据作品类型向父级发出文本或有声下载请求。
-const emit = defineEmits<{ select: [novel: Novel, mode: "text" | "audio"] }>();
+// 卡片根据作品类型向父级发出对应的下载请求。
+const emit = defineEmits<{
+  select: [novel: Novel, mode: "text" | "audio" | "comic"];
+}>();
 </script>
 
 <template>
@@ -22,13 +24,37 @@ const emit = defineEmits<{ select: [novel: Novel, mode: "text" | "audio"] }>();
     role="button"
     tabindex="0"
     @click="
-      emit('select', novel, novel.bookshelfType === 'audio' ? 'audio' : 'text')
+      emit(
+        'select',
+        novel,
+        novel.bookshelfType === 'audio'
+          ? 'audio'
+          : novel.bookshelfType === 'comic'
+            ? 'comic'
+            : 'text',
+      )
     "
     @keydown.enter="
-      emit('select', novel, novel.bookshelfType === 'audio' ? 'audio' : 'text')
+      emit(
+        'select',
+        novel,
+        novel.bookshelfType === 'audio'
+          ? 'audio'
+          : novel.bookshelfType === 'comic'
+            ? 'comic'
+            : 'text',
+      )
     "
   >
-    <img :src="novel.novelCover" :alt="`${novel.novelName} 封面`" />
+    <img
+      v-if="novel.novelCover"
+      :src="novel.novelCover"
+      :alt="`${novel.novelName} 封面`"
+    />
+    <div v-else class="novel-cover-placeholder" aria-hidden="true">
+      <ImageIcon v-if="novel.bookshelfType === 'comic'" :size="25" />
+      <FileText v-else :size="25" />
+    </div>
     <div class="novel-info">
       <div style="display: flex; flex-direction: column">
         <p class="novel-name">{{ novel.novelName }}</p>
@@ -56,30 +82,35 @@ const emit = defineEmits<{ select: [novel: Novel, mode: "text" | "audio"] }>();
     </div>
     <div class="novel-actions">
       <button
-        v-if="novel.bookshelfType !== 'comic'"
         class="download-button"
-        :class="{ audio: novel.bookshelfType === 'audio' }"
+        :class="{
+          audio: novel.bookshelfType === 'audio',
+          comic: novel.bookshelfType === 'comic',
+        }"
         :title="
           novel.bookshelfType === 'audio'
             ? `选择有声章节并下载：${novel.novelName}`
-            : `选择章节并下载：${novel.novelName}`
+            : novel.bookshelfType === 'comic'
+              ? `选择漫画章节并下载：${novel.novelName}`
+              : `选择章节并下载：${novel.novelName}`
         "
         @click.stop="
           emit(
             'select',
             novel,
-            novel.bookshelfType === 'audio' ? 'audio' : 'text',
+            novel.bookshelfType === 'audio'
+              ? 'audio'
+              : novel.bookshelfType === 'comic'
+                ? 'comic'
+                : 'text',
           )
         "
       >
         <Headphones
           v-if="novel.bookshelfType === 'audio'"
           :size="18"
-        /><Download v-else :size="18" />
+        /><ImageIcon v-else-if="novel.bookshelfType === 'comic'" :size="18" /><Download v-else :size="18" />
       </button>
-      <span v-else class="media-unavailable" title="当前暂不支持漫画章节下载"
-        ><ImageIcon :size="18"
-      /></span>
     </div>
   </article>
 </template>
@@ -158,15 +189,6 @@ const emit = defineEmits<{ select: [novel: Novel, mode: "text" | "audio"] }>();
 .media-type-comic {
   color: #8b6a9b;
 }
-.media-unavailable {
-  display: grid;
-  width: 33px;
-  height: 33px;
-  border-radius: 10px;
-  color: #a890aa;
-  background: #eee5f1;
-  place-items: center;
-}
 .novel-actions {
   display: grid;
   gap: 7px;
@@ -193,5 +215,22 @@ const emit = defineEmits<{ select: [novel: Novel, mode: "text" | "audio"] }>();
 }
 .download-button.audio:hover {
   background: #934149;
+}
+.novel-cover-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 70px;
+  height: 96px;
+  border-radius: 9px;
+  color: #a66d59;
+  background: #f3d5c5;
+}
+.download-button.comic {
+  color: #735383;
+  background: #eee5f1;
+}
+.download-button.comic:hover {
+  background: #8b6a9b;
 }
 </style>

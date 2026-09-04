@@ -46,6 +46,7 @@ struct LocalBookDetail {
     audio_tracks: Vec<LocalAudioTrack>,
     epub_href: Option<String>,
     chapter_volumes: Vec<LocalChapterVolume>,
+    comic_chapters: Vec<LocalComicChapter>,
 }
 
 /// A locally playable audio track. The renderer converts the validated absolute
@@ -75,6 +76,7 @@ struct LocalChapterSummary {
 #[serde(rename_all = "camelCase")]
 struct StoredBookMetadata {
     novel_id: Option<i64>,
+    comic_id: Option<i64>,
     title: Option<String>,
     author: Option<String>,
     description: Option<String>,
@@ -96,6 +98,7 @@ struct StoredBookMetadata {
     last_update_time: Option<String>,
     downloaded_text_chapter_ids: Option<Vec<i64>>,
     downloaded_audio_chapter_ids: Option<Vec<i64>>,
+    downloaded_comic_chapter_ids: Option<Vec<i64>>,
 }
 
 /// One persisted text chapter from `.novel-flow-chapters.json`.
@@ -126,6 +129,15 @@ struct RequestPolicy {
     max_concurrent_downloads: u8,
     #[serde(default = "default_web_fallback_enabled")]
     web_fallback_enabled: bool,
+}
+
+/// A locally stored comic chapter and its ordered page files.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalComicChapter {
+    id: i64,
+    title: String,
+    pages: Vec<String>,
 }
 
 fn default_web_fallback_enabled() -> bool {
@@ -615,9 +627,10 @@ fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBook>, String>
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        let text =
-            entry.path().join(".novel-flow.json").exists() || entry.path().join("book.md").exists();
+        let text = entry.path().join(".novel-flow-chapters.json").exists()
+            || entry.path().join("book.md").exists();
         let audio = entry.path().join("audio").is_dir();
+        let comic = entry.path().join("comic").is_dir();
         books.push(LibraryBook {
             name,
             updated_at: metadata
@@ -642,7 +655,7 @@ fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBook>, String>
             formats: LibraryFormats {
                 text,
                 audio,
-                comic: false,
+                comic,
             },
         });
     }
@@ -802,9 +815,10 @@ fn get_local_book(app: tauri::AppHandle, name: String) -> Result<LocalBookDetail
         directory.join(&epub_name).to_string_lossy().into_owned()
     });
     let audio_tracks = read_local_audio_tracks(&directory)?;
+    let comic_chapters = read_local_comic_chapters(&directory)?;
     Ok(LocalBookDetail {
         name,
-        novel_id: metadata.novel_id,
+        novel_id: metadata.novel_id.or(metadata.comic_id),
         author: metadata.author.unwrap_or_else(|| "未知作者".to_string()),
         description: metadata
             .description
@@ -829,7 +843,50 @@ fn get_local_book(app: tauri::AppHandle, name: String) -> Result<LocalBookDetail
         audio_tracks,
         epub_href,
         chapter_volumes,
+        comic_chapters,
     })
+}
+
+fn read_local_comic_chapters(directory: &PathBuf) -> Result<Vec<LocalComicChapter>, String> {
+    let root = directory.join("comic");
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut chapters = Vec::new();
+    for entry in fs::read_dir(root).map_err(|error| format!("无法读取漫画目录：{error}"))? {
+        let entry = entry.map_err(|error| format!("读取漫画章节失败：{error}"))?;
+        let chapter_dir = entry.path();
+        if !chapter_dir.is_dir() || !chapter_dir.join(".complete").is_file() {
+            continue;
+        }
+        let Some(id) = entry.file_name().to_str().and_then(|value| value.parse::<i64>().ok()) else {
+            continue;
+        };
+        let title = fs::read_to_string(chapter_dir.join(".complete"))
+            .unwrap_or_else(|_| format!("第 {id} 话"))
+            .trim()
+            .to_string();
+        let mut pages = fs::read_dir(&chapter_dir)
+            .map_err(|error| format!("无法读取漫画页：{error}"))?
+            .filter_map(Result::ok)
+            .filter(|item| item.path().is_file() && item.file_name() != ".complete")
+            .map(|item| item.path())
+            .filter(|path| matches!(path.extension().and_then(|value| value.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("jpg" | "jpeg" | "png" | "webp" | "avif")))
+            .collect::<Vec<_>>();
+        pages.sort();
+        if !pages.is_empty() {
+            chapters.push(LocalComicChapter { id, title, pages: pages.into_iter().map(|path| path.to_string_lossy().into_owned()).collect() });
+        }
+    }
+    chapters.sort_by_key(|chapter| chapter.id);
+    Ok(chapters)
+}
+
+#[tauri::command]
+fn get_local_comic_chapter(app: tauri::AppHandle, name: String, chapter_id: i64) -> Result<LocalComicChapter, String> {
+    if chapter_id <= 0 { return Err("漫画章节参数无效".to_string()); }
+    let directory = local_book_directory(&app, &name)?;
+    read_local_comic_chapters(&directory)?.into_iter().find(|chapter| chapter.id == chapter_id).ok_or_else(|| "本地漫画章节不存在".to_string())
 }
 
 /// Reads one downloaded text chapter without exposing its filesystem path.

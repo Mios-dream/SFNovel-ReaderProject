@@ -20,26 +20,26 @@ export function useChapterPicker({
   const chapterLoading = ref(false);
   const chapterMode = ref<ChapterMode>("text");
   const chapterHasAudio = ref(false);
+  const chapterHasComic = ref(false);
   const chapterNovel = ref<Novel>();
   const chapterVolumes = ref<ChapterVolume[]>([]);
   const audioChapters = ref<Chapter[]>([]);
+  const comicChapters = ref<Chapter[]>([]);
   const selectedChapterIds = ref<number[]>([]);
 
   async function openChapterPicker(novel: Novel, mode: ChapterMode) {
-    if (novel.bookshelfType === "comic") {
-      notify("当前暂不支持漫画章节下载");
-      return;
-    }
     chapterNovel.value = novel;
     chapterMode.value = mode;
     chapterModalOpen.value = true;
     chapterLoading.value = true;
     chapterVolumes.value = [];
     audioChapters.value = [];
+    comicChapters.value = [];
     chapterHasAudio.value = false;
+    chapterHasComic.value = false;
     selectedChapterIds.value = [];
     try {
-      const [info, volumes, audio] = await Promise.all([
+      const [info, volumes, audio, comic] = await Promise.all([
         invoke<Partial<Novel>>("get_novel_details", {
           novelId: novel.novelId,
         }).catch(() => ({})),
@@ -53,13 +53,22 @@ export function useChapterPicker({
               novelId: novel.novelId,
             }).catch(() => ({ chapters: [] as Chapter[] }))
           : Promise.resolve({ chapters: [] as Chapter[] }),
+        novel.bookshelfType === "comic"
+          ? invoke<{ chapters: Chapter[] }>("get_comic_chapters", {
+              comicId: novel.novelId,
+            }).catch(() => ({ chapters: [] as Chapter[] }))
+          : Promise.resolve({ chapters: [] as Chapter[] }),
       ]);
       chapterNovel.value = { ...novel, ...info };
       chapterVolumes.value = volumes;
       audioChapters.value = audio.chapters;
+      comicChapters.value = comic.chapters;
       chapterHasAudio.value = audio.chapters.length > 0;
+      chapterHasComic.value = comic.chapters.length > 0;
       if (mode === "audio" && !chapterHasAudio.value)
         chapterMode.value = "text";
+      if (mode === "comic" && !chapterHasComic.value)
+        chapterModalOpen.value = false;
       selectDownloadableChapters();
     } catch (error) {
       chapterModalOpen.value = false;
@@ -74,7 +83,9 @@ export function useChapterPicker({
       ? chapterVolumes.value.flatMap((volume) =>
           volume.chapters.map((chapter) => chapter.chapId),
         )
-      : audioChapters.value.map((chapter) => chapter.id);
+      : chapterMode.value === "audio"
+        ? audioChapters.value.map((chapter) => chapter.id)
+        : comicChapters.value.map((chapter) => chapter.id);
   }
 
   function isDownloadable(id: number, mode = chapterMode.value) {
@@ -82,7 +93,9 @@ export function useChapterPicker({
       ? chapterVolumes.value
           .flatMap((volume) => volume.chapters)
           .find((item) => item.chapId === id)
-      : audioChapters.value.find((item) => item.id === id);
+      : mode === "audio"
+        ? audioChapters.value.find((item) => item.id === id)
+        : comicChapters.value.find((item) => item.id === id);
     return chapter && !chapter.downloaded && (!chapter.isVip || chapter.isUnlocked);
   }
 
@@ -92,6 +105,7 @@ export function useChapterPicker({
 
   function changeChapterMode(mode: ChapterMode) {
     if (mode === "audio" && !chapterHasAudio.value) return;
+    if (mode === "comic" && !chapterHasComic.value) return;
     chapterMode.value = mode;
     selectDownloadableChapters();
   }
@@ -113,11 +127,17 @@ export function useChapterPicker({
             title: novel.novelName,
             chapterIds: selectedChapterIds.value,
           })
-        : await invoke<Job>("create_audio_download", {
-            novelId: novel.novelId,
-            title: novel.novelName,
-            chapterIds: selectedChapterIds.value,
-          });
+        : chapterMode.value === "audio"
+          ? await invoke<Job>("create_audio_download", {
+              novelId: novel.novelId,
+              title: novel.novelName,
+              chapterIds: selectedChapterIds.value,
+            })
+          : await invoke<Job>("create_comic_download", {
+              comicId: novel.novelId,
+              title: novel.novelName,
+              chapterIds: selectedChapterIds.value,
+            });
       addJob(job);
       chapterModalOpen.value = false;
       notify(`已将《${novel.novelName}》加入下载队列`);
@@ -132,9 +152,11 @@ export function useChapterPicker({
     chapterLoading,
     chapterMode,
     chapterHasAudio,
+    chapterHasComic,
     chapterNovel,
     chapterVolumes,
     audioChapters,
+    comicChapters,
     selectedChapterIds,
     openChapterPicker,
     changeChapterMode,

@@ -506,6 +506,71 @@ async fn enrich_local_book(
     Ok(())
 }
 
+/// Fetches comic metadata from the SF comic endpoint and persists artwork.
+async fn enrich_local_comic_book(
+    client: &SfacgHttpClient,
+    directory: &std::path::PathBuf,
+    metadata: &mut StoredBookMetadata,
+    comic_id: i64,
+    cookie: Option<&str>,
+) -> Result<(), String> {
+    let detail = client
+        .get_data_with_cookie(
+            &format!("/comics/{comic_id}"),
+            &[("expand", "intro,typeName,sysTags,latestchapter,fav,ticket,pointCount".to_string())],
+            cookie,
+        )
+        .await?;
+    let text = |keys: &[&str]| {
+        keys.iter().find_map(|key| {
+            detail
+                .get(*key)
+                .and_then(Value::as_str)
+                .filter(|v| !v.trim().is_empty())
+                .map(ToString::to_string)
+                .or_else(|| {
+                    detail
+                        .get("expand")
+                        .and_then(|expand| expand.get(*key))
+                        .and_then(Value::as_str)
+                        .filter(|v| !v.trim().is_empty())
+                        .map(ToString::to_string)
+                })
+        })
+    };
+    metadata.comic_id = Some(comic_id);
+    metadata.title = text(&["comicName", "novelName"]).or_else(|| metadata.title.clone());
+    metadata.author = text(&["authorName", "author"]).or_else(|| metadata.author.clone());
+    metadata.description = text(&["intro", "description", "content"]).or_else(|| metadata.description.clone());
+    metadata.type_name = text(&["typeName", "categoryName"]).or_else(|| metadata.type_name.clone());
+    metadata.last_update_time = text(&["lastUpdateTime", "updateTime"]).or_else(|| metadata.last_update_time.clone());
+    metadata.is_finished = detail.get("isFinish").and_then(Value::as_bool).or(metadata.is_finished);
+    metadata.score = detail.get("point").and_then(Value::as_f64).or(metadata.score);
+    metadata.view_count = detail.get("viewTimes").and_then(Value::as_i64).or(metadata.view_count);
+    metadata.mark_count = detail.get("markCount").and_then(Value::as_i64).or(metadata.mark_count);
+    metadata.favorite_count = detail.get("favoriteCount").or_else(|| detail.get("fav")).and_then(Value::as_i64).or(metadata.favorite_count);
+    if let Some(tags) = detail
+        .get("tags")
+        .or_else(|| detail.get("sysTags"))
+        .or_else(|| detail.get("expand").and_then(|expand| expand.get("tags")))
+        .or_else(|| detail.get("expand").and_then(|expand| expand.get("sysTags")))
+        .and_then(Value::as_array)
+    {
+        metadata.tags = tags.iter().filter_map(|tag| tag.as_str().or_else(|| tag.get("tagName").and_then(Value::as_str)).map(str::trim).filter(|v| !v.is_empty()).map(ToString::to_string)).take(8).collect();
+    }
+    let Some(cover_url) = text(&["comicCover", "coverBig", "coverMedium", "coverSmall", "novelCover"]) else { return Ok(()); };
+    let cover = directory.join("imgs").join("cover.jpeg");
+    if cover.is_file() { return Ok(()); }
+    let source = if cover_url.starts_with("http://") || cover_url.starts_with("https://") { cover_url } else { format!("https://manhua.sfacg.com{}", if cover_url.starts_with('/') { cover_url } else { format!("/{cover_url}") }) };
+    let payload = client.client.get(source).header(reqwest::header::REFERER, "https://manhua.sfacg.com/").send().await.map_err(|e| format!("无法下载漫画封面：{e}"))?.error_for_status().map_err(|e| format!("漫画封面下载被拒绝：{e}"))?.bytes().await.map_err(|e| format!("无法读取漫画封面：{e}"))?;
+    let parent = cover.parent().ok_or_else(|| "封面目录无效".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| format!("无法创建封面目录：{e}"))?;
+    let partial = cover.with_extension("jpeg.part");
+    fs::write(&partial, payload).map_err(|e| format!("无法写入漫画封面：{e}"))?;
+    fs::rename(&partial, &cover).map_err(|e| format!("无法完成漫画封面写入：{e}"))?;
+    Ok(())
+}
+
 /// Runs one authenticated audio download task and rebuilds the local M3U8 list.
 ///
 /// # Arguments
@@ -656,6 +721,182 @@ async fn run_audio_download(
             job.status = "done".to_string();
             job.progress = 100;
             job.message = "有声章节下载完成".to_string();
+            job.file = Some(file);
+        }),
+        Err(_error) if cancelled.load(std::sync::atomic::Ordering::Relaxed) => {
+            update_native_job(&state, &job_id, |job| {
+                job.status = "paused".to_string();
+                job.message = "已暂停，可继续下载".to_string();
+            })
+        }
+        Err(error) => update_native_job(&state, &job_id, |job| {
+            job.status = "error".to_string();
+            job.message = error;
+        }),
+    }
+    emit_native_job_update(&app, &state, &job_id);
+    let _ = persist_native_jobs(&app, &state);
+}
+
+/// Returns the extension represented by a validated SF comic image URL.
+fn comic_image_extension(url: &str) -> &'static str {
+    let path = url.split('?').next().unwrap_or(url).to_ascii_lowercase();
+    if path.ends_with(".png") {
+        "png"
+    } else if path.ends_with(".webp") {
+        "webp"
+    } else if path.ends_with(".jpeg") {
+        "jpeg"
+    } else {
+        "jpg"
+    }
+}
+
+/// Downloads selected comic chapters into app-owned page directories. VIP
+/// chapters require the native SF session and every web/image request reuses
+/// that session without returning it to the renderer.
+async fn run_comic_download(
+    app: tauri::AppHandle,
+    job_id: String,
+    comic_id: i64,
+    title: String,
+    chapter_ids: Vec<i64>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+) {
+    let state = app.state::<NativeJobState>();
+    let result: Result<String, String> = async {
+        #[cfg(target_os = "android")]
+        sync_android_auth_session(&app).await?;
+        let cookie = current_session_cookie(&app).ok();
+        let client = SfacgHttpClient::new()?;
+        let (_catalog_title, catalog) = client.comic_catalog(comic_id, cookie.as_deref()).await?;
+        let requested = chapter_ids.into_iter().collect::<std::collections::HashSet<_>>();
+        let chapters = catalog
+            .into_iter()
+            .filter(|chapter| {
+                requested.contains(&chapter.id) && chapter.is_unlocked
+            })
+            .collect::<Vec<_>>();
+        if chapters.is_empty() {
+            return Err("所选漫画章节没有可下载内容；VIP 章节必须由目录明确标记为已解锁".to_string());
+        }
+        let directory = library_directory(&app)?.join(safe_library_name(&title));
+        let comic_directory = directory.join("comic");
+        fs::create_dir_all(&comic_directory)
+            .map_err(|error| format!("无法创建漫画目录：{error}"))?;
+        let mut metadata =
+            read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?;
+        metadata.comic_id = Some(comic_id);
+        metadata.title = Some(title.clone());
+        metadata
+            .author
+            .get_or_insert_with(|| "未知作者".to_string());
+        metadata
+            .description
+            .get_or_insert_with(|| "暂无简介".to_string());
+        let _ = enrich_local_comic_book(
+            &client,
+            &directory,
+            &mut metadata,
+            comic_id,
+            cookie.as_deref(),
+        )
+        .await;
+        let mut downloaded = metadata
+            .downloaded_comic_chapter_ids
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let policy = get_request_policy(app.clone()).unwrap_or_default();
+        let total = chapters.len();
+        for (chapter_index, chapter) in chapters.into_iter().enumerate() {
+            if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err("下载已暂停".to_string());
+            }
+            update_native_job(&state, &job_id, |job| {
+                job.status = "downloading".to_string();
+                job.progress = 2 + ((chapter_index * 94) / total) as u8;
+                job.message = format!("正在读取：{}", chapter.title);
+            });
+            emit_native_job_update(&app, &state, &job_id);
+            let chapter_directory = comic_directory.join(format!("{:06}", chapter.id));
+            let marker = chapter_directory.join(".complete");
+            if !marker.is_file() {
+                let images = client
+                    .comic_chapter_images(comic_id, chapter.id, cookie.as_deref())
+                    .await?;
+                fs::create_dir_all(&chapter_directory)
+                    .map_err(|error| format!("无法创建漫画章节目录：{error}"))?;
+                for (page_index, image) in images.iter().enumerate() {
+                    if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Err("下载已暂停".to_string());
+                    }
+                    update_native_job(&state, &job_id, |job| {
+                        job.message = format!(
+                            "正在下载：{}（{}/{})",
+                            chapter.title,
+                            page_index + 1,
+                            images.len()
+                        );
+                    });
+                    emit_native_job_update(&app, &state, &job_id);
+                    let extension = comic_image_extension(image);
+                    let target = chapter_directory.join(format!("{:03}.{extension}", page_index + 1));
+                    if target.is_file() {
+                        continue;
+                    }
+                    let mut image_request = client
+                        .client
+                        .get(image)
+                        .header(reqwest::header::REFERER, "https://manhua.sfacg.com/")
+                        .header(reqwest::header::ACCEPT, "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
+                    if let Some(cookie) = cookie.as_deref() {
+                        image_request = image_request.header(reqwest::header::COOKIE, cookie);
+                    }
+                    let payload = image_request
+                        .send()
+                        .await
+                        .map_err(|error| format!("无法下载漫画图片：{error}"))?
+                        .error_for_status()
+                        .map_err(|error| format!("漫画图片下载被拒绝：{error}"))?
+                        .bytes()
+                        .await
+                        .map_err(|error| format!("无法读取漫画图片：{error}"))?;
+                    let partial = target.with_extension(format!("{extension}.part"));
+                    fs::write(&partial, payload)
+                        .map_err(|error| format!("无法写入漫画图片：{error}"))?;
+                    fs::rename(&partial, &target)
+                        .map_err(|error| format!("无法完成漫画图片写入：{error}"))?;
+                }
+                fs::write(&marker, chapter.title.as_bytes())
+                    .map_err(|error| format!("无法完成漫画章节写入：{error}"))?;
+            }
+            downloaded.insert(chapter.id);
+            tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
+        }
+        metadata.downloaded_comic_chapter_ids = Some(downloaded.into_iter().collect());
+        let payload = serde_json::to_vec_pretty(&metadata)
+            .map_err(|error| format!("无法序列化漫画元数据：{error}"))?;
+        fs::write(directory.join(".novel-flow.json.tmp"), payload)
+            .map_err(|error| format!("无法写入漫画元数据：{error}"))?;
+        if directory.join(".novel-flow.json").exists() {
+            fs::remove_file(directory.join(".novel-flow.json"))
+                .map_err(|error| format!("无法替换漫画元数据：{error}"))?;
+        }
+        fs::rename(
+            directory.join(".novel-flow.json.tmp"),
+            directory.join(".novel-flow.json"),
+        )
+        .map_err(|error| format!("无法完成漫画元数据写入：{error}"))?;
+        Ok("comic".to_string())
+    }
+    .await;
+    match result {
+        Ok(file) => update_native_job(&state, &job_id, |job| {
+            job.status = "done".to_string();
+            job.progress = 100;
+            job.message = "漫画章节下载完成".to_string();
             job.file = Some(file);
         }),
         Err(_error) if cancelled.load(std::sync::atomic::Ordering::Relaxed) => {
@@ -838,6 +1079,94 @@ async fn create_audio_download(
     Ok(job)
 }
 
+/// Creates and schedules a comic download task. VIP chapters require an
+/// existing native SF session; the worker repeats that entitlement check.
+#[tauri::command]
+async fn create_comic_download(
+    app: tauri::AppHandle,
+    comic_id: i64,
+    title: String,
+    chapter_ids: Vec<i64>,
+) -> Result<NativeJob, String> {
+    validate_novel_id(comic_id)?;
+    if title.trim().is_empty() || title.chars().count() > 200 {
+        return Err("漫画标题无效".to_string());
+    }
+    if chapter_ids.is_empty() || chapter_ids.iter().any(|id| *id <= 0) {
+        return Err("漫画章节选择无效".to_string());
+    }
+    if !ensure_external_storage_access(app.clone()).await? {
+        return Err("请在系统设置中允许本应用管理所有文件，然后重试下载".to_string());
+    }
+    #[cfg(target_os = "android")]
+    sync_android_auth_session(&app).await?;
+    let client = SfacgHttpClient::new()?;
+    let cookie = current_session_cookie(&app).ok();
+    let (_catalog_title, catalog) = client.comic_catalog(comic_id, cookie.as_deref()).await?;
+    let requested = chapter_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    if catalog
+        .iter()
+        .any(|chapter| requested.contains(&chapter.id) && !chapter.is_unlocked)
+    {
+        return Err("所选 VIP 漫画章节尚未解锁，请确认账号已购买对应章节".to_string());
+    }
+    let id = format!(
+        "{}-{comic_id}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| "系统时间无效".to_string())?
+            .as_millis()
+    );
+    let job = NativeJob {
+        id: id.clone(),
+        title: title.clone(),
+        kind: "comic".to_string(),
+        status: "queued".to_string(),
+        progress: 0,
+        message: "等待开始".to_string(),
+        file: None,
+        novel_id: Some(comic_id),
+    };
+    let state = app.state::<NativeJobState>();
+    state
+        .jobs
+        .lock()
+        .map_err(|_| "下载任务状态不可用".to_string())?
+        .insert(id.clone(), job.clone());
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    state
+        .cancellations
+        .lock()
+        .map_err(|_| "下载任务状态不可用".to_string())?
+        .insert(id.clone(), cancelled.clone());
+    state
+        .specs
+        .lock()
+        .map_err(|_| "下载任务状态不可用".to_string())?
+        .insert(
+            id.clone(),
+            NativeJobSpec {
+                kind: "comic".to_string(),
+                novel_id: comic_id,
+                title: title.clone(),
+                chapter_ids: chapter_ids.clone(),
+            },
+        );
+    persist_native_jobs(&app, &state)?;
+    tauri::async_runtime::spawn(run_comic_download(
+        app,
+        id,
+        comic_id,
+        title,
+        chapter_ids,
+        cancelled,
+    ));
+    Ok(job)
+}
+
 /// Lists native download tasks in reverse creation order.
 ///
 /// # Arguments
@@ -933,6 +1262,15 @@ fn resume_download_job(app: tauri::AppHandle, job_id: String) -> Result<NativeJo
     persist_native_jobs(&app, &state)?;
     if spec.kind == "audio" {
         tauri::async_runtime::spawn(run_audio_download(
+            app,
+            job_id,
+            spec.novel_id,
+            spec.title,
+            spec.chapter_ids,
+            cancelled,
+        ));
+    } else if spec.kind == "comic" {
+        tauri::async_runtime::spawn(run_comic_download(
             app,
             job_id,
             spec.novel_id,

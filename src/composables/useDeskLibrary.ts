@@ -6,6 +6,7 @@ import type {
   Book,
   LocalBookDetail,
   LocalChapterContent,
+  LocalComicChapter,
   ViewName,
 } from "../types";
 import { localAssetSource, type Notify } from "./deskShared";
@@ -25,6 +26,7 @@ export function useDeskLibrary({
   const confirmBook = ref<Book>();
   const localBook = ref<LocalBookDetail>();
   const localChapter = ref<LocalChapterContent>();
+  const localComicChapter = ref<LocalComicChapter>();
   const localAudioTrackIndex = ref(0);
   const exportingFormat = ref<ExportFormat>();
 
@@ -68,11 +70,28 @@ export function useDeskLibrary({
         ...track,
         href: localAssetSource(track.href) || "",
       }));
+      bookDetail.comicChapters = bookDetail.comicChapters || [];
       localBook.value = bookDetail;
       return bookDetail;
     } catch (error) {
       notify(error instanceof Error ? error.message : "无法读取本地书籍详情");
       return undefined;
+    }
+  }
+
+  async function openLocalComicChapter(chapterId: number) {
+    const book = localBook.value;
+    if (!book) return;
+    try {
+      const chapter = await invoke<LocalComicChapter>("get_local_comic_chapter", {
+        name: book.name,
+        chapterId,
+      });
+      chapter.pages = chapter.pages.map((page) => localAssetSource(page) || "");
+      localComicChapter.value = chapter;
+      return chapter;
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "无法读取本地漫画章节");
     }
   }
 
@@ -152,6 +171,7 @@ export function useDeskLibrary({
     confirmBook,
     localBook,
     localChapter,
+    localComicChapter,
     localAudioTrackIndex,
     exportingFormat,
     refreshLibrary,
@@ -159,6 +179,7 @@ export function useDeskLibrary({
     deleteBook,
     confirmDeleteBook,
     openLocalChapter,
+    openLocalComicChapter,
     openLocalAudioPlayer,
     readOnline,
     exportBook,
