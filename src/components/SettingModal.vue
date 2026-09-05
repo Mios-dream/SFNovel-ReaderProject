@@ -27,7 +27,7 @@ const emit = defineEmits<{
 const defaultPolicy: RequestPolicy = {
   requestIntervalMs: 500,
   maxConcurrentDownloads: 1,
-  webFallbackEnabled: true,
+  appFallbackEnabled: true,
 };
 // 使用本地草稿编辑，只有提交表单时才将设置发送给后端。
 const draft = reactive<RequestPolicy>({ ...props.policy });
@@ -115,14 +115,14 @@ function resetDraft() {
 
             <div class="setting-row">
               <div class="setting-info">
-                <strong>启用网页回退</strong>
-                <small>API 正文请求失败时自动切换到网页解析，默认开启</small>
+                <strong>网页失败时使用 App API</strong>
+                <small>网页正文不可用时允许回退 App API，默认开启</small>
               </div>
               <label class="setting-control toggle-control">
-                <input v-model="draft.webFallbackEnabled" type="checkbox" />
+                <input v-model="draft.appFallbackEnabled" type="checkbox" />
                 <span class="toggle" aria-hidden="true"></span>
                 <span>{{
-                  draft.webFallbackEnabled ? "已启用" : "已关闭"
+                  draft.appFallbackEnabled ? "已启用" : "已关闭"
                 }}</span>
               </label>
             </div>

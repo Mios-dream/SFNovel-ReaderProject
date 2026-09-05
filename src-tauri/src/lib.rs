@@ -1,4 +1,13 @@
-//! Native application assembly. Domain implementation lives in focused source files.
+//! 原生应用装配入口。
+//!
+//! 本模块负责组装 Tauri 运行时、共享状态、平台插件与前端可调用命令；具体
+//! 业务实现按 SFACG 通信、本地书库、下载任务和诊断功能拆分在独立源文件中。
+
+mod app_client;
+mod web_client;
+
+use app_client::AppClient;
+use web_client::WebClient;
 
 include!("sfacg.rs");
 include!("library.rs");
@@ -6,24 +15,37 @@ include!("downloads.rs");
 include!("diagnostics.rs");
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Configures and runs the Tauri application on the current platform.
+/// 配置并在当前平台运行 Tauri 应用。
 ///
-/// # Side effects
-/// Registers native state, commands, the opener plugin, Android authentication
-/// support when applicable, and restores persisted download jobs as paused.
-/// The function blocks until the application exits.
+/// # 副作用
+/// 注册原生状态、IPC 命令和打开器插件；在 Android 注册认证插件；并将已持久化
+/// 的未完成下载恢复为暂停状态。函数会阻塞至应用退出。
 pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .manage(AuthSessionState::default())
         .manage(NativeJobState::default())
         .setup(|app| {
+            #[cfg(target_os = "android")]
+            tauri::async_runtime::block_on(initialize_device_identity(&app.handle()))?;
+            #[cfg(not(target_os = "android"))]
+            initialize_device_identity(&app.handle())?;
             // A malformed recovery snapshot must not block application startup.
             let _ = restore_native_jobs(&app.handle());
             #[cfg(target_os = "windows")]
             if let Ok(Some(session)) = restore_desktop_auth_session(&app.handle()) {
                 if let Ok(mut current) = app.state::<AuthSessionState>().session.lock() {
                     *current = Some(session);
+                }
+            }
+            #[cfg(target_os = "windows")]
+            if let Ok(Some(web_session)) = restore_desktop_web_session(&app.handle()) {
+                if let Ok(mut current) = app.state::<AuthSessionState>().session.lock() {
+                    if let Some(existing) = current.as_mut() {
+                        existing.web_cookie = web_session.web_cookie;
+                    } else {
+                        *current = Some(web_session);
+                    }
                 }
             }
             Ok(())

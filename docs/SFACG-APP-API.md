@@ -1,6 +1,6 @@
 # SFACG App API 登录与签名
 
-> 验证日期：2026-08-30。本文只记录登录和请求签名协议。该协议可能被 SF 随时调整，不代表稳定的公开 API。
+> 验证日期：2026-09-05。本文只记录登录和请求签名协议。该协议可能被 SF 随时调整，不代表稳定的公开 API。
 
 ## 已验证的登录方法
 
@@ -11,18 +11,17 @@
 - Basic Auth：固定的 App 基础认证
 - `Accept`：`application/vnd.sfacg.api+json;version=1`
 - `Content-Type`：`application/json; charset=UTF-8`
-- `User-Agent`：`boluobao/5.2.16(android;35)/OPPO/{deviceToken 小写}/OPPO`
-- `deviceToken`：大写 UUID；实测固定值 `910D166A-736E-3231-8B21-8D12DFD75F16` 可用
-- `salt`：`lPQDb9AKO7$LjkPG`
-- 时间戳：Unix 毫秒时间戳
+- `User-Agent`：`boluobao/5.0.36(android;34)/H5/{deviceToken}/H5`
+- `deviceToken`：每个安装稳定保存的大写 UUID
+- `salt`：`FN_Q29XHVmfV3mYX`
+- 时间戳：Unix 秒级时间戳
 
-登录体使用小写字段名：
+登录体使用 App 客户端字段名：
 
 ```json
 {
-  "username": "账号",
-  "password": "密码",
-  "shuMeiId": ""
+  "userName": "账号",
+  "passWord": "密码"
 }
 ```
 
@@ -38,29 +37,19 @@ nonce={大写 UUID v4}&timestamp={Unix 毫秒}&devicetoken={deviceToken}&sign={�
 
 `sign` 的计算步骤：
 
-1. 将 `timestamp + salt + deviceToken + nonce` 按 ASCII 编码为 `authString`，长度为 101 字节。
-2. 将 `nonce` 重复四次。对重复串第 2、3、4、5 个字节分别计算 `byte - floor(byte / 0x24) * 0x24`，得到四个偏移量。
-3. 从重复串按四个偏移量分别截取长度 `13`、`16`、`36`、`36` 的片段，拼接为 `nonceReorder`。
-4. 对 `authString` 与 `nonceReorder` 的每个字节执行 `(a + b) >> 1`，得到 101 个字符。
-5. 将结果按 `D + A + C + B` 重排，其中四段长度依次为 `13`、`16`、`36`、`36`。
-6. 对字符执行上游的 ASCII 归一化规则：小于 `0x30` 或位于数字/大小写字母间隙的字符加 `19`，`0x39` 间隙取 `0x39`。
-7. 对归一化后的 UTF-8 字符串计算 MD5，并转为大写十六进制。
-
-不要使用简单的 `MD5(nonce + timestamp + deviceToken + salt)` 替代上述算法。实测中，简单算法会得到 `417/782`。
+1. 生成大写 UUID nonce。
+2. 拼接 `nonce + timestamp + deviceToken + salt`。
+3. 对拼接结果计算 MD5，并转为大写十六进制。
 
 ## Nonce 流程
 
-复杂签名必须先用章节接口预检 nonce：
+每个请求独立生成 nonce，不需要章节接口预检，也不跨请求复用：
 
 ```text
-生成 nonce
-  -> GET /Chaps/8436696?expand=content%2Cexpand.content
-  -> status.httpCode == 417：更换 nonce，有限次重试
-  -> 非 417：保留 nonce
-  -> 用同一个 nonce 请求 /sessions 和后续 API
+生成新的 nonce
+  -> 计算当前请求的 SFSecurity
+  -> 发送 /sessions 或其他 App API
 ```
-
-不能在登录后为每个请求重新生成 nonce；实测会使后续请求再次返回 `417/782`。
 
 ## 可复现登录代码
 
@@ -79,53 +68,26 @@ import { v4 as uuidv4 } from "uuid";
 
 const HOST = "https://api.sfacg.com";
 const DEVICE_TOKEN = "910D166A-736E-3231-8B21-8D12DFD75F16";
-const SALT = "lPQDb9AKO7$LjkPG";
+const SALT = "FN_Q29XHVmfV3mYX";
 const BASIC_AUTH = "Basic YW5kcm9pZHVzZXI6MWEjJDUxLXl0Njk7KkFjdkBxeHE=";
 const USERNAME = process.env.SFACG_USERNAME;
 const PASSWORD = process.env.SFACG_PASSWORD;
 
 function sign(nonce: string, timestamp: number): string {
-  const repeated = Buffer.from(nonce.repeat(4), "ascii");
-  const offset = (index: number) => {
-    const value = repeated[index];
-    return value - Math.floor(value / 0x24) * 0x24;
-  };
-  const reorderedNonce = Buffer.concat([
-    repeated.subarray(offset(1), offset(1) + 13),
-    repeated.subarray(offset(2), offset(2) + 16),
-    repeated.subarray(offset(3), offset(3) + 36),
-    repeated.subarray(offset(4), offset(4) + 36),
-  ]);
-  const auth = Buffer.from(`${timestamp}${SALT}${DEVICE_TOKEN}${nonce}`, "ascii");
-  let mixed = "";
-  for (let i = 0; i < 101; i += 1) {
-    mixed += String.fromCharCode((auth[i] + reorderedNonce[i]) >> 1);
-  }
-  const result = `${mixed.slice(65)}${mixed.slice(0, 13)}${mixed.slice(29, 65)}${mixed.slice(13, 29)}`;
-  let normalized = "";
-  for (const character of result) {
-    const code = character.charCodeAt(0);
-    if (code < 0x30) {
-      normalized += 0x39 < code + 19 && code + 19 < 0x41
-        ? String.fromCharCode(0x39)
-        : String.fromCharCode(code + 19);
-    } else if ((0x39 < code && code < 0x41) || (0x5a < code && code < 0x61)) {
-      normalized += String.fromCharCode(code + 19);
-    } else {
-      normalized += character;
-    }
-  }
-  return crypto.createHash("md5").update(normalized, "utf8").digest("hex").toUpperCase();
+  return crypto.createHash("md5")
+    .update(`${nonce}${timestamp}${DEVICE_TOKEN}${SALT}`, "utf8")
+    .digest("hex")
+    .toUpperCase();
 }
 
 function requestHeaders(nonce: string) {
-  const timestamp = Date.now();
+  const timestamp = Math.floor(Date.now() / 1000);
   return {
     Authorization: BASIC_AUTH,
     Accept: "application/vnd.sfacg.api+json;version=1",
     "Accept-Charset": "UTF-8",
     "Content-Type": "application/json; charset=UTF-8",
-    "User-Agent": `boluobao/5.2.16(android;35)/OPPO/${DEVICE_TOKEN.toLowerCase()}/OPPO`,
+    "User-Agent": `boluobao/5.0.36(android;34)/H5/${DEVICE_TOKEN}/H5`,
     "Accept-Encoding": "gzip",
     SFSecurity: `nonce=${nonce}&timestamp=${timestamp}&devicetoken=${DEVICE_TOKEN}&sign=${sign(nonce, timestamp)}`,
   };
@@ -133,24 +95,10 @@ function requestHeaders(nonce: string) {
 
 async function main() {
   if (!USERNAME || !PASSWORD) throw new Error("Set SFACG_USERNAME and SFACG_PASSWORD first.");
-  let nonce = "";
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const candidate = uuidv4().toUpperCase();
-    const probe = await axios.get(
-      `${HOST}/Chaps/8436696?expand=content%2Cexpand.content`,
-      { headers: requestHeaders(candidate), validateStatus: () => true },
-    );
-    if (probe.data?.status?.httpCode !== 417) {
-      nonce = candidate;
-      break;
-    }
-  }
-  if (!nonce) throw new Error("No usable nonce returned by chapter probe.");
-
   const login = await axios.post(
     `${HOST}/sessions`,
-    { username: USERNAME, password: PASSWORD, shuMeiId: "" },
-    { headers: requestHeaders(nonce), validateStatus: () => true },
+    { userName: USERNAME, passWord: PASSWORD },
+    { headers: requestHeaders(uuidv4().toUpperCase()), validateStatus: () => true },
   );
   const status = login.data?.status;
   const cookie = (Array.isArray(login.headers["set-cookie"]) ? login.headers["set-cookie"] : [])
@@ -160,7 +108,7 @@ async function main() {
   let userHttpCode: number | undefined;
   if (status?.httpCode === 200 && cookie) {
     const user = await axios.get(`${HOST}/user`, {
-      headers: { ...requestHeaders(nonce), Cookie: cookie },
+      headers: { ...requestHeaders(uuidv4().toUpperCase()), Cookie: cookie },
       validateStatus: () => true,
     });
     userHttpCode = user.data?.status?.httpCode;

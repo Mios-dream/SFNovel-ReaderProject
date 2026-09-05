@@ -8,7 +8,7 @@ export function useRequestPolicy(notify: Notify) {
   const requestPolicy = ref<RequestPolicy>({
     requestIntervalMs: 500,
     maxConcurrentDownloads: 1,
-    webFallbackEnabled: true,
+    appFallbackEnabled: true,
   });
   const requestPolicySaving = ref(false);
   const contentDictionarySize = ref(0);

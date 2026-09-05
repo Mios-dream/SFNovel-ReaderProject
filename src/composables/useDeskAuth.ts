@@ -4,7 +4,7 @@ import type { AuthStatus, UserProfile } from "../types";
 import { nativeErrorMessage, type Notify } from "./deskShared";
 
 export function useDeskAuth(notify: Notify) {
-  const auth = ref<AuthStatus>({ authenticated: false });
+  const auth = ref<AuthStatus>({ authenticated: false, appAuthenticated: false, webAuthenticated: false });
   const credentialsOpen = ref(false);
   const accountOpen = ref(false);
   const accountProfile = ref<UserProfile>();
@@ -21,7 +21,7 @@ export function useDeskAuth(notify: Notify) {
   }
 
   async function loadAccountProfile() {
-    if (!auth.value.authenticated) return;
+    if (!auth.value.appAuthenticated) return;
     accountProfileLoading.value = true;
     accountProfileError.value = "";
     try {
@@ -63,7 +63,6 @@ export function useDeskAuth(notify: Notify) {
       }
       auth.value = result;
       credentialsOpen.value = false;
-      await loadAccountProfile();
       notify("SF 账号已登录到当前会话");
     } catch (error) {
       notify(nativeErrorMessage(error, "无法打开官方登录窗口"));
@@ -75,7 +74,7 @@ export function useDeskAuth(notify: Notify) {
   async function logout() {
     try {
       await invoke<void>("logout");
-      auth.value = { authenticated: false };
+      auth.value = { authenticated: false, appAuthenticated: false, webAuthenticated: false };
       accountOpen.value = false;
       credentialsOpen.value = false;
       accountProfile.value = undefined;
@@ -87,7 +86,7 @@ export function useDeskAuth(notify: Notify) {
   }
 
   async function openAccount() {
-    if (!auth.value.authenticated) {
+    if (!auth.value.appAuthenticated) {
       credentialsOpen.value = true;
       return;
     }

@@ -1,13 +1,12 @@
-/// Returns a non-sensitive description of the native runtime.
+/// 返回原生运行时的非敏感诊断描述。
 ///
-/// This command is intentionally small: it verifies the Vue-to-Rust invoke
-/// bridge without exposing filesystem paths, credentials, or network state.
+/// 此命令仅用于验证 Vue 到 Rust 的 IPC 链路，不暴露文件路径、凭据或网络状态。
 ///
-/// # Arguments
-/// * `name` - Optional display name supplied by the renderer.
+/// # 参数
+/// * `name` - 渲染进程提供的可选显示名称。
 ///
-/// # Returns
-/// A greeting suitable for the development diagnostics view.
+/// # 返回值
+/// 适合在开发诊断视图展示的问候文本。
 #[tauri::command]
 fn greet(name: &str) -> String {
     let subject = if name.trim().is_empty() {
@@ -18,12 +17,12 @@ fn greet(name: &str) -> String {
     format!("Novel Flow native runtime ready for {subject}.")
 }
 
-/// Returns the application runtime version used by the renderer diagnostics.
+/// 返回供渲染进程诊断界面使用的应用运行时版本。
 ///
-/// The value comes from the Tauri application package metadata and has no side effects.
+/// 版本来自 Tauri 应用包元数据，调用不产生副作用。
 ///
-/// # Returns
-/// The semantic version declared by the application package.
+/// # 返回值
+/// 应用包声明的语义化版本号。
 #[tauri::command]
 fn app_runtime_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()

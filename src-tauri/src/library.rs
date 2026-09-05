@@ -163,8 +163,8 @@ struct StoredChapterStore {
 struct RequestPolicy {
     request_interval_ms: u64,
     max_concurrent_downloads: u8,
-    #[serde(default = "default_web_fallback_enabled")]
-    web_fallback_enabled: bool,
+    #[serde(default = "default_app_fallback_enabled")]
+    app_fallback_enabled: bool,
 }
 
 /// A locally stored comic chapter and its ordered page files.
@@ -178,7 +178,10 @@ struct LocalComicChapter {
     pages: Vec<String>,
 }
 
-fn default_web_fallback_enabled() -> bool {
+/// 返回请求策略中“允许 App API 回退”的 serde 默认值。
+///
+/// 旧版持久化策略缺少该字段时也会保留启用回退的默认行为。
+fn default_app_fallback_enabled() -> bool {
     true
 }
 
@@ -191,7 +194,7 @@ impl Default for RequestPolicy {
         Self {
             request_interval_ms: 500,
             max_concurrent_downloads: 1,
-            web_fallback_enabled: true,
+            app_fallback_enabled: true,
         }
     }
 }
@@ -361,13 +364,13 @@ async fn update_content_dictionary(
     app: tauri::AppHandle,
     chapter_id: i64,
 ) -> Result<ContentDictionaryResult, String> {
-    let cookie = current_session_cookie(&app).ok();
-    let client = SfacgHttpClient::new()?;
-    let api = client
-        .chapter_content_with_metadata_from_api(chapter_id, cookie.as_deref())
+    let app_client = AppClient::new(&app)?;
+    let api = app_client
+        .chapter_content_with_metadata_from_api(chapter_id)
         .await?;
-    let web = client
-        .chapter_content_from_web(api.novel_id, api.volume_id, chapter_id, cookie.as_deref())
+    let web_client = WebClient::new(&app)?;
+    let web = web_client
+        .chapter_content(api.novel_id, api.volume_id, chapter_id)
         .await?;
     let source: Vec<char> = api
         .content
@@ -458,6 +461,14 @@ fn migrate_legacy_android_library(app: &tauri::AppHandle, target: &PathBuf) -> R
         .map_err(|error| format!("无法迁移旧书库到外部目录：{error}"))
 }
 
+/// 递归复制旧 Android 私有书库的所有内容。
+///
+/// # 参数
+/// * `source` - 已确认存在的旧书库目录。
+/// * `target` - 已创建的公开下载目录。
+///
+/// # 错误
+/// 枚举源目录、创建子目录或复制任一文件失败时返回 I/O 错误。
 #[cfg(target_os = "android")]
 fn copy_directory_contents(source: &PathBuf, target: &PathBuf) -> std::io::Result<()> {
     for entry in fs::read_dir(source)? {
@@ -848,6 +859,14 @@ fn get_local_book(app: tauri::AppHandle, name: String) -> Result<LocalBookDetail
     })
 }
 
+/// 根据本地资源类型读取已持久化的作品元数据。
+///
+/// # 参数
+/// * `metadata` - 本地书籍的完整元数据容器。
+/// * `kind` - 资源类型，支持 `novel`、`audio` 和 `comic`。
+///
+/// # 返回值
+/// 对应资源类型的元数据；未知类型返回 `None`。
 fn local_work_metadata(
     metadata: Option<StoredWorkMetadata>,
     directory: &PathBuf,
@@ -886,6 +905,10 @@ fn local_work_metadata(
     })
 }
 
+/// 从已校验的本地书籍目录读取已下载漫画章节及其有序页面。
+///
+/// # 错误
+/// 章节目录无法枚举、编号无效或页面文件无法读取时返回错误。
 fn read_local_comic_chapters(directory: &PathBuf) -> Result<Vec<LocalComicChapter>, String> {
     let root = directory.join("comic");
     if !root.is_dir() {
@@ -930,6 +953,15 @@ fn read_local_comic_chapters(directory: &PathBuf) -> Result<Vec<LocalComicChapte
     Ok(chapters)
 }
 
+/// 返回一章已下载漫画的标题、封面和页面本地路径。
+///
+/// # 参数
+/// * `app` - 用于定位应用自有书库的 Tauri 应用句柄。
+/// * `name` - 先前由书库命令返回的精确书籍目录名。
+/// * `chapter_id` - 要读取的正整数漫画章节标识。
+///
+/// # 错误
+/// 书籍或章节不存在、目录未通过校验或页面信息无法读取时返回错误。
 #[tauri::command]
 fn get_local_comic_chapter(app: tauri::AppHandle, name: String, chapter_id: i64) -> Result<LocalComicChapter, String> {
     if chapter_id <= 0 { return Err("漫画章节参数无效".to_string()); }

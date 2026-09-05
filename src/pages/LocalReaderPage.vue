@@ -506,9 +506,15 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="icon-button mode-toggle"
-        :title="displayMode === 'vertical' ? '切换到翻页显示' : '切换到竖屏显示'"
-        :aria-label="displayMode === 'vertical' ? '切换到翻页显示' : '切换到竖屏显示'"
-        @click="setDisplayMode(displayMode === 'vertical' ? 'paged' : 'vertical')"
+        :title="
+          displayMode === 'vertical' ? '切换到翻页显示' : '切换到竖屏显示'
+        "
+        :aria-label="
+          displayMode === 'vertical' ? '切换到翻页显示' : '切换到竖屏显示'
+        "
+        @click="
+          setDisplayMode(displayMode === 'vertical' ? 'paged' : 'vertical')
+        "
       >
         <ScrollText v-if="displayMode === 'vertical'" :size="18" />
         <Columns2 v-else :size="18" />
@@ -942,7 +948,7 @@ onBeforeUnmount(() => {
   }
   :global(.reader-flip-page-body) {
     padding: calc(66px + env(safe-area-inset-top)) 12px
-      calc(66px + env(safe-area-inset-bottom));
+      env(safe-area-inset-bottom);
     font-size: 15px;
   }
   .page-flip-topbar {

@@ -16,24 +16,42 @@ use zip::ZipWriter;
 #[cfg(target_os = "android")]
 use tauri::plugin::{PluginHandle, TauriPlugin};
 
+/// SF App API 的固定服务根地址。
 const SF_API_HOST: &str = "https://api.sfacg.com";
+/// App API HTTP 基础认证使用的公开客户端标识。
 const SF_API_USER: &str = "androiduser";
+/// App API HTTP 基础认证的协议常量。
 const SF_API_PASSWORD: &str = "1a#$51-yt69;*Acv@qxq";
-const SF_DEVICE_TOKEN: &str = "910D166A-736E-3231-8B21-8D12DFD75F16";
-const SF_SECURITY_SALT: &str = "lPQDb9AKO7$LjkPG";
-const SF_APP_USER_AGENT: &str =
-    "boluobao/5.2.16(android;35)/OPPO/910d166a-736e-3231-8b21-8d12dfd75f16/OPPO";
+/// 生成 `SFSecurity` 请求头所需的协议盐值。
+const SF_SECURITY_SALT: &str = "FN_Q29XHVmfV3mYX";
+/// 首次创建用户正文恢复字典时使用的内置默认映射。
 const DEFAULT_CONTENT_DICTIONARY: &str = include_str!("../../sfacg-content-dictionary.json");
+/// 官方网页登录页面地址。
 const OFFICIAL_LOGIN_URL: &str = "https://passport.sfacg.com/";
+/// 官方登录窗口的稳定 Tauri 标签。
 const OFFICIAL_LOGIN_WINDOW_LABEL: &str = "sfacg-official-login";
-static SF_API_NONCE: OnceLock<tokio::sync::Mutex<Option<String>>> = OnceLock::new();
+/// Windows 上模拟官方网页访问时使用的浏览器标识。
+#[cfg(target_os = "windows")]
+const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+/// Android 上模拟官方网页访问时使用的浏览器标识。
+#[cfg(target_os = "android")]
+const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
+/// 其他桌面平台访问 SF 网页时使用的浏览器标识。
+#[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
+const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+/// 进程级设备身份令牌，仅在初始化后可供签名客户端读取。
+static SF_DEVICE_TOKEN: OnceLock<String> = OnceLock::new();
 
-fn sf_api_nonce_state() -> &'static tokio::sync::Mutex<Option<String>> {
-    SF_API_NONCE.get_or_init(|| tokio::sync::Mutex::new(None))
-}
-
-async fn clear_sf_api_nonce() {
-    *sf_api_nonce_state().lock().await = None;
+/// 返回已初始化的设备身份令牌。
+///
+/// # 错误
+/// 应用尚未完成设备身份初始化时返回错误，调用方不应自行生成替代值。
+fn device_token() -> Result<&'static str, String> {
+    SF_DEVICE_TOKEN
+        .get()
+        .map(String::as_str)
+        .ok_or_else(|| "设备身份尚未初始化，请重启应用".to_string())
+    // Ok("910D166A-736E-3231-8B21-8D12DFD75F16")
 }
 
 /// A public novel item returned to the renderer by the search command.
@@ -166,6 +184,8 @@ struct AudioChapterSummary {
 #[serde(rename_all = "camelCase")]
 struct AuthStatus {
     authenticated: bool,
+    app_authenticated: bool,
+    web_authenticated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     user_name: Option<String>,
 }
@@ -183,18 +203,16 @@ struct UserProfile {
     vip_level: i64,
 }
 
-/// Holds the active SF session in native memory while API commands are running.
-///
-/// Windows additionally restores this state from a DPAPI-protected app-data file;
-/// Android repopulates it from the persistent app-owned WebView cookie jar.
+/// Holds independently scoped SF sessions in native memory.
 #[derive(Default)]
 struct AuthSessionState {
     session: Mutex<Option<NativeAuthSession>>,
 }
 
-/// Describes a native-only SF session without implementing serialization.
+/// App and Web cookies are intentionally separate and cannot be converted.
 struct NativeAuthSession {
-    cookie: String,
+    app_cookie: Option<String>,
+    web_cookie: Option<String>,
     user_name: String,
 }
 
@@ -226,12 +244,27 @@ struct ComicChapterSummary {
     downloaded: bool,
 }
 
+/// Windows 端加密保存的 App 登录会话序列化格式。
+///
+/// Cookie 在写入磁盘前必须由系统数据保护 API 加密。
 #[derive(Deserialize, Serialize)]
 struct PersistedAuthSession {
+    version: u8,
     cookie: String,
     user_name: String,
 }
 
+/// Windows 端加密保存的稳定设备身份序列化格式。
+#[derive(Deserialize, Serialize)]
+struct PersistedDeviceIdentity {
+    version: u8,
+    token: String,
+}
+
+/// 返回 Windows 端加密 App 会话文件的私有存储路径。
+///
+/// # 错误
+/// 无法解析应用数据目录时返回错误。
 #[cfg(target_os = "windows")]
 fn auth_session_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
@@ -240,6 +273,25 @@ fn auth_session_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|error| format!("无法解析登录会话路径：{error}"))
 }
 
+/// 返回 Windows 端加密 Web 会话文件的私有存储路径。
+///
+/// # 错误
+/// 无法解析应用数据目录时返回错误。
+#[cfg(target_os = "windows")]
+fn web_session_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|directory| directory.join("web-session.v2.bin"))
+        .map_err(|error| format!("无法解析网页登录会话路径：{error}"))
+}
+
+/// 使用当前 Windows 用户的数据保护密钥加密会话或设备身份数据。
+///
+/// # 参数
+/// * `input` - 待加密的序列化字节。
+///
+/// # 错误
+/// Windows 数据保护 API 调用失败时返回带系统错误码的错误。
 #[cfg(target_os = "windows")]
 fn protect_auth_data(input: &[u8]) -> Result<Vec<u8>, String> {
     use std::ptr;
@@ -276,6 +328,13 @@ fn protect_auth_data(input: &[u8]) -> Result<Vec<u8>, String> {
     Ok(protected)
 }
 
+/// 使用当前 Windows 用户的数据保护密钥解密会话或设备身份数据。
+///
+/// # 参数
+/// * `input` - 由 [`protect_auth_data`] 生成的密文字节。
+///
+/// # 错误
+/// 密文不属于当前用户或 Windows 数据保护 API 调用失败时返回错误。
 #[cfg(target_os = "windows")]
 fn unprotect_auth_data(input: &[u8]) -> Result<Vec<u8>, String> {
     use std::ptr;
@@ -312,6 +371,10 @@ fn unprotect_auth_data(input: &[u8]) -> Result<Vec<u8>, String> {
     Ok(plain)
 }
 
+/// 将 App 会话经系统加密后原子写入 Windows 私有存储。
+///
+/// # 错误
+/// 路径解析、序列化、加密或替换目标文件失败时返回错误。
 #[cfg(target_os = "windows")]
 fn persist_desktop_auth_session(
     app: &tauri::AppHandle,
@@ -324,6 +387,7 @@ fn persist_desktop_auth_session(
         .ok_or_else(|| "登录会话目录无效".to_string())?;
     fs::create_dir_all(directory).map_err(|error| format!("无法创建登录会话目录：{error}"))?;
     let payload = serde_json::to_vec(&PersistedAuthSession {
+        version: 2,
         cookie: cookie.to_string(),
         user_name: user_name.to_string(),
     })
@@ -337,6 +401,13 @@ fn persist_desktop_auth_session(
     fs::rename(temporary, path).map_err(|error| format!("无法完成登录会话保存：{error}"))
 }
 
+/// 从 Windows 私有存储恢复已加密的 App 会话。
+///
+/// # 返回值
+/// 不存在、格式过期或字段为空的会话返回 `Ok(None)`。
+///
+/// # 错误
+/// 已存在的会话文件无法读取或解密时返回错误。
 #[cfg(target_os = "windows")]
 fn restore_desktop_auth_session(app: &tauri::AppHandle) -> Result<Option<NativeAuthSession>, String> {
     let path = auth_session_path(app)?;
@@ -347,15 +418,20 @@ fn restore_desktop_auth_session(app: &tauri::AppHandle) -> Result<Option<NativeA
     let payload = unprotect_auth_data(&encrypted)?;
     let stored = serde_json::from_slice::<PersistedAuthSession>(&payload)
         .map_err(|error| format!("登录会话格式无效：{error}"))?;
-    if stored.cookie.trim().is_empty() || stored.user_name.trim().is_empty() {
+    if stored.version != 2 || stored.cookie.trim().is_empty() || stored.user_name.trim().is_empty() {
         return Ok(None);
     }
     Ok(Some(NativeAuthSession {
-        cookie: stored.cookie,
+        app_cookie: Some(stored.cookie),
+        web_cookie: None,
         user_name: stored.user_name,
     }))
 }
 
+/// 删除 Windows 私有存储中的加密 App 会话。
+///
+/// # 错误
+/// 删除已存在的会话文件失败时返回错误。
 #[cfg(target_os = "windows")]
 fn clear_desktop_auth_session(app: &tauri::AppHandle) -> Result<(), String> {
     let path = auth_session_path(app)?;
@@ -365,23 +441,125 @@ fn clear_desktop_auth_session(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Receives an Android WebView cookie from the native plugin, never from JavaScript.
+/// 将 Web 会话经系统加密后写入 Windows 私有存储。
+///
+/// # 错误
+/// 序列化、加密、目录创建或文件写入失败时返回错误。
+#[cfg(target_os = "windows")]
+fn persist_desktop_web_session(app: &tauri::AppHandle, cookie: &str) -> Result<(), String> {
+    let path = web_session_path(app)?;
+    let payload = serde_json::to_vec(&PersistedAuthSession { version: 2, cookie: cookie.to_string(), user_name: "已登录 SF 账号".to_string() }).map_err(|e| format!("无法序列化网页登录会话：{e}"))?;
+    let encrypted = protect_auth_data(&payload)?;
+    let parent = path.parent().ok_or_else(|| "网页登录会话目录无效".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| format!("无法创建网页登录会话目录：{e}"))?;
+    fs::write(&path, encrypted).map_err(|e| format!("无法保存网页登录会话：{e}"))
+}
+
+/// 从 Windows 私有存储恢复已加密的 Web 会话。
+///
+/// # 返回值
+/// 会话不存在、格式过期或 Cookie 为空时返回 `Ok(None)`。
+///
+/// # 错误
+/// 已存在的会话文件无法读取或解密时返回错误。
+#[cfg(target_os = "windows")]
+fn restore_desktop_web_session(app: &tauri::AppHandle) -> Result<Option<NativeAuthSession>, String> {
+    let path = web_session_path(app)?;
+    if !path.is_file() { return Ok(None); }
+    let payload = unprotect_auth_data(&fs::read(path).map_err(|e| format!("无法读取网页登录会话：{e}"))?)?;
+    let stored = serde_json::from_slice::<PersistedAuthSession>(&payload).map_err(|e| format!("网页登录会话格式无效：{e}"))?;
+    if stored.version != 2 || stored.cookie.trim().is_empty() { return Ok(None); }
+    Ok(Some(NativeAuthSession { app_cookie: None, web_cookie: Some(stored.cookie), user_name: stored.user_name }))
+}
+
+/// 删除 Windows 私有存储中的加密 Web 会话。
+///
+/// # 错误
+/// 删除已存在的会话文件失败时返回错误。
+#[cfg(target_os = "windows")]
+fn clear_desktop_web_session(app: &tauri::AppHandle) -> Result<(), String> {
+    let path = web_session_path(app)?;
+    if path.exists() { fs::remove_file(path).map_err(|e| format!("无法清除网页登录会话：{e}"))?; }
+    Ok(())
+}
+
+/// 在 Windows 上恢复或生成稳定设备身份，并以系统数据保护机制保存。
+///
+/// # 错误
+/// 设备身份文件无法读写、加解密或应用数据目录无法解析时返回错误。
+#[cfg(target_os = "windows")]
+fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), String> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("无法解析设备身份路径：{error}"))?
+        .join("device-identity.v1.bin");
+    let token = if path.is_file() {
+        let encrypted = fs::read(&path).map_err(|error| format!("无法读取设备身份：{error}"))?;
+        let payload = unprotect_auth_data(&encrypted)?;
+        serde_json::from_slice::<PersistedDeviceIdentity>(&payload)
+            .ok()
+            .filter(|identity| identity.version == 1 && is_valid_device_token(&identity.token))
+            .map(|identity| identity.token)
+    } else {
+        None
+    }
+    .unwrap_or_else(|| Uuid::new_v4().hyphenated().to_string().to_uppercase());
+    let directory = path.parent().ok_or_else(|| "设备身份目录无效".to_string())?;
+    fs::create_dir_all(directory).map_err(|error| format!("无法创建设备身份目录：{error}"))?;
+    let payload = serde_json::to_vec(&PersistedDeviceIdentity { version: 1, token: token.clone() })
+        .map_err(|error| format!("无法序列化设备身份：{error}"))?;
+    let encrypted = protect_auth_data(&payload)?;
+    let temporary = path.with_extension("bin.tmp");
+    fs::write(&temporary, encrypted).map_err(|error| format!("无法保存设备身份：{error}"))?;
+    if path.exists() {
+        fs::remove_file(&path).map_err(|error| format!("无法替换设备身份：{error}"))?;
+    }
+    fs::rename(temporary, path).map_err(|error| format!("无法完成设备身份保存：{error}"))?;
+    let _ = SF_DEVICE_TOKEN.set(token);
+    Ok(())
+}
+
+/// 在非 Windows、非 Android 平台为当前进程生成临时设备身份。
+///
+/// 此身份不会落盘，应用重启后会重新生成。
+#[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
+fn initialize_device_identity(_app: &tauri::AppHandle) -> Result<(), String> {
+    let _ = SF_DEVICE_TOKEN.set(Uuid::new_v4().hyphenated().to_string().to_uppercase());
+    Ok(())
+}
+
+/// 判断设备身份令牌是否为合法 UUID。
+fn is_valid_device_token(token: &str) -> bool {
+    Uuid::parse_str(token).is_ok()
+}
+
+/// Android 原生插件返回的 WebView Cookie 容器。
+///
+/// Cookie 仅由 Kotlin 插件提供，绝不接受来自 JavaScript 的会话值。
 #[cfg(target_os = "android")]
 #[derive(Deserialize)]
 struct AndroidCookieResponse {
     cookie: Option<String>,
 }
 
-/// Stores the Android native plugin handle used exclusively by Rust commands.
+/// Android 原生插件返回的稳定设备身份容器。
+#[cfg(target_os = "android")]
+#[derive(Deserialize)]
+struct AndroidDeviceTokenResponse {
+    token: Option<String>,
+}
+
+/// 保存只供 Rust 命令调用的 Android 原生认证插件句柄。
 #[cfg(target_os = "android")]
 struct AndroidSfacgAuth<R: tauri::Runtime> {
     mobile_plugin_handle: PluginHandle<R>,
 }
 
-/// Builds the Android-only plugin that owns the official-login WebView and cookie bridge.
+/// 构建拥有官方登录 WebView 与 Cookie 桥接能力的 Android 专用插件。
 ///
-/// # Returns
-/// A Tauri plugin that registers the Kotlin implementation before commands run.
+/// # 返回值
+/// 在命令运行前注册 Kotlin 实现的 Tauri 插件。
 #[cfg(target_os = "android")]
 fn android_sfacg_auth_plugin<R: tauri::Runtime>() -> TauriPlugin<R> {
     tauri::plugin::Builder::new("sfacg-auth")
@@ -396,16 +574,16 @@ fn android_sfacg_auth_plugin<R: tauri::Runtime>() -> TauriPlugin<R> {
         .build()
 }
 
-/// Reconciles the persistent Android WebView session with native request state.
+/// 将持久化的 Android WebView 会话同步到原生请求状态。
 ///
-/// # Arguments
-/// * `app` - Application handle used to call the Android plugin and access state.
+/// # 参数
+/// * `app` - 用于调用 Android 插件和访问状态的应用句柄。
 ///
-/// # Errors
-/// Returns an error when the Android plugin cannot provide its app-owned cookie jar.
+/// # 错误
+/// Android 插件无法提供其自有 Cookie 存储时返回错误。
 #[cfg(target_os = "android")]
 async fn sync_android_auth_session(app: &tauri::AppHandle) -> Result<(), String> {
-    let cookie = app
+    let web_cookie = app
         .state::<AndroidSfacgAuth<tauri::Wry>>()
         .mobile_plugin_handle
         .run_mobile_plugin_async::<AndroidCookieResponse>("readSessionCookie", ())
@@ -413,18 +591,54 @@ async fn sync_android_auth_session(app: &tauri::AppHandle) -> Result<(), String>
         .map_err(|error| format!("无法读取 Android 登录会话：{error}"))?
         .cookie
         .filter(|value| !value.trim().is_empty());
+    let app_cookie = app
+        .state::<AndroidSfacgAuth<tauri::Wry>>()
+        .mobile_plugin_handle
+        .run_mobile_plugin_async::<AndroidCookieResponse>("readAppSessionCookie", ())
+        .await
+        .map_err(|error| format!("无法读取 Android App 会话：{error}"))?
+        .cookie
+        .filter(|value| !value.trim().is_empty());
     let auth_state = app.state::<AuthSessionState>();
     let mut session = auth_state
         .session
         .lock()
         .map_err(|_| "登录会话状态不可用".to_string())?;
-    *session = cookie.map(|cookie| NativeAuthSession {
-        cookie,
+    *session = if app_cookie.is_some() || web_cookie.is_some() {
+        Some(NativeAuthSession {
+        app_cookie,
+        web_cookie,
         user_name: "已登录 SF 账号".to_string(),
-    });
+        })
+    } else {
+        None
+    };
     Ok(())
 }
 
+/// 从 Android 原生插件读取或创建稳定设备身份，并初始化进程缓存。
+///
+/// # 错误
+/// 插件调用失败或返回的令牌不是合法 UUID 时返回错误。
+#[cfg(target_os = "android")]
+async fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), String> {
+    let token = app
+        .state::<AndroidSfacgAuth<tauri::Wry>>()
+        .mobile_plugin_handle
+        .run_mobile_plugin_async::<AndroidDeviceTokenResponse>("readOrCreateDeviceToken", ())
+        .await
+        .map_err(|error| format!("无法读取设备身份：{error}"))?
+        .token
+        .filter(|token| is_valid_device_token(token))
+        .ok_or_else(|| "Android 设备身份无效".to_string())?;
+    let _ = SF_DEVICE_TOKEN.set(token.to_uppercase());
+    Ok(())
+}
+
+/// 通过 Android 原生插件持久化 App 会话 Cookie。
+///
+/// # 错误
+/// 插件无法写入其受管 Cookie 存储时返回错误。
 #[cfg(target_os = "android")]
 async fn persist_android_auth_session(
     app: &tauri::AppHandle,
@@ -433,7 +647,7 @@ async fn persist_android_auth_session(
     app.state::<AndroidSfacgAuth<tauri::Wry>>()
         .mobile_plugin_handle
         .run_mobile_plugin_async::<Value>(
-            "writeSessionCookie",
+            "writeAppSessionCookie",
             serde_json::json!({ "cookie": cookie }),
         )
         .await
@@ -455,596 +669,11 @@ fn current_auth_status(app: &tauri::AppHandle) -> Result<AuthStatus, String> {
         .lock()
         .map_err(|_| "登录会话状态不可用".to_string())?;
     Ok(AuthStatus {
-        authenticated: session.is_some(),
+        authenticated: session.as_ref().is_some_and(|value| value.app_cookie.is_some() || value.web_cookie.is_some()),
+        app_authenticated: session.as_ref().is_some_and(|value| value.app_cookie.is_some()),
+        web_authenticated: session.as_ref().is_some_and(|value| value.web_cookie.is_some()),
         user_name: session.as_ref().map(|value| value.user_name.clone()),
     })
-}
-
-/// Returns the authenticated cookie for native request code without exposing it to the renderer.
-///
-/// # Arguments
-/// * `app` - Application handle used to access the native session state.
-///
-/// # Errors
-/// Returns an error if no active session exists or the state lock is unavailable.
-fn current_session_cookie(app: &tauri::AppHandle) -> Result<String, String> {
-    app.state::<AuthSessionState>()
-        .session
-        .lock()
-        .map_err(|_| "登录会话状态不可用".to_string())?
-        .as_ref()
-        .map(|session| session.cookie.clone())
-        .ok_or_else(|| "请先登录 SF 账号".to_string())
-}
-
-/// Creates the signed SF API HTTP client used by public catalog commands.
-struct SfacgHttpClient {
-    client: reqwest::Client,
-}
-
-impl SfacgHttpClient {
-    /// Creates a client with a bounded request timeout and a desktop-like user agent.
-    ///
-    /// # Returns
-    /// A configured client that does not retain user credentials or cookies.
-    fn new() -> Result<Self, String> {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .user_agent(SF_APP_USER_AGENT)
-            .build()
-            .map(|client| Self { client })
-            .map_err(|error| format!("无法创建 SF 网络客户端：{error}"))
-    }
-
-    /// Requests a signed SF API resource and unwraps its `data` envelope.
-    ///
-    /// # Arguments
-    /// * `path` - Relative API path from the fixed SF API host.
-    /// * `query` - Query parameters restricted to the calling command.
-    ///
-    /// # Errors
-    /// Returns a脱敏 error when nonce negotiation, transport, status, or JSON parsing fails.
-    async fn get_data(&self, path: &str, query: &[(&str, String)]) -> Result<Value, String> {
-        self.get_data_with_cookie(path, query, None).await
-    }
-
-    /// Requests a signed SF API resource with an optional in-memory session cookie.
-    ///
-    /// # Arguments
-    /// * `path` - Relative API path from the fixed SF API host.
-    /// * `query` - Query parameters restricted to the calling command.
-    /// * `cookie` - An SF session value that never reaches the renderer.
-    ///
-    /// # Errors
-    /// Returns a redacted error when nonce negotiation, transport, status, or
-    /// JSON parsing fails.
-    async fn get_data_with_cookie(
-        &self,
-        path: &str,
-        query: &[(&str, String)],
-        cookie: Option<&str>,
-    ) -> Result<Value, String> {
-        let nonce = self.obtain_nonce().await?;
-        let mut request = self
-            .client
-            .get(format!("{SF_API_HOST}{path}"))
-            .basic_auth(SF_API_USER, Some(SF_API_PASSWORD))
-            .header("Accept", "application/vnd.sfacg.api+json;version=1")
-            .header("Accept-Charset", "UTF-8")
-            .header("Content-Type", "application/json; charset=UTF-8")
-            .header("SFSecurity", security_header(&nonce)?)
-            .query(query);
-        if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
-            request = request.header(reqwest::header::COOKIE, cookie);
-        }
-        let response = request
-            .send()
-            .await
-            .map_err(|error| format!("SF 请求失败：{error}"))?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.json::<Value>().await.unwrap_or(Value::Null);
-            let api_code = body
-                .get("status")
-                .and_then(|value| value.get("errorCode"))
-                .and_then(Value::as_i64);
-            let api_message = body
-                .get("status")
-                .and_then(|value| value.get("msg"))
-                .and_then(Value::as_str)
-                .filter(|value| !value.trim().is_empty());
-            eprintln!(
-                "[sfacg] request rejected: path={path}, http={}, api_code={api_code:?}, message={api_message:?}",
-                status.as_u16(),
-            );
-            if status == reqwest::StatusCode::EXPECTATION_FAILED {
-                clear_sf_api_nonce().await;
-            }
-            return Err(match api_message {
-                Some(message) => format!("SF 请求返回 HTTP {}：{message}", status.as_u16()),
-                None => format!("SF 请求返回 HTTP {}", status.as_u16()),
-            });
-        }
-        let body = response
-            .json::<Value>()
-            .await
-            .map_err(|error| format!("SF 响应格式无效：{error}"))?;
-        Ok(body.get("data").cloned().unwrap_or(body))
-    }
-
-    /// Signs in using the SF App endpoint and extracts an issued session cookie.
-    ///
-    /// # Arguments
-    /// * `username` - The user-entered SF account name, used only for this request.
-    /// * `password` - The user-entered SF password, used only for this request.
-    ///
-    /// # Errors
-    /// Returns a redacted error when SF rejects the credentials or does not issue
-    /// a supported session cookie.
-    async fn login_with_password(&self, username: &str, password: &str) -> Result<String, String> {
-        let nonce = self.obtain_nonce().await?;
-        let response = self
-            .client
-            .post(format!("{SF_API_HOST}/sessions"))
-            .basic_auth(SF_API_USER, Some(SF_API_PASSWORD))
-            .header("Accept", "application/vnd.sfacg.api+json;version=1")
-            .header("Accept-Charset", "UTF-8")
-            .header("Content-Type", "application/json; charset=UTF-8")
-            .header("SFSecurity", security_header(&nonce)?)
-            .json(&serde_json::json!({
-                "username": username,
-                "password": password,
-                "shuMeiId": "",
-            }))
-            .send()
-            .await
-            .map_err(|error| format!("SF 登录请求失败：{error}"))?;
-        let status = response.status();
-        let cookie = response
-            .headers()
-            .get_all(reqwest::header::SET_COOKIE)
-            .iter()
-            .filter_map(|header| header.to_str().ok())
-            .filter_map(|header| header.split(';').next())
-            .filter(|pair| pair.starts_with(".SFCommunity=") || pair.starts_with("session_APP="))
-            .collect::<Vec<_>>()
-            .join("; ");
-        let body = response.json::<Value>().await.unwrap_or(Value::Null);
-        let successful = status.is_success()
-            && body
-                .get("status")
-                .and_then(|value| value.get("httpCode"))
-                .and_then(Value::as_i64)
-                == Some(200);
-        if !successful {
-            return Err(body
-                .get("status")
-                .and_then(|value| value.get("msg"))
-                .and_then(Value::as_str)
-                .filter(|message| !message.trim().is_empty())
-                .unwrap_or("SF 账号密码登录失败")
-                .to_string());
-        }
-        if cookie.is_empty() {
-            return Err("SF 登录成功但未返回会话 Cookie".to_string());
-        }
-        Ok(cookie)
-    }
-
-    /// Fetches API chapter text together with the novel and volume identifiers
-    /// required to compare it with the public web chapter.
-    ///
-    /// # Arguments
-    /// * `chapter_id` - Positive SF chapter identifier.
-    /// * `cookie` - Optional authenticated session kept in native memory.
-    ///
-    /// # Errors
-    /// Returns an error when the API response lacks usable text or ownership
-    /// metadata, or when the upstream request fails.
-    async fn chapter_content_with_metadata_from_api(
-        &self,
-        chapter_id: i64,
-        cookie: Option<&str>,
-    ) -> Result<ApiChapterContent, String> {
-        if chapter_id <= 0 {
-            return Err("章节编号无效".to_string());
-        }
-        let response = self
-            .get_data_with_cookie(
-                &format!("/Chaps/{chapter_id}"),
-                &[("expand", "content,expand.content".to_string())],
-                cookie,
-            )
-            .await?;
-        let content = response
-            .get("expand")
-            .and_then(|value| value.get("content"))
-            .and_then(Value::as_str)
-            .or_else(|| response.get("content").and_then(Value::as_str))
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "SF App API 未返回章节正文".to_string())?;
-        let novel_id = response
-            .get("novelId")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| "SF App API 未返回章节所属作品信息".to_string())?;
-        let volume_id = response
-            .get("volumeId")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| "SF App API 未返回章节所属卷信息".to_string())?;
-        Ok(ApiChapterContent {
-            content: content.to_string(),
-            novel_id,
-            volume_id,
-        })
-    }
-
-    /// Reads the authenticated SF audio catalog without exposing stream URLs to
-    /// the renderer.
-    ///
-    /// # Arguments
-    /// * `novel_id` - Positive SF work identifier.
-    /// * `cookie` - Authenticated session retained only in native memory.
-    ///
-    /// # Errors
-    /// Returns an error when the session is rejected, the work has no audio, or
-    /// the upstream catalog response is malformed.
-    async fn audio_catalog(
-        &self,
-        novel_id: i64,
-        cookie: &str,
-    ) -> Result<(String, Vec<NativeAudioChapter>), String> {
-        validate_novel_id(novel_id)?;
-        let response = self
-            .client
-            .get("https://i.sfacg.com/ajax/ashx/Common.ashx")
-            .query(&[("op", "getAudioInfo"), ("nid", &novel_id.to_string())])
-            .header(reqwest::header::COOKIE, cookie)
-            .header("Accept", "application/json, text/javascript, */*; q=0.01")
-            .header("X-Requested-With", "XMLHttpRequest")
-            .header(
-                reqwest::header::REFERER,
-                "https://i.sfacg.com/consume/book/",
-            )
-            .send()
-            .await
-            .map_err(|error| format!("无法连接 SF 有声接口：{error}"))?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED
-            || response.status() == reqwest::StatusCode::FORBIDDEN
-        {
-            return Err("SF 登录会话已失效，请重新登录".to_string());
-        }
-        let payload = response
-            .json::<Value>()
-            .await
-            .map_err(|error| format!("SF 有声目录格式无效：{error}"))?;
-        if payload.get("status").and_then(Value::as_i64) != Some(200) {
-            let message = payload.get("msg").and_then(Value::as_str).unwrap_or("");
-            return Err(if message == "参数不正确" {
-                "该作品没有可用的有声章节".to_string()
-            } else if message.is_empty() {
-                "SF 有声接口拒绝了请求".to_string()
-            } else {
-                format!("SF 有声接口拒绝了请求：{message}")
-            });
-        }
-        let data = payload
-            .get("data")
-            .ok_or_else(|| "该作品没有可用的有声章节".to_string())?;
-        let title = data
-            .get("NovelName")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or("未命名有声作品")
-            .to_string();
-        let mut chapters = Vec::new();
-        for volume in data
-            .get("VolumeSet")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let volume_title = volume
-                .get("VolumeName")
-                .and_then(Value::as_str)
-                .unwrap_or("未分卷")
-                .to_string();
-            for audio in volume
-                .get("AudioSet")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                let Some(source) = audio.get("AudioSrc").and_then(Value::as_str) else {
-                    continue;
-                };
-                if source.trim().is_empty() {
-                    continue;
-                }
-                let id = audio
-                    .get("AudioID")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(chapters.len() as i64 + 1);
-                chapters.push(NativeAudioChapter {
-                    id,
-                    title: audio
-                        .get("ChapterTitle")
-                        .and_then(Value::as_str)
-                        .unwrap_or("未命名章节")
-                        .to_string(),
-                    volume: volume_title.clone(),
-                    source: source.to_string(),
-                });
-            }
-        }
-        if chapters.is_empty() {
-            return Err("该作品没有可用的有声章节".to_string());
-        }
-        Ok((title, chapters))
-    }
-
-    /// Lists comic chapters from the SF comic site. The documented App API
-    /// provides the comic identity and folder name, while the comic site's
-    /// public page is the available catalog API for chapter IDs.
-    ///
-    /// An authenticated session is forwarded only to the SF comic site so its
-    /// VIP markers and access rules match the user's account.
-    async fn comic_catalog(
-        &self,
-        comic_id: i64,
-        cookie: Option<&str>,
-    ) -> Result<(String, Vec<NativeComicChapter>), String> {
-        validate_novel_id(comic_id)?;
-        let detail = self.get_data(&format!("/comics/{comic_id}"), &[]).await?;
-        let title = detail
-            .get("comicName")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "SF 漫画接口未返回作品名称".to_string())?
-            .to_string();
-        let folder = detail
-            .get("folderName")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "SF 漫画接口未返回目录标识".to_string())?;
-        let mut request = self
-            .client
-            .get(format!("https://manhua.sfacg.com/mh/{folder}/"))
-            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml");
-        if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
-            request = request.header(reqwest::header::COOKIE, cookie);
-        }
-        let html = request
-            .send()
-            .await
-            .map_err(|error| format!("无法读取 SF 漫画目录：{error}"))?
-            .error_for_status()
-            .map_err(|error| format!("SF 漫画目录请求被拒绝：{error}"))?
-            .text()
-            .await
-            .map_err(|error| format!("SF 漫画目录格式无效：{error}"))?;
-        let chapters = parse_comic_catalog(&html, folder)?;
-        if chapters.is_empty() {
-            return Err("该漫画没有可用章节".to_string());
-        }
-        Ok((title, chapters))
-    }
-
-    /// Resolves image URLs for one comic chapter using the authenticated SF
-    /// web session when present. The URLs are consumed only by the native
-    /// downloader.
-    async fn comic_chapter_images(
-        &self,
-        comic_id: i64,
-        chapter_id: i64,
-        cookie: Option<&str>,
-    ) -> Result<Vec<String>, String> {
-        validate_novel_id(comic_id)?;
-        if chapter_id <= 0 {
-            return Err("漫画章节编号无效".to_string());
-        }
-        let detail = self.get_data(&format!("/comics/{comic_id}"), &[]).await?;
-        let folder = detail
-            .get("folderName")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "SF 漫画接口未返回目录标识".to_string())?;
-        let chapter_url = format!("https://manhua.sfacg.com/mh/{folder}/{chapter_id}/");
-        let mut chapter_request = self
-            .client
-            .get(&chapter_url)
-            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml");
-        if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
-            chapter_request = chapter_request.header(reqwest::header::COOKIE, cookie);
-        }
-        let html = chapter_request
-            .send()
-            .await
-            .map_err(|error| format!("无法读取 SF 漫画章节：{error}"))?
-            .error_for_status()
-            .map_err(|error| format!("SF 漫画章节请求被拒绝：{error}"))?
-            .text()
-            .await
-            .map_err(|error| format!("SF 漫画章节格式无效：{error}"))?;
-        let source_comic_id = extract_js_number(&html, "c")
-            .ok_or_else(|| "该漫画章节当前不可下载".to_string())?;
-        let source_chapter_id = extract_js_number(&html, "chapId")
-            .ok_or_else(|| "该漫画章节当前不可下载".to_string())?;
-        let serial = extract_js_string(&html, "fn")
-            .ok_or_else(|| "SF 漫画章节未返回资源标识".to_string())?;
-        let path = extract_js_string(&html, "nv")
-            .ok_or_else(|| "SF 漫画章节未返回资源路径".to_string())?;
-        let mut images_request = self
-            .client
-            .get("https://manhua.sfacg.com/ajax/Common.ashx")
-            .query(&[
-                ("op", "getPics"),
-                ("cid", &source_comic_id.to_string()),
-                ("chapId", &source_chapter_id.to_string()),
-                ("serial", serial.as_str()),
-                ("path", path.as_str()),
-            ])
-            .header(reqwest::header::REFERER, chapter_url)
-            .header(reqwest::header::ACCEPT, "application/json, text/javascript, */*; q=0.01")
-            .header("X-Requested-With", "XMLHttpRequest");
-        if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
-            images_request = images_request.header(reqwest::header::COOKIE, cookie);
-        }
-        let payload = images_request
-            .send()
-            .await
-            .map_err(|error| format!("无法读取 SF 漫画图片接口：{error}"))?
-            .error_for_status()
-            .map_err(|error| format!("SF 漫画图片接口被拒绝：{error}"))?
-            .json::<Value>()
-            .await
-            .map_err(|error| format!("SF 漫画图片接口格式无效：{error}"))?;
-        if payload.get("status").and_then(Value::as_i64) != Some(200) {
-            return Err(payload
-                .get("msg")
-                .and_then(Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or("该漫画章节当前不可下载")
-                .to_string());
-        }
-        let images = payload
-            .get("data")
-            .and_then(Value::as_array)
-            .ok_or_else(|| "SF 漫画图片接口未返回图片".to_string())?
-            .iter()
-            .filter_map(Value::as_str)
-            .filter(|url| url.starts_with("https://"))
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-        if images.is_empty() {
-            return Err("该漫画章节没有可下载图片".to_string());
-        }
-        Ok(images)
-    }
-
-    /// Fetches and extracts a public SF web chapter from `#ChapterBody`.
-    ///
-    /// # Arguments
-    /// * `novel_id` - SF novel identifier.
-    /// * `volume_id` - SF volume identifier.
-    /// * `chapter_id` - SF chapter identifier.
-    /// * `cookie` - Optional authenticated session used for accessible chapters.
-    ///
-    /// # Errors
-    /// Returns an error when the page is unavailable or its chapter body cannot be found.
-    async fn chapter_content_from_web(
-        &self,
-        novel_id: i64,
-        volume_id: i64,
-        chapter_id: i64,
-        cookie: Option<&str>,
-    ) -> Result<String, String> {
-        let mut request = self.client.get(format!(
-            "https://book.sfacg.com/Novel/{novel_id}/{volume_id}/{chapter_id}/"
-        ));
-        if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
-            request = request.header(reqwest::header::COOKIE, cookie);
-        }
-        let html = request
-            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml")
-            .header(
-                reqwest::header::REFERER,
-                format!("https://book.sfacg.com/Novel/{novel_id}/MainIndex/"),
-            )
-            .send()
-            .await
-            .map_err(|error| format!("无法读取 SF 网页章节：{error}"))?
-            .text()
-            .await
-            .map_err(|error| format!("SF 网页章节格式无效：{error}"))?;
-        let start = html
-            .find("id=\"ChapterBody\"")
-            .or_else(|| html.find("id='ChapterBody'"))
-            .ok_or_else(|| "SF 网页响应中没有找到 #ChapterBody".to_string())?;
-        let body_start = html[start..]
-            .find('>')
-            .map(|offset| start + offset + 1)
-            .ok_or_else(|| "SF 章节正文结构无效".to_string())?;
-        let body_end = html[body_start..]
-            .find("</div>")
-            .map(|offset| body_start + offset)
-            .ok_or_else(|| "SF 章节正文结构无效".to_string())?;
-        let body = html[body_start..body_end]
-            .replace("<br>", "\n")
-            .replace("<br/>", "\n")
-            .replace("<br />", "\n")
-            .replace("</p>", "\n")
-            .replace("&nbsp;", " ")
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">");
-        let mut plain = String::with_capacity(body.len());
-        let mut in_tag = false;
-        for character in body.chars() {
-            match character {
-                '<' => in_tag = true,
-                '>' => in_tag = false,
-                _ if !in_tag => plain.push(character),
-                _ => {}
-            }
-        }
-        let plain = plain.replace("\r\n", "\n").replace('\r', "\n");
-        if plain.trim().is_empty() {
-            return Err("SF 网页章节正文为空".to_string());
-        }
-        Ok(plain.trim().to_string())
-    }
-
-    /// Negotiates a short-lived nonce required by the SF API signature.
-    ///
-    /// # Errors
-    /// Returns an error after three rejected nonce candidates or any transport failure.
-    async fn obtain_nonce(&self) -> Result<String, String> {
-        let mut shared_nonce = sf_api_nonce_state().lock().await;
-        if let Some(nonce) = shared_nonce.as_ref() {
-            return Ok(nonce.clone());
-        }
-        for _ in 0..3 {
-            let nonce = Uuid::new_v4().to_string().to_uppercase();
-            let response = self
-                .client
-                .get(format!("{SF_API_HOST}/Chaps/8436696"))
-                .basic_auth(SF_API_USER, Some(SF_API_PASSWORD))
-                .header("Accept", "application/vnd.sfacg.api+json;version=1")
-                .header("Accept-Charset", "UTF-8")
-                .header("Content-Type", "application/json; charset=UTF-8")
-                .header("SFSecurity", security_header(&nonce)?)
-                .query(&[("expand", "content,expand.content")])
-                .send()
-                .await
-                .map_err(|error| format!("SF nonce 请求失败：{error}"))?;
-            let http_status = response.status();
-            let body = response
-                .json::<Value>()
-                .await
-                .map_err(|error| format!("SF nonce 响应格式无效：{error}"))?;
-            let api_status = body
-                .get("status")
-                .and_then(|status| status.get("httpCode"))
-                .and_then(Value::as_i64);
-            if api_status != Some(417) {
-                if !http_status.is_success() {
-                    let message = body
-                        .get("status")
-                        .and_then(|status| status.get("msg"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("无上游说明");
-                    eprintln!(
-                        "[sfacg] nonce probe unexpected response: http={}, api_status={api_status:?}, message={message}",
-                        http_status.as_u16(),
-                    );
-                }
-                *shared_nonce = Some(nonce.clone());
-                return Ok(nonce);
-            }
-            eprintln!("[sfacg] nonce probe rejected: HTTP 417 / errorCode 782");
-        }
-        Err("SF API 未返回可用 nonce".to_string())
-    }
 }
 
 /// API chapter content and the identifiers needed for web comparison.
@@ -1057,66 +686,20 @@ struct ApiChapterContent {
 /// Builds the SF `SFSecurity` header without logging any credential material.
 ///
 /// # Arguments
-/// * `nonce` - Uppercase UUID candidate used for this request.
+/// * `nonce` - Uppercase UUID generated for this request.
 ///
 /// # Errors
-/// Returns an error if the generated signing input is unexpectedly short.
+/// Returns an error if the system clock or device identity is unavailable.
 fn security_header(nonce: &str) -> Result<String, String> {
-    let repeated = nonce.repeat(4).into_bytes();
-    let offset = |index: usize| -> usize {
-        let value = repeated[index] as usize;
-        value - (value / 0x24) * 0x24
-    };
-    let mut reordered = Vec::with_capacity(101);
-    for (index, length) in [(1, 13), (2, 16), (3, 36), (4, 36)] {
-        let start = offset(index);
-        let end = start.saturating_add(length);
-        if end > repeated.len() {
-            return Err("SF 签名输入长度无效".to_string());
-        }
-        reordered.extend_from_slice(&repeated[start..end]);
-    }
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "系统时间无效".to_string())?
-        .as_millis();
-    let auth = format!("{timestamp}{SF_SECURITY_SALT}{SF_DEVICE_TOKEN}{nonce}").into_bytes();
-    if auth.len() < 101 || reordered.len() < 101 {
-        return Err("SF 签名输入不足".to_string());
-    }
-    let mixed: Vec<char> = (0..101)
-        .map(|index| {
-            char::from_u32(((auth[index] as u32 + reordered[index] as u32) >> 1) & 0x10FFFF)
-                .unwrap_or('?')
-        })
-        .collect();
-    let result: Vec<char> = mixed[65..]
-        .iter()
-        .chain(&mixed[..13])
-        .chain(&mixed[29..65])
-        .chain(&mixed[13..29])
-        .copied()
-        .collect();
-    let mut normalized = String::with_capacity(result.len());
-    for character in result {
-        let code = character as u32;
-        let next = if code < 0x30 {
-            let shifted = code + 19;
-            if (0x39 < shifted) && (shifted < 0x41) {
-                0x39
-            } else {
-                shifted
-            }
-        } else if (0x39 < code && code < 0x41) || (0x5A < code && code < 0x61) {
-            code + 19
-        } else {
-            code
-        };
-        normalized.push(char::from_u32(next).unwrap_or('?'));
-    }
-    let digest = Md5::digest(normalized.as_bytes());
+        .as_secs();
+    let device_token = device_token()?.to_uppercase();
+    let data = format!("{nonce}{timestamp}{device_token}{SF_SECURITY_SALT}");
+    let digest = Md5::digest(data.as_bytes());
     Ok(format!(
-        "nonce={nonce}&timestamp={timestamp}&devicetoken={SF_DEVICE_TOKEN}&sign={:X}",
+        "nonce={nonce}&timestamp={timestamp}&devicetoken={device_token}&sign={:X}",
         digest
     ))
 }
@@ -1217,7 +800,7 @@ fn strip_html_tags(value: &str) -> String {
 /// # Errors
 /// Returns an error for empty/oversized input or an unavailable upstream service.
 #[tauri::command]
-async fn search_novels(query: String) -> Result<Vec<SearchNovel>, String> {
+async fn search_novels(app: tauri::AppHandle, query: String) -> Result<Vec<SearchNovel>, String> {
     let query = query.trim().to_string();
     if query.is_empty() {
         return Ok(Vec::new());
@@ -1225,7 +808,7 @@ async fn search_novels(query: String) -> Result<Vec<SearchNovel>, String> {
     if query.chars().count() > 100 {
         return Err("搜索关键词不能超过 100 个字符".to_string());
     }
-    let client = SfacgHttpClient::new()?;
+    let client = AppClient::new(&app)?;
     let response = client
         .get_data(
             "/search/novels/result/new",
@@ -1320,9 +903,9 @@ fn validate_novel_id(novel_id: i64) -> Result<(), String> {
 /// # Errors
 /// Returns an error for invalid identifiers or unavailable/malformed upstream metadata.
 #[tauri::command]
-async fn get_novel_details(novel_id: i64) -> Result<NovelDetail, String> {
+async fn get_novel_details(app: tauri::AppHandle, novel_id: i64) -> Result<NovelDetail, String> {
     validate_novel_id(novel_id)?;
-    let client = SfacgHttpClient::new()?;
+    let client = AppClient::new(&app)?;
     let detail = client
         .get_data(
             &format!("/novels/{novel_id}"),
@@ -1389,9 +972,12 @@ async fn get_novel_details(novel_id: i64) -> Result<NovelDetail, String> {
 /// # Errors
 /// Returns an error for invalid identifiers or a malformed/unavailable SF directory.
 #[tauri::command]
-async fn get_chapter_volumes(novel_id: i64) -> Result<Vec<ChapterVolume>, String> {
+async fn get_chapter_volumes(
+    app: tauri::AppHandle,
+    novel_id: i64,
+) -> Result<Vec<ChapterVolume>, String> {
     validate_novel_id(novel_id)?;
-    let client = SfacgHttpClient::new()?;
+    let client = AppClient::new(&app)?;
     let response = client
         .get_data(&format!("/novels/{novel_id}/dirs"), &[])
         .await?;
@@ -1461,9 +1047,8 @@ async fn get_chapter_volumes(novel_id: i64) -> Result<Vec<ChapterVolume>, String
 async fn get_audio_chapters(app: tauri::AppHandle, novel_id: i64) -> Result<AudioCatalog, String> {
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let cookie = current_session_cookie(&app)?;
-    let client = SfacgHttpClient::new()?;
-    let (title, chapters) = client.audio_catalog(novel_id, &cookie).await?;
+    let client = WebClient::new(&app)?;
+    let (title, chapters) = client.audio_catalog(novel_id).await?;
     let book_directory = library_directory(&app)?.join(safe_library_name(&title));
     let metadata =
         read_json_or_default::<StoredBookMetadata>(&book_directory.join(".novel-flow.json"))?;
@@ -1494,9 +1079,10 @@ async fn get_comic_chapters(app: tauri::AppHandle, comic_id: i64) -> Result<Comi
     validate_novel_id(comic_id)?;
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let cookie = current_session_cookie(&app).ok();
-    let client = SfacgHttpClient::new()?;
-    let (title, chapters) = client.comic_catalog(comic_id, cookie.as_deref()).await?;
+    let app_client = AppClient::new(&app)?;
+    let (title, folder) = app_client.comic_identity(comic_id).await?;
+    let web_client = WebClient::new(&app)?;
+    let chapters = web_client.comic_catalog(&folder).await?;
     let book_directory = library_directory(&app)?.join(safe_library_name(&title));
     let metadata =
         read_json_or_default::<StoredBookMetadata>(&book_directory.join(".novel-flow.json"))?;
@@ -1540,13 +1126,14 @@ async fn get_bookshelf(
     let _ = force_refresh;
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let cookie = current_session_cookie(&app)?;
-    let client = SfacgHttpClient::new()?;
+    let client = AppClient::new(&app)?;
+    if !client.has_session() {
+        return Err("请先使用 App 登录 SF 账号".to_string());
+    }
     let shelves = client
-        .get_data_with_cookie(
+        .get_data(
             "/user/Pockets",
             &[("expand", "novels,albums,comics".to_string())],
-            Some(&cookie),
         )
         .await?;
     let shelves = shelves
@@ -1671,22 +1258,46 @@ async fn login_with_password(
     if username.chars().count() > 128 || password.chars().count() > 512 {
         return Err("账号或密码长度无效".to_string());
     }
-    let client = SfacgHttpClient::new()?;
+    let client = AppClient::new(&app)?;
     let cookie = client.login_with_password(username, &password).await?;
     #[cfg(target_os = "android")]
     persist_android_auth_session(&app, &cookie).await?;
     #[cfg(target_os = "windows")]
     persist_desktop_auth_session(&app, &cookie, username)?;
-    let auth_state = app.state::<AuthSessionState>();
-    let mut session = auth_state
-        .session
-        .lock()
-        .map_err(|_| "登录会话状态不可用".to_string())?;
-    *session = Some(NativeAuthSession {
-        cookie,
-        user_name: username.to_string(),
-    });
-    drop(session);
+    {
+        let auth_state = app.state::<AuthSessionState>();
+        let mut session = auth_state
+            .session
+            .lock()
+            .map_err(|_| "登录会话状态不可用".to_string())?;
+        *session = Some(NativeAuthSession {
+            app_cookie: Some(cookie),
+            web_cookie: None,
+            user_name: username.to_string(),
+        });
+    }
+
+    // Device reporting is an optional post-login diagnostic. It must not turn
+    // a successful credential login into a failure when the endpoint is absent,
+    // restricted, or unrelated to App API authorization.
+    if let Ok(authenticated_client) = AppClient::new(&app) {
+        match authenticated_client
+            .get_data("/user", &[])
+            .await
+        {
+            Ok(user) => {
+                if let Some(account_id) = user.get("accountId").and_then(Value::as_i64) {
+                    if let Err(error) = authenticated_client
+                        .report_android_device_info(account_id)
+                        .await
+                    {
+                        eprintln!("[sfacg] optional device report rejected: {error}");
+                    }
+                }
+            }
+            Err(error) => eprintln!("[sfacg] optional device report skipped: {error}"),
+        }
+    }
     current_auth_status(&app)
 }
 
@@ -1788,38 +1399,18 @@ async fn start_official_login(app: tauri::AppHandle) -> Result<(), String> {
                     .collect::<Vec<_>>()
                     .join(",");
                 eprintln!("[sfacg] official login cookies captured: {cookie_names}");
-                let client = SfacgHttpClient::new()?;
-                if let Err(error) = client
-                    .get_data_with_cookie(
-                        "/user",
-                        &[("expand", "welfareCoin".to_string())],
-                        Some(&cookie),
-                    )
-                    .await
-                {
-                    let _ = login_window.close();
-                    return Err(format!(
-                        "官方网页登录未获得可用于 App 接口的会话，请改用账号密码登录：{error}"
-                    ));
-                }
                 let auth_state = app.state::<AuthSessionState>();
+                #[cfg(target_os = "windows")]
+                persist_desktop_web_session(&app, &cookie)?;
                 let mut session = auth_state
                     .session
                     .lock()
                     .map_err(|_| "登录会话状态不可用".to_string())?;
                 *session = Some(NativeAuthSession {
-                    cookie,
+                    app_cookie: None,
+                    web_cookie: Some(cookie),
                     user_name: "已登录 SF 账号".to_string(),
                 });
-                #[cfg(target_os = "windows")]
-                persist_desktop_auth_session(
-                    &app,
-                    &session
-                        .as_ref()
-                        .ok_or_else(|| "登录会话状态不可用".to_string())?
-                        .cookie,
-                    "已登录 SF 账号",
-                )?;
                 drop(session);
                 let _ = login_window.close();
                 return Ok(());
@@ -1867,7 +1458,7 @@ fn merge_sfacg_session_cookie(
     }
     for cookie in cookies {
         let name = cookie.name();
-        if name == ".SFCommunity" || name == "session_APP" || name.starts_with("session_") {
+        if name == ".SFCommunity" || name == "session_PC" {
             cookie_pairs.insert(name.to_string(), cookie.value().to_string());
         }
     }
@@ -1915,7 +1506,10 @@ async fn logout(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|_| "登录会话状态不可用".to_string())?;
     *session = None;
     #[cfg(target_os = "windows")]
-    clear_desktop_auth_session(&app)?;
+    {
+        clear_desktop_auth_session(&app)?;
+        clear_desktop_web_session(&app)?;
+    }
     Ok(())
 }
 
@@ -1931,13 +1525,14 @@ async fn logout(app: tauri::AppHandle) -> Result<(), String> {
 /// Returns an error when no authenticated native session is available.
 #[tauri::command]
 async fn verify_authenticated_request(app: tauri::AppHandle) -> Result<AuthStatus, String> {
-    let cookie = current_session_cookie(&app)?;
-    let client = SfacgHttpClient::new()?;
+    let client = AppClient::new(&app)?;
+    if !client.has_session() {
+        return Err("请先使用 App 登录 SF 账号".to_string());
+    }
     let _ = client
-        .get_data_with_cookie(
+        .get_data(
             "/user",
             &[("expand", "welfareCoin".to_string())],
-            Some(&cookie),
         )
         .await?;
     current_auth_status(&app)
@@ -1954,18 +1549,17 @@ async fn verify_authenticated_request(app: tauri::AppHandle) -> Result<AuthStatu
 async fn get_user_profile(app: tauri::AppHandle) -> Result<UserProfile, String> {
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let cookie = current_session_cookie(&app)?;
-    let client = SfacgHttpClient::new()?;
+    let client = AppClient::new(&app)?;
+    if !client.has_session() {
+        return Err("请先使用 App 登录 SF 账号".to_string());
+    }
     let user = client
-        .get_data_with_cookie(
+        .get_data(
             "/user",
             &[("expand", "welfareCoin".to_string())],
-            Some(&cookie),
         )
         .await?;
-    let money = client
-        .get_data_with_cookie("/user/money", &[], Some(&cookie))
-        .await?;
+    let money = client.get_data("/user/money", &[]).await?;
     let account_id = user
         .get("accountId")
         .and_then(Value::as_i64)

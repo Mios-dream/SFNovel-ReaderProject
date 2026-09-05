@@ -41,12 +41,11 @@ fn emit_native_job_update(app: &tauri::AppHandle, state: &NativeJobState, job_id
 /// are deliberately left untouched; re-downloading a chapter recreates its
 ///正文 and image files together.
 async fn materialize_chapter_images(
-    client: &SfacgHttpClient,
+    client: &WebClient,
     directory: &std::path::Path,
     novel_id: i64,
     chapter_id: i64,
     content: &str,
-    cookie: Option<&str>,
 ) -> Result<String, String> {
     let marker = "[img=";
     if !content.contains(marker) {
@@ -84,15 +83,8 @@ async fn materialize_chapter_images(
 
         output.push_str(&content[cursor..marker_start]);
         image_index += 1;
-        let mut request = client
-            .client
-            .get(url)
-            .header(reqwest::header::REFERER, &referer)
-            .header(reqwest::header::ACCEPT, "image/avif,image/webp,image/*,*/*;q=0.8");
-        if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
-            request = request.header(reqwest::header::COOKIE, cookie);
-        }
-        let response = request
+        let response = client
+            .asset_request(url, &referer, "image/avif,image/webp,image/*,*/*;q=0.8")
             .send()
             .await
             .map_err(|error| format!("无法下载章节图片 {image_index}：{error}"))?
@@ -155,8 +147,8 @@ async fn run_text_download(
 ) {
     let state = app.state::<NativeJobState>();
     let result: Result<String, String> = async {
-        let cookie = current_session_cookie(&app).ok();
-        let client = SfacgHttpClient::new()?;
+        let app_client = AppClient::new(&app)?;
+        let web_client = WebClient::new(&app)?;
         let policy = get_request_policy(app.clone()).unwrap_or_default();
         let directory = library_directory(&app)?.join(safe_library_name(&title));
         fs::create_dir_all(&directory).map_err(|error| format!("无法创建本地书籍目录：{error}"))?;
@@ -172,19 +164,19 @@ async fn run_text_download(
             .description
             .get_or_insert_with(|| "暂无简介".to_string());
         let _ = enrich_local_book(
-            &client,
+            &app_client,
+            &web_client,
             &directory,
             novel_metadata,
             novel_id,
-            cookie.as_deref(),
         )
         .await;
         let mut store = read_json_or_default::<StoredChapterStore>(
             &directory.join(".novel-flow-chapters.json"),
         )?;
         store.novel_id = novel_id;
-        let directory_data = client
-            .get_data_with_cookie(&format!("/novels/{novel_id}/dirs"), &[], cookie.as_deref())
+        let directory_data = app_client
+            .get_data(&format!("/novels/{novel_id}/dirs"), &[])
             .await?;
         let requested =
             chapter_ids.map(|ids| ids.into_iter().collect::<std::collections::HashSet<_>>());
@@ -219,7 +211,7 @@ async fn run_text_download(
                     .and_then(Value::as_bool)
                     .unwrap_or(false)
                     && !chapter.get("has").and_then(Value::as_bool).unwrap_or(false)
-                    && cookie.is_none()
+                    && !app_client.has_session()
                 {
                     continue;
                 }
@@ -255,34 +247,29 @@ async fn run_text_download(
             });
             emit_native_job_update(&app, &state, &job_id);
             if !store.chapters.contains_key(&chapter_id.to_string()) {
-                let raw_content = match client
-                    .chapter_content_with_metadata_from_api(chapter_id, cookie.as_deref())
+                let raw_content = match web_client
+                    .chapter_content(novel_id, volume_id, chapter_id)
                     .await
                 {
-                    Ok(api) => decode_api_content(&app, &api.content)?,
-                    Err(api_error) if policy.web_fallback_enabled => {
+                    Ok(content) => content,
+                    Err(web_error) if policy.app_fallback_enabled => {
                         update_native_job(&state, &job_id, |job| {
-                            job.message = format!("API 不可用，切换网页：{api_error}");
+                            job.message = format!("网页正文不可用，切换 App API：{web_error}");
                         });
                         emit_native_job_update(&app, &state, &job_id);
-                        client
-                            .chapter_content_from_web(
-                                novel_id,
-                                volume_id,
-                                chapter_id,
-                                cookie.as_deref(),
-                            )
-                            .await?
+                        let api = app_client
+                            .chapter_content_with_metadata_from_api(chapter_id)
+                            .await?;
+                        decode_api_content(&app, &api.content)?
                     }
-                    Err(error) => return Err(format!("API 正文下载失败：{error}")),
+                    Err(error) => return Err(format!("网页正文下载失败：{error}")),
                 };
                 let content = materialize_chapter_images(
-                    &client,
+                    &web_client,
                     &directory,
                     novel_id,
                     chapter_id,
                     &raw_content,
-                    cookie.as_deref(),
                 )
                 .await?;
                 store.chapters.insert(
@@ -372,20 +359,19 @@ fn safe_audio_name(value: &str) -> String {
 /// Metadata or cover failures deliberately do not fail a chapter download: the
 /// content remains usable and the next download can fill the missing artwork.
 async fn enrich_local_book(
-    client: &SfacgHttpClient,
+    client: &AppClient,
+    web_client: &WebClient,
     directory: &std::path::PathBuf,
     metadata: &mut StoredWorkMetadata,
     novel_id: i64,
-    cookie: Option<&str>,
 ) -> Result<(), String> {
     let detail = client
-        .get_data_with_cookie(
+        .get_data(
             &format!("/novels/{novel_id}"),
             &[(
                 "expand",
                 "intro,typeName,sysTags,chapterCount,pointCount,fav,ticket,latestchapter,bigNovelCover".to_string(),
             )],
-            cookie,
         )
         .await?;
     if let Some(author) = detail
@@ -488,11 +474,12 @@ async fn enrich_local_book(
     } else {
         format!("https://book.sfacg.com/{}", cover_url.trim_start_matches('/'))
     };
-    let payload = client
-        .client
-        .get(source)
-        .header(reqwest::header::REFERER, format!("https://book.sfacg.com/Novel/{novel_id}/"))
-        .header(reqwest::header::ACCEPT, "image/avif,image/webp,image/*,*/*;q=0.8")
+    let payload = web_client
+        .asset_request(
+            source,
+            &format!("https://book.sfacg.com/Novel/{novel_id}/"),
+            "image/avif,image/webp,image/*,*/*;q=0.8",
+        )
         .send()
         .await
         .map_err(|error| format!("无法下载封面：{error}"))?
@@ -513,19 +500,18 @@ async fn enrich_local_book(
 /// The audio service is the source of truth for an album's name, author,
 /// description, and artwork when it exposes those fields.
 async fn enrich_local_audio_book(
-    client: &SfacgHttpClient,
+    client: &AppClient,
+    web_client: &WebClient,
     directory: &std::path::PathBuf,
     metadata: &mut StoredWorkMetadata,
     novel_id: i64,
     album_id: Option<i64>,
-    cookie: &str,
 ) -> Result<(), String> {
     if let Some(album_id) = album_id {
         let detail = client
-            .get_data_with_cookie(
+            .get_data(
                 &format!("/albums/{album_id}"),
                 &[("expand", "intro,typeName,sysTags,latestchapter".to_string())],
-                Some(cookie),
             )
             .await?;
         let text = |keys: &[&str]| {
@@ -559,23 +545,21 @@ async fn enrich_local_audio_book(
         }
         let cover_url = if let Some(cover_url) = text(&["coverBig"]) {
             cover_url
-        } else if let Some(cover_url) = fetch_novel_big_cover(client, novel_id, cookie).await.ok().flatten() {
+        } else if let Some(cover_url) = fetch_novel_big_cover(client, novel_id).await.ok().flatten() {
             cover_url
         } else if let Some(cover_url) = text(&["coverMedium", "coverSmall", "albumCover", "cover"]) {
             cover_url
         } else {
             return Ok(());
         };
-        return save_audio_cover(client, directory, &cover_url, cookie).await;
+        return save_audio_cover(web_client, directory, &cover_url).await;
     }
-    let response = client
-        .client
-        .get("https://i.sfacg.com/ajax/ashx/Common.ashx")
+    let response = web_client
+        .ajax_request(
+            "https://i.sfacg.com/ajax/ashx/Common.ashx",
+            "https://i.sfacg.com/consume/book/",
+        )
         .query(&[("op", "getAudioInfo"), ("nid", &novel_id.to_string())])
-        .header(reqwest::header::COOKIE, cookie)
-        .header("Accept", "application/json, text/javascript, */*; q=0.01")
-        .header("X-Requested-With", "XMLHttpRequest")
-        .header(reqwest::header::REFERER, "https://i.sfacg.com/consume/book/")
         .send()
         .await
         .map_err(|error| format!("无法连接 SF 有声信息接口：{error}"))?
@@ -605,29 +589,27 @@ async fn enrich_local_audio_book(
     metadata.description = text(&["Intro", "Description", "Content"]).or_else(|| metadata.description.clone());
     metadata.type_name = text(&["TypeName", "CategoryName"]).or_else(|| metadata.type_name.clone());
     metadata.last_update_time = text(&["LastUpdateTime", "UpdateTime"]).or_else(|| metadata.last_update_time.clone());
-    let cover_url = if let Some(cover_url) = fetch_novel_big_cover(client, novel_id, cookie).await.ok().flatten() {
+    let cover_url = if let Some(cover_url) = fetch_novel_big_cover(client, novel_id).await.ok().flatten() {
         cover_url
     } else if let Some(cover_url) = text(&["CoverBig", "AlbumCover", "CoverMedium", "CoverSmall", "Cover"]) {
         cover_url
     } else {
         return Ok(());
     };
-    save_audio_cover(client, directory, &cover_url, cookie).await
+    save_audio_cover(web_client, directory, &cover_url).await
 }
 
 /// Resolves the un-cropped large cover used by the mobile work header. The
 /// audio player endpoint may expose a circular/trimmed `NovelCover`, so it is
 /// deliberately excluded from this lookup.
 async fn fetch_novel_big_cover(
-    client: &SfacgHttpClient,
+    client: &AppClient,
     novel_id: i64,
-    cookie: &str,
 ) -> Result<Option<String>, String> {
     let detail = client
-        .get_data_with_cookie(
+        .get_data(
             &format!("/novels/{novel_id}"),
             &[("expand", "bigNovelCover".to_string())],
-            Some(cookie),
         )
         .await?;
     Ok(detail
@@ -638,11 +620,19 @@ async fn fetch_novel_big_cover(
         .map(ToString::to_string))
 }
 
+/// 下载并以原子替换方式保存有声作品封面。
+///
+/// # 参数
+/// * `client` - 仅持有 Web 会话的资源请求客户端。
+/// * `directory` - 已校验的本地书籍目录。
+/// * `cover_url` - 上游返回的封面绝对或相对地址。
+///
+/// # 错误
+/// 封面无法下载、读取、创建目录或写入本地文件时返回错误。
 async fn save_audio_cover(
-    client: &SfacgHttpClient,
+    client: &WebClient,
     directory: &std::path::PathBuf,
     cover_url: &str,
-    cookie: &str,
 ) -> Result<(), String> {
     let cover = directory.join("imgs").join("audio-cover.jpeg");
     let source = if cover_url.starts_with("http://") || cover_url.starts_with("https://") {
@@ -651,10 +641,11 @@ async fn save_audio_cover(
         format!("https://i.sfacg.com/{}", cover_url.trim_start_matches('/'))
     };
     let payload = client
-        .client
-        .get(source)
-        .header(reqwest::header::REFERER, "https://i.sfacg.com/consume/book/")
-        .header(reqwest::header::COOKIE, cookie)
+        .asset_request(
+            source,
+            "https://i.sfacg.com/consume/book/",
+            "image/avif,image/webp,image/*,*/*;q=0.8",
+        )
         .send()
         .await
         .map_err(|error| format!("无法下载有声封面：{error}"))?
@@ -673,17 +664,16 @@ async fn save_audio_cover(
 
 /// Fetches comic metadata from the SF comic endpoint and persists artwork.
 async fn enrich_local_comic_book(
-    client: &SfacgHttpClient,
+    client: &AppClient,
+    web_client: &WebClient,
     directory: &std::path::PathBuf,
     metadata: &mut StoredWorkMetadata,
     comic_id: i64,
-    cookie: Option<&str>,
 ) -> Result<(), String> {
     let detail = client
-        .get_data_with_cookie(
+        .get_data(
             &format!("/comics/{comic_id}"),
             &[("expand", "intro,typeName,sysTags,latestchapter,fav,ticket,pointCount".to_string())],
-            cookie,
         )
         .await?;
     let text = |keys: &[&str]| {
@@ -728,7 +718,20 @@ async fn enrich_local_comic_book(
     let cover = directory.join("imgs").join("comic-cover.jpeg");
     if cover.is_file() { return Ok(()); }
     let source = if cover_url.starts_with("http://") || cover_url.starts_with("https://") { cover_url } else { format!("https://manhua.sfacg.com{}", if cover_url.starts_with('/') { cover_url } else { format!("/{cover_url}") }) };
-    let payload = client.client.get(source).header(reqwest::header::REFERER, "https://manhua.sfacg.com/").send().await.map_err(|e| format!("无法下载漫画封面：{e}"))?.error_for_status().map_err(|e| format!("漫画封面下载被拒绝：{e}"))?.bytes().await.map_err(|e| format!("无法读取漫画封面：{e}"))?;
+    let payload = web_client
+        .asset_request(
+            source,
+            "https://manhua.sfacg.com/",
+            "image/avif,image/webp,image/*,*/*;q=0.8",
+        )
+        .send()
+        .await
+        .map_err(|error| format!("无法下载漫画封面：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("漫画封面下载被拒绝：{error}"))?
+        .bytes()
+        .await
+        .map_err(|error| format!("无法读取漫画封面：{error}"))?;
     let parent = cover.parent().ok_or_else(|| "封面目录无效".to_string())?;
     fs::create_dir_all(parent).map_err(|e| format!("无法创建封面目录：{e}"))?;
     let partial = cover.with_extension("jpeg.part");
@@ -759,9 +762,9 @@ async fn run_audio_download(
     let result: Result<String, String> = async {
         #[cfg(target_os = "android")]
         sync_android_auth_session(&app).await?;
-        let cookie = current_session_cookie(&app)?;
-        let client = SfacgHttpClient::new()?;
-        let (_catalog_title, catalog) = client.audio_catalog(novel_id, &cookie).await?;
+        let app_client = AppClient::new(&app)?;
+        let web_client = WebClient::new(&app)?;
+        let (_catalog_title, catalog) = web_client.audio_catalog(novel_id).await?;
         let selected = chapter_ids
             .into_iter()
             .collect::<std::collections::HashSet<_>>();
@@ -789,12 +792,12 @@ async fn run_audio_download(
             .description
             .get_or_insert_with(|| "暂无简介".to_string());
         let _ = enrich_local_audio_book(
-            &client,
+            &app_client,
+            &web_client,
             &directory,
             audio_metadata,
             novel_id,
             album_id,
-            &cookie,
         )
         .await;
         let mut downloaded = metadata
@@ -826,15 +829,12 @@ async fn run_audio_download(
             });
             emit_native_job_update(&app, &state, &job_id);
             if !target.is_file() {
-                let payload = client
-                    .client
-                    .get(&chapter.source)
-                    .header(reqwest::header::COOKIE, &cookie)
-                    .header(
-                        reqwest::header::REFERER,
+                let payload = web_client
+                    .asset_request(
+                        &chapter.source,
                         "https://i.sfacg.com/consume/book/",
+                        "audio/mpeg,*/*;q=0.8",
                     )
-                    .header(reqwest::header::ACCEPT, "audio/mpeg,*/*;q=0.8")
                     .send()
                     .await
                     .map_err(|error| format!("无法下载有声章节：{error}"))?
@@ -937,9 +937,10 @@ async fn run_comic_download(
     let result: Result<String, String> = async {
         #[cfg(target_os = "android")]
         sync_android_auth_session(&app).await?;
-        let cookie = current_session_cookie(&app).ok();
-        let client = SfacgHttpClient::new()?;
-        let (_catalog_title, catalog) = client.comic_catalog(comic_id, cookie.as_deref()).await?;
+        let app_client = AppClient::new(&app)?;
+        let web_client = WebClient::new(&app)?;
+        let (_catalog_title, folder) = app_client.comic_identity(comic_id).await?;
+        let catalog = web_client.comic_catalog(&folder).await?;
         let requested = chapter_ids.into_iter().collect::<std::collections::HashSet<_>>();
         let chapters = catalog
             .into_iter()
@@ -966,11 +967,11 @@ async fn run_comic_download(
             .description
             .get_or_insert_with(|| "暂无简介".to_string());
         let _ = enrich_local_comic_book(
-            &client,
+            &app_client,
+            &web_client,
             &directory,
             comic_metadata,
             comic_id,
-            cookie.as_deref(),
         )
         .await;
         let mut downloaded = metadata
@@ -994,8 +995,8 @@ async fn run_comic_download(
             let chapter_directory = comic_directory.join(format!("{:06}", chapter.id));
             let marker = chapter_directory.join(".complete");
             if !marker.is_file() {
-                let images = client
-                    .comic_chapter_images(comic_id, chapter.id, cookie.as_deref())
+                let images = web_client
+                    .comic_chapter_images(&folder, chapter.id)
                     .await?;
                 fs::create_dir_all(&chapter_directory)
                     .map_err(|error| format!("无法创建漫画章节目录：{error}"))?;
@@ -1017,15 +1018,12 @@ async fn run_comic_download(
                     if target.is_file() {
                         continue;
                     }
-                    let mut image_request = client
-                        .client
-                        .get(image)
-                        .header(reqwest::header::REFERER, "https://manhua.sfacg.com/")
-                        .header(reqwest::header::ACCEPT, "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
-                    if let Some(cookie) = cookie.as_deref() {
-                        image_request = image_request.header(reqwest::header::COOKIE, cookie);
-                    }
-                    let payload = image_request
+                    let payload = web_client
+                        .asset_request(
+                            image,
+                            "https://manhua.sfacg.com/",
+                            "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                        )
                         .send()
                         .await
                         .map_err(|error| format!("无法下载漫画图片：{error}"))?
@@ -1197,7 +1195,7 @@ async fn create_audio_download(
     }
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    current_session_cookie(&app)?;
+    WebClient::new(&app)?.require_session()?;
     let id = format!(
         "{}-{novel_id}",
         SystemTime::now()
@@ -1275,9 +1273,10 @@ async fn create_comic_download(
     }
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let client = SfacgHttpClient::new()?;
-    let cookie = current_session_cookie(&app).ok();
-    let (_catalog_title, catalog) = client.comic_catalog(comic_id, cookie.as_deref()).await?;
+    let app_client = AppClient::new(&app)?;
+    let web_client = WebClient::new(&app)?;
+    let (_catalog_title, folder) = app_client.comic_identity(comic_id).await?;
+    let catalog = web_client.comic_catalog(&folder).await?;
     let requested = chapter_ids
         .iter()
         .copied()

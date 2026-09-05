@@ -51,7 +51,9 @@ export function useChapterPicker({
           { novelId: novel.novelId },
         );
       } else if (mode === "audio") {
-        if (!auth.value.authenticated) throw new Error("请先登录再下载有声内容");
+        if (!auth.value.webAuthenticated) {
+          throw new Error("请先使用官方网页登录 Web 服务再下载有声内容");
+        }
         const audio = await invoke<{ chapters: Chapter[] }>(
           "get_audio_chapters",
           { novelId: novel.novelId },

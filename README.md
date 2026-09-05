@@ -147,7 +147,8 @@ SF Novel Flow/
 ├── docs/
 │   ├── image/                  # README 头图和界面截图
 │   ├── SFACG-APP-API.md        # App API 验证记录
-│   └── SFACG-AUDIO-API.md      # 有声接口与安全说明
+│   ├── SFACG-AUDIO-API.md      # 有声接口与安全说明
+│   └── SFACG-AUTH-RISK-AUDIT.md # 登录与账号风控审计记录
 ├── src/                        # Vue 3 渲染层
 │   ├── components/             # 登录、章节选择、队列、导出和设置组件
 │   ├── composables/            # 前端状态与 Tauri 命令调用

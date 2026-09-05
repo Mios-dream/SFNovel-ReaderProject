@@ -120,7 +120,12 @@ export type LocalBookDetail = {
 };
 export type LocalChapterContent = LocalChapter & { content: string };
 
-export type AuthStatus = { authenticated: boolean; userName?: string };
+export type AuthStatus = {
+  authenticated: boolean;
+  appAuthenticated: boolean;
+  webAuthenticated: boolean;
+  userName?: string;
+};
 export type BrowserLoginStatus = AuthStatus & { waiting?: boolean };
 export type UserProfile = {
   accountId: number;
@@ -135,5 +140,5 @@ export type UserProfile = {
 export type RequestPolicy = {
   requestIntervalMs: number;
   maxConcurrentDownloads: number;
-  webFallbackEnabled: boolean;
+  appFallbackEnabled: boolean;
 };

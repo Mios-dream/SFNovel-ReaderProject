@@ -54,7 +54,7 @@ export function useDeskBookshelf({
 
   async function refreshBookshelf(forceRefresh = false) {
     await refreshAuthStatus();
-    if (!auth.value.authenticated) {
+    if (!auth.value.appAuthenticated) {
       requestCredentials();
       notify("登录后即可读取 SF 书架");
       return;
