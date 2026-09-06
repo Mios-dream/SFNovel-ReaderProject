@@ -1,10 +1,15 @@
 //! SF 网页客户端及其 Web 会话边界。
 
-use super::*;
+use crate::sfacg::{
+    extract_js_number, extract_js_string, parse_comic_catalog, validate_novel_id, AuthSessionState,
+    NativeAudioChapter, NativeComicChapter, SF_WEB_USER_AGENT,
+};
+use serde_json::Value;
+use tauri::Manager;
 
 /// 使用来自 `NativeAuthSession.web_cookie` 的已过滤 Web 会话快照，发送 SF
 /// 网页、AJAX 和静态资源请求。
-pub(super) struct WebClient {
+pub(crate) struct WebClient {
     client: reqwest::Client,
     web_cookie: Option<String>,
 }
@@ -14,7 +19,7 @@ impl WebClient {
     ///
     /// # 错误
     /// 当会话状态无法读取或 HTTP 客户端无法创建时返回错误。
-    pub(super) fn new(app: &tauri::AppHandle) -> Result<Self, String> {
+    pub(crate) fn new(app: &tauri::AppHandle) -> Result<Self, String> {
         let web_cookie = Self::read_web_cookie(app)?;
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(15))
@@ -33,7 +38,7 @@ impl WebClient {
     }
 
     /// 判断此客户端是否持有包含 `session_PC` 的 Web 会话。
-    pub(super) fn has_session(&self) -> bool {
+    pub(crate) fn has_session(&self) -> bool {
         self.web_cookie.as_ref().is_some_and(|cookie| {
             cookie
                 .split(';')

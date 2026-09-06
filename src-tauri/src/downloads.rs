@@ -1,3 +1,25 @@
+//! 原生下载任务的创建、调度、恢复与进度发布。
+//!
+//! 本模块编排文本、有声和漫画下载；SFACG 请求与本地文件格式分别委托给远程
+//! 服务模块和书库模块，避免下载流程承担额外的协议或持久化职责。
+
+use crate::app_client::AppClient;
+use crate::endpoint_policy::{app_endpoint_client, web_endpoint_client, EndpointCapability};
+use crate::library::{
+    decode_api_content, ensure_external_storage_access, get_request_policy, library_directory,
+    persist_native_jobs, read_json_or_default, safe_library_name, StoredBookMetadata,
+    StoredChapter, StoredChapterStore, StoredWorkMetadata,
+};
+#[cfg(target_os = "android")]
+use crate::sfacg::sync_android_auth_session;
+use crate::sfacg::{validate_novel_id, NativeJob, NativeJobSpec, NativeJobState};
+use crate::web_client::WebClient;
+use serde_json::Value;
+use std::fs;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{Emitter, Manager};
+
 /// Updates one native task while keeping all renderer-facing state in Rust memory.
 ///
 /// # Arguments
@@ -128,6 +150,37 @@ async fn materialize_chapter_images(
     Ok(output)
 }
 
+/// 按正文能力策略读取章节内容。
+///
+/// 先请求官方网站正文，失败后按设置决定是否尝试 App API。网页与 App 的请求细节
+/// 仍分别封装在各自客户端中；返回的失败原因只用于任务状态提示，不含认证材料。
+///
+/// # 返回值
+/// 返回正文和可选的网页失败原因；存在失败原因表示本次成功使用了 App 回退。
+async fn resolve_text_content(
+    app: &tauri::AppHandle,
+    web_client: &WebClient,
+    novel_id: i64,
+    volume_id: i64,
+    chapter_id: i64,
+    app_fallback_enabled: bool,
+) -> Result<(String, Option<String>), String> {
+    match web_client
+        .chapter_content(novel_id, volume_id, chapter_id)
+        .await
+    {
+        Ok(content) => Ok((content, None)),
+        Err(web_error) if app_fallback_enabled => {
+            let api_client = app_endpoint_client(app, EndpointCapability::TextChapterApp)?;
+            let api = api_client
+                .chapter_content_with_metadata_from_api(chapter_id)
+                .await?;
+            Ok((decode_api_content(app, &api.content)?, Some(web_error)))
+        }
+        Err(web_error) => Err(EndpointCapability::TextChapterWeb.unavailable_message(&web_error)),
+    }
+}
+
 /// Runs a text download task using the native SF web parser and atomic local stores.
 ///
 /// # Arguments
@@ -147,8 +200,8 @@ async fn run_text_download(
 ) {
     let state = app.state::<NativeJobState>();
     let result: Result<String, String> = async {
-        let app_client = AppClient::new(&app)?;
-        let web_client = WebClient::new(&app)?;
+        let app_client = app_endpoint_client(&app, EndpointCapability::TextDirectory)?;
+        let web_client = web_endpoint_client(&app, EndpointCapability::TextChapterWeb)?;
         let policy = get_request_policy(app.clone()).unwrap_or_default();
         let directory = library_directory(&app)?.join(safe_library_name(&title));
         fs::create_dir_all(&directory).map_err(|error| format!("无法创建本地书籍目录：{error}"))?;
@@ -247,23 +300,21 @@ async fn run_text_download(
             });
             emit_native_job_update(&app, &state, &job_id);
             if !store.chapters.contains_key(&chapter_id.to_string()) {
-                let raw_content = match web_client
-                    .chapter_content(novel_id, volume_id, chapter_id)
-                    .await
-                {
-                    Ok(content) => content,
-                    Err(web_error) if policy.app_fallback_enabled => {
-                        update_native_job(&state, &job_id, |job| {
-                            job.message = format!("网页正文不可用，切换 App API：{web_error}");
-                        });
-                        emit_native_job_update(&app, &state, &job_id);
-                        let api = app_client
-                            .chapter_content_with_metadata_from_api(chapter_id)
-                            .await?;
-                        decode_api_content(&app, &api.content)?
-                    }
-                    Err(error) => return Err(format!("网页正文下载失败：{error}")),
-                };
+                let (raw_content, web_fallback_reason) = resolve_text_content(
+                    &app,
+                    &web_client,
+                    novel_id,
+                    volume_id,
+                    chapter_id,
+                    policy.app_fallback_enabled,
+                )
+                .await?;
+                if let Some(web_error) = web_fallback_reason {
+                    update_native_job(&state, &job_id, |job| {
+                        job.message = format!("网页正文不可用，切换 App API：{web_error}");
+                    });
+                    emit_native_job_update(&app, &state, &job_id);
+                }
                 let content = materialize_chapter_images(
                     &web_client,
                     &directory,
@@ -435,10 +486,11 @@ async fn enrich_local_book(
         .and_then(|value| value.get("ticket"))
         .and_then(Value::as_i64);
     metadata.allow_download = detail.get("allowDown").and_then(Value::as_bool);
-    if let Some(latest) = detail
-        .get("expand")
-        .and_then(|value| value.get("latestChapter").or_else(|| value.get("latestchapter")))
-    {
+    if let Some(latest) = detail.get("expand").and_then(|value| {
+        value
+            .get("latestChapter")
+            .or_else(|| value.get("latestchapter"))
+    }) {
         metadata.latest_chapter_title = latest
             .get("title")
             .and_then(Value::as_str)
@@ -472,7 +524,10 @@ async fn enrich_local_book(
     let source = if cover_url.starts_with("http://") || cover_url.starts_with("https://") {
         cover_url
     } else {
-        format!("https://book.sfacg.com/{}", cover_url.trim_start_matches('/'))
+        format!(
+            "https://book.sfacg.com/{}",
+            cover_url.trim_start_matches('/')
+        )
     };
     let payload = web_client
         .asset_request(
@@ -533,21 +588,55 @@ async fn enrich_local_audio_book(
         };
         metadata.id = Some(album_id);
         metadata.catalog_id = Some(novel_id);
-        metadata.title = text(&["name", "albumName", "novelName"]).or_else(|| metadata.title.clone());
-        metadata.author = text(&["authorName", "author", "anchorName"]).or_else(|| metadata.author.clone());
-        metadata.description = text(&["intro", "description", "content"]).or_else(|| metadata.description.clone());
-        metadata.type_name = text(&["typeName", "categoryName"]).or_else(|| metadata.type_name.clone());
-        metadata.last_update_time = text(&["lastUpdateTime", "updateTime"]).or_else(|| metadata.last_update_time.clone());
-        metadata.is_finished = detail.get("isFinished").or_else(|| detail.get("isFinish")).and_then(Value::as_bool).or(metadata.is_finished);
-        metadata.view_count = detail.get("visitTimes").or_else(|| detail.get("viewTimes")).and_then(Value::as_i64).or(metadata.view_count);
-        if let Some(tags) = detail.get("sysTags").or_else(|| detail.get("tags")).or_else(|| detail.get("expand").and_then(|expand| expand.get("sysTags"))).and_then(Value::as_array) {
-            metadata.tags = tags.iter().filter_map(|tag| tag.as_str().or_else(|| tag.get("tagName").and_then(Value::as_str)).map(str::trim).filter(|value| !value.is_empty()).map(ToString::to_string)).take(8).collect();
+        metadata.title =
+            text(&["name", "albumName", "novelName"]).or_else(|| metadata.title.clone());
+        metadata.author =
+            text(&["authorName", "author", "anchorName"]).or_else(|| metadata.author.clone());
+        metadata.description =
+            text(&["intro", "description", "content"]).or_else(|| metadata.description.clone());
+        metadata.type_name =
+            text(&["typeName", "categoryName"]).or_else(|| metadata.type_name.clone());
+        metadata.last_update_time =
+            text(&["lastUpdateTime", "updateTime"]).or_else(|| metadata.last_update_time.clone());
+        metadata.is_finished = detail
+            .get("isFinished")
+            .or_else(|| detail.get("isFinish"))
+            .and_then(Value::as_bool)
+            .or(metadata.is_finished);
+        metadata.view_count = detail
+            .get("visitTimes")
+            .or_else(|| detail.get("viewTimes"))
+            .and_then(Value::as_i64)
+            .or(metadata.view_count);
+        if let Some(tags) = detail
+            .get("sysTags")
+            .or_else(|| detail.get("tags"))
+            .or_else(|| {
+                detail
+                    .get("expand")
+                    .and_then(|expand| expand.get("sysTags"))
+            })
+            .and_then(Value::as_array)
+        {
+            metadata.tags = tags
+                .iter()
+                .filter_map(|tag| {
+                    tag.as_str()
+                        .or_else(|| tag.get("tagName").and_then(Value::as_str))
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToString::to_string)
+                })
+                .take(8)
+                .collect();
         }
         let cover_url = if let Some(cover_url) = text(&["coverBig"]) {
             cover_url
-        } else if let Some(cover_url) = fetch_novel_big_cover(client, novel_id).await.ok().flatten() {
+        } else if let Some(cover_url) = fetch_novel_big_cover(client, novel_id).await.ok().flatten()
+        {
             cover_url
-        } else if let Some(cover_url) = text(&["coverMedium", "coverSmall", "albumCover", "cover"]) {
+        } else if let Some(cover_url) = text(&["coverMedium", "coverSmall", "albumCover", "cover"])
+        {
             cover_url
         } else {
             return Ok(());
@@ -585,17 +674,27 @@ async fn enrich_local_audio_book(
     metadata.id = Some(novel_id);
     metadata.catalog_id = Some(novel_id);
     metadata.title = text(&["AlbumName", "NovelName", "Title"]).or_else(|| metadata.title.clone());
-    metadata.author = text(&["AuthorName", "Author", "AnchorName"]).or_else(|| metadata.author.clone());
-    metadata.description = text(&["Intro", "Description", "Content"]).or_else(|| metadata.description.clone());
+    metadata.author =
+        text(&["AuthorName", "Author", "AnchorName"]).or_else(|| metadata.author.clone());
+    metadata.description =
+        text(&["Intro", "Description", "Content"]).or_else(|| metadata.description.clone());
     metadata.type_name = text(&["TypeName", "CategoryName"]).or_else(|| metadata.type_name.clone());
-    metadata.last_update_time = text(&["LastUpdateTime", "UpdateTime"]).or_else(|| metadata.last_update_time.clone());
-    let cover_url = if let Some(cover_url) = fetch_novel_big_cover(client, novel_id).await.ok().flatten() {
-        cover_url
-    } else if let Some(cover_url) = text(&["CoverBig", "AlbumCover", "CoverMedium", "CoverSmall", "Cover"]) {
-        cover_url
-    } else {
-        return Ok(());
-    };
+    metadata.last_update_time =
+        text(&["LastUpdateTime", "UpdateTime"]).or_else(|| metadata.last_update_time.clone());
+    let cover_url =
+        if let Some(cover_url) = fetch_novel_big_cover(client, novel_id).await.ok().flatten() {
+            cover_url
+        } else if let Some(cover_url) = text(&[
+            "CoverBig",
+            "AlbumCover",
+            "CoverMedium",
+            "CoverSmall",
+            "Cover",
+        ]) {
+            cover_url
+        } else {
+            return Ok(());
+        };
     save_audio_cover(web_client, directory, &cover_url).await
 }
 
@@ -673,7 +772,10 @@ async fn enrich_local_comic_book(
     let detail = client
         .get_data(
             &format!("/comics/{comic_id}"),
-            &[("expand", "intro,typeName,sysTags,latestchapter,fav,ticket,pointCount".to_string())],
+            &[(
+                "expand",
+                "intro,typeName,sysTags,latestchapter,fav,ticket,pointCount".to_string(),
+            )],
         )
         .await?;
     let text = |keys: &[&str]| {
@@ -697,27 +799,80 @@ async fn enrich_local_comic_book(
     metadata.online_path = text(&["folderName"]);
     metadata.title = text(&["comicName", "novelName"]).or_else(|| metadata.title.clone());
     metadata.author = text(&["authorName", "author"]).or_else(|| metadata.author.clone());
-    metadata.description = text(&["intro", "description", "content"]).or_else(|| metadata.description.clone());
+    metadata.description =
+        text(&["intro", "description", "content"]).or_else(|| metadata.description.clone());
     metadata.type_name = text(&["typeName", "categoryName"]).or_else(|| metadata.type_name.clone());
-    metadata.last_update_time = text(&["lastUpdateTime", "updateTime"]).or_else(|| metadata.last_update_time.clone());
-    metadata.is_finished = detail.get("isFinish").and_then(Value::as_bool).or(metadata.is_finished);
-    metadata.score = detail.get("point").and_then(Value::as_f64).or(metadata.score);
-    metadata.view_count = detail.get("viewTimes").and_then(Value::as_i64).or(metadata.view_count);
-    metadata.mark_count = detail.get("markCount").and_then(Value::as_i64).or(metadata.mark_count);
-    metadata.favorite_count = detail.get("favoriteCount").or_else(|| detail.get("fav")).and_then(Value::as_i64).or(metadata.favorite_count);
+    metadata.last_update_time =
+        text(&["lastUpdateTime", "updateTime"]).or_else(|| metadata.last_update_time.clone());
+    metadata.is_finished = detail
+        .get("isFinish")
+        .and_then(Value::as_bool)
+        .or(metadata.is_finished);
+    metadata.score = detail
+        .get("point")
+        .and_then(Value::as_f64)
+        .or(metadata.score);
+    metadata.view_count = detail
+        .get("viewTimes")
+        .and_then(Value::as_i64)
+        .or(metadata.view_count);
+    metadata.mark_count = detail
+        .get("markCount")
+        .and_then(Value::as_i64)
+        .or(metadata.mark_count);
+    metadata.favorite_count = detail
+        .get("favoriteCount")
+        .or_else(|| detail.get("fav"))
+        .and_then(Value::as_i64)
+        .or(metadata.favorite_count);
     if let Some(tags) = detail
         .get("tags")
         .or_else(|| detail.get("sysTags"))
         .or_else(|| detail.get("expand").and_then(|expand| expand.get("tags")))
-        .or_else(|| detail.get("expand").and_then(|expand| expand.get("sysTags")))
+        .or_else(|| {
+            detail
+                .get("expand")
+                .and_then(|expand| expand.get("sysTags"))
+        })
         .and_then(Value::as_array)
     {
-        metadata.tags = tags.iter().filter_map(|tag| tag.as_str().or_else(|| tag.get("tagName").and_then(Value::as_str)).map(str::trim).filter(|v| !v.is_empty()).map(ToString::to_string)).take(8).collect();
+        metadata.tags = tags
+            .iter()
+            .filter_map(|tag| {
+                tag.as_str()
+                    .or_else(|| tag.get("tagName").and_then(Value::as_str))
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(ToString::to_string)
+            })
+            .take(8)
+            .collect();
     }
-    let Some(cover_url) = text(&["coverBig", "comicCover", "coverMedium", "coverSmall", "novelCover"]) else { return Ok(()); };
+    let Some(cover_url) = text(&[
+        "coverBig",
+        "comicCover",
+        "coverMedium",
+        "coverSmall",
+        "novelCover",
+    ]) else {
+        return Ok(());
+    };
     let cover = directory.join("imgs").join("comic-cover.jpeg");
-    if cover.is_file() { return Ok(()); }
-    let source = if cover_url.starts_with("http://") || cover_url.starts_with("https://") { cover_url } else { format!("https://manhua.sfacg.com{}", if cover_url.starts_with('/') { cover_url } else { format!("/{cover_url}") }) };
+    if cover.is_file() {
+        return Ok(());
+    }
+    let source = if cover_url.starts_with("http://") || cover_url.starts_with("https://") {
+        cover_url
+    } else {
+        format!(
+            "https://manhua.sfacg.com{}",
+            if cover_url.starts_with('/') {
+                cover_url
+            } else {
+                format!("/{cover_url}")
+            }
+        )
+    };
     let payload = web_client
         .asset_request(
             source,
@@ -762,9 +917,12 @@ async fn run_audio_download(
     let result: Result<String, String> = async {
         #[cfg(target_os = "android")]
         sync_android_auth_session(&app).await?;
-        let app_client = AppClient::new(&app)?;
-        let web_client = WebClient::new(&app)?;
-        let (_catalog_title, catalog) = web_client.audio_catalog(novel_id).await?;
+        let app_client = app_endpoint_client(&app, EndpointCapability::NovelDetail)?;
+        let web_client = web_endpoint_client(&app, EndpointCapability::Audio)?;
+        let (_catalog_title, catalog) = web_client
+            .audio_catalog(novel_id)
+            .await
+            .map_err(|error| EndpointCapability::Audio.unavailable_message(&error))?;
         let selected = chapter_ids
             .into_iter()
             .collect::<std::collections::HashSet<_>>();
@@ -837,12 +995,21 @@ async fn run_audio_download(
                     )
                     .send()
                     .await
-                    .map_err(|error| format!("无法下载有声章节：{error}"))?
+                    .map_err(|error| {
+                        EndpointCapability::Audio
+                            .unavailable_message(&format!("无法下载有声章节：{error}"))
+                    })?
                     .error_for_status()
-                    .map_err(|error| format!("有声章节下载被拒绝：{error}"))?
+                    .map_err(|error| {
+                        EndpointCapability::Audio
+                            .unavailable_message(&format!("有声章节下载被拒绝：{error}"))
+                    })?
                     .bytes()
                     .await
-                    .map_err(|error| format!("无法读取有声章节：{error}"))?;
+                    .map_err(|error| {
+                        EndpointCapability::Audio
+                            .unavailable_message(&format!("无法读取有声章节：{error}"))
+                    })?;
                 let partial = target.with_extension("mp3.part");
                 fs::write(&partial, payload)
                     .map_err(|error| format!("无法写入有声章节：{error}"))?;
@@ -937,19 +1104,25 @@ async fn run_comic_download(
     let result: Result<String, String> = async {
         #[cfg(target_os = "android")]
         sync_android_auth_session(&app).await?;
-        let app_client = AppClient::new(&app)?;
-        let web_client = WebClient::new(&app)?;
+        let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
+        let web_client = web_endpoint_client(&app, EndpointCapability::ComicCatalog)?;
+        let pages_client = web_endpoint_client(&app, EndpointCapability::ComicPages)?;
         let (_catalog_title, folder) = app_client.comic_identity(comic_id).await?;
-        let catalog = web_client.comic_catalog(&folder).await?;
-        let requested = chapter_ids.into_iter().collect::<std::collections::HashSet<_>>();
+        let catalog = web_client
+            .comic_catalog(&folder)
+            .await
+            .map_err(|error| EndpointCapability::ComicCatalog.unavailable_message(&error))?;
+        let requested = chapter_ids
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
         let chapters = catalog
             .into_iter()
-            .filter(|chapter| {
-                requested.contains(&chapter.id) && chapter.is_unlocked
-            })
+            .filter(|chapter| requested.contains(&chapter.id) && chapter.is_unlocked)
             .collect::<Vec<_>>();
         if chapters.is_empty() {
-            return Err("所选漫画章节没有可下载内容；VIP 章节必须由目录明确标记为已解锁".to_string());
+            return Err(
+                "所选漫画章节没有可下载内容；VIP 章节必须由目录明确标记为已解锁".to_string(),
+            );
         }
         let directory = library_directory(&app)?.join(safe_library_name(&title));
         let comic_directory = directory.join("comic");
@@ -995,9 +1168,10 @@ async fn run_comic_download(
             let chapter_directory = comic_directory.join(format!("{:06}", chapter.id));
             let marker = chapter_directory.join(".complete");
             if !marker.is_file() {
-                let images = web_client
+                let images = pages_client
                     .comic_chapter_images(&folder, chapter.id)
-                    .await?;
+                    .await
+                    .map_err(|error| EndpointCapability::ComicPages.unavailable_message(&error))?;
                 fs::create_dir_all(&chapter_directory)
                     .map_err(|error| format!("无法创建漫画章节目录：{error}"))?;
                 for (page_index, image) in images.iter().enumerate() {
@@ -1014,11 +1188,12 @@ async fn run_comic_download(
                     });
                     emit_native_job_update(&app, &state, &job_id);
                     let extension = comic_image_extension(image);
-                    let target = chapter_directory.join(format!("{:03}.{extension}", page_index + 1));
+                    let target =
+                        chapter_directory.join(format!("{:03}.{extension}", page_index + 1));
                     if target.is_file() {
                         continue;
                     }
-                    let payload = web_client
+                    let payload = pages_client
                         .asset_request(
                             image,
                             "https://manhua.sfacg.com/",
@@ -1026,12 +1201,21 @@ async fn run_comic_download(
                         )
                         .send()
                         .await
-                        .map_err(|error| format!("无法下载漫画图片：{error}"))?
+                        .map_err(|error| {
+                            EndpointCapability::ComicPages
+                                .unavailable_message(&format!("无法下载漫画图片：{error}"))
+                        })?
                         .error_for_status()
-                        .map_err(|error| format!("漫画图片下载被拒绝：{error}"))?
+                        .map_err(|error| {
+                            EndpointCapability::ComicPages
+                                .unavailable_message(&format!("漫画图片下载被拒绝：{error}"))
+                        })?
                         .bytes()
                         .await
-                        .map_err(|error| format!("无法读取漫画图片：{error}"))?;
+                        .map_err(|error| {
+                            EndpointCapability::ComicPages
+                                .unavailable_message(&format!("无法读取漫画图片：{error}"))
+                        })?;
                     let partial = target.with_extension(format!("{extension}.part"));
                     fs::write(&partial, payload)
                         .map_err(|error| format!("无法写入漫画图片：{error}"))?;
@@ -1094,7 +1278,7 @@ async fn run_comic_download(
 /// # Errors
 /// Returns an error for invalid input or an unavailable native task registry.
 #[tauri::command]
-async fn create_text_download(
+pub(crate) async fn create_text_download(
     app: tauri::AppHandle,
     novel_id: i64,
     title: String,
@@ -1176,7 +1360,7 @@ async fn create_text_download(
 /// # Errors
 /// Returns an error for invalid input, missing login state, or unavailable task state.
 #[tauri::command]
-async fn create_audio_download(
+pub(crate) async fn create_audio_download(
     app: tauri::AppHandle,
     novel_id: i64,
     album_id: Option<i64>,
@@ -1195,7 +1379,7 @@ async fn create_audio_download(
     }
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    WebClient::new(&app)?.require_session()?;
+    let _ = web_endpoint_client(&app, EndpointCapability::Audio)?;
     let id = format!(
         "{}-{novel_id}",
         SystemTime::now()
@@ -1255,7 +1439,7 @@ async fn create_audio_download(
 /// Creates and schedules a comic download task. VIP chapters require an
 /// existing native SF session; the worker repeats that entitlement check.
 #[tauri::command]
-async fn create_comic_download(
+pub(crate) async fn create_comic_download(
     app: tauri::AppHandle,
     comic_id: i64,
     title: String,
@@ -1273,10 +1457,13 @@ async fn create_comic_download(
     }
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let app_client = AppClient::new(&app)?;
-    let web_client = WebClient::new(&app)?;
+    let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
+    let web_client = web_endpoint_client(&app, EndpointCapability::ComicCatalog)?;
     let (_catalog_title, folder) = app_client.comic_identity(comic_id).await?;
-    let catalog = web_client.comic_catalog(&folder).await?;
+    let catalog = web_client
+        .comic_catalog(&folder)
+        .await
+        .map_err(|error| EndpointCapability::ComicCatalog.unavailable_message(&error))?;
     let requested = chapter_ids
         .iter()
         .copied()
@@ -1350,7 +1537,7 @@ async fn create_comic_download(
 /// # Errors
 /// Returns an error if the task registry lock is unavailable.
 #[tauri::command]
-fn list_download_jobs(app: tauri::AppHandle) -> Result<Vec<NativeJob>, String> {
+pub(crate) fn list_download_jobs(app: tauri::AppHandle) -> Result<Vec<NativeJob>, String> {
     Ok(list_download_jobs_inner(&app.state::<NativeJobState>()))
 }
 
@@ -1363,7 +1550,10 @@ fn list_download_jobs(app: tauri::AppHandle) -> Result<Vec<NativeJob>, String> {
 /// # Errors
 /// Returns an error if no matching task exists or task state is unavailable.
 #[tauri::command]
-fn pause_download_job(app: tauri::AppHandle, job_id: String) -> Result<NativeJob, String> {
+pub(crate) fn pause_download_job(
+    app: tauri::AppHandle,
+    job_id: String,
+) -> Result<NativeJob, String> {
     let state = app.state::<NativeJobState>();
     let cancellation = state
         .cancellations
@@ -1399,7 +1589,10 @@ fn pause_download_job(app: tauri::AppHandle, job_id: String) -> Result<NativeJob
 /// # Errors
 /// Returns an error when the task is absent, not paused, or no longer resumable.
 #[tauri::command]
-fn resume_download_job(app: tauri::AppHandle, job_id: String) -> Result<NativeJob, String> {
+pub(crate) fn resume_download_job(
+    app: tauri::AppHandle,
+    job_id: String,
+) -> Result<NativeJob, String> {
     let app_for_state = app.clone();
     let state = app_for_state.state::<NativeJobState>();
     let job = state
@@ -1498,7 +1691,7 @@ fn list_download_jobs_inner(state: &NativeJobState) -> Vec<NativeJob> {
 /// # Errors
 /// Returns an error if the task does not exist or registry access fails.
 #[tauri::command]
-fn delete_download_job(app: tauri::AppHandle, job_id: String) -> Result<(), String> {
+pub(crate) fn delete_download_job(app: tauri::AppHandle, job_id: String) -> Result<(), String> {
     let state = app.state::<NativeJobState>();
     if let Some(cancellation) = state
         .cancellations
@@ -1521,4 +1714,3 @@ fn delete_download_job(app: tauri::AppHandle, job_id: String) -> Result<(), Stri
     }
     deleted
 }
-

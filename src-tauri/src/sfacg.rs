@@ -1,52 +1,61 @@
+//! SFACG 远程查询、认证和原生会话生命周期。
+//!
+//! 本模块仅处理上游 SFACG 协议、平台认证桥接与会话持久化。网络客户端的协议
+//! 细节分别封装在 [`crate::app_client`] 与 [`crate::web_client`]，离线书库和下载
+//! 任务由相邻业务模块负责。
+
+use crate::endpoint_policy::{app_endpoint_client, web_endpoint_client, EndpointCapability};
+use crate::library::{
+    get_request_policy, library_directory, read_json_or_default, safe_library_name,
+    StoredBookMetadata,
+};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::fs::File;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use uuid::Uuid;
-use zip::write::SimpleFileOptions;
-use zip::ZipWriter;
 
 #[cfg(target_os = "android")]
 use tauri::plugin::{PluginHandle, TauriPlugin};
 
 /// SF App API 的固定服务根地址。
-const SF_API_HOST: &str = "https://api.sfacg.com";
+pub(crate) const SF_API_HOST: &str = "https://api.sfacg.com";
 /// App API HTTP 基础认证使用的公开客户端标识。
-const SF_API_USER: &str = "androiduser";
+pub(crate) const SF_API_USER: &str = "androiduser";
 /// App API HTTP 基础认证的协议常量。
-const SF_API_PASSWORD: &str = "1a#$51-yt69;*Acv@qxq";
+pub(crate) const SF_API_PASSWORD: &str = "1a#$51-yt69;*Acv@qxq";
 /// 生成 `SFSecurity` 请求头所需的协议盐值。
 const SF_SECURITY_SALT: &str = "FN_Q29XHVmfV3mYX";
 /// 首次创建用户正文恢复字典时使用的内置默认映射。
-const DEFAULT_CONTENT_DICTIONARY: &str = include_str!("../../sfacg-content-dictionary.json");
+pub(crate) const DEFAULT_CONTENT_DICTIONARY: &str =
+    include_str!("../../sfacg-content-dictionary.json");
 /// 官方网页登录页面地址。
 const OFFICIAL_LOGIN_URL: &str = "https://passport.sfacg.com/";
 /// 官方登录窗口的稳定 Tauri 标签。
 const OFFICIAL_LOGIN_WINDOW_LABEL: &str = "sfacg-official-login";
 /// Windows 上模拟官方网页访问时使用的浏览器标识。
 #[cfg(target_os = "windows")]
-const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+pub(crate) const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 /// Android 上模拟官方网页访问时使用的浏览器标识。
 #[cfg(target_os = "android")]
-const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
+pub(crate) const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
 /// 其他桌面平台访问 SF 网页时使用的浏览器标识。
 #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
-const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+pub(crate) const SF_WEB_USER_AGENT: &str =
+    "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 /// 进程级设备身份令牌，仅在初始化后可供签名客户端读取。
-static SF_DEVICE_TOKEN: OnceLock<String> = OnceLock::new();
+pub(crate) static SF_DEVICE_TOKEN: OnceLock<String> = OnceLock::new();
 
 /// 返回已初始化的设备身份令牌。
 ///
 /// # 错误
 /// 应用尚未完成设备身份初始化时返回错误，调用方不应自行生成替代值。
-fn device_token() -> Result<&'static str, String> {
+pub(crate) fn device_token() -> Result<&'static str, String> {
     SF_DEVICE_TOKEN
         .get()
         .map(String::as_str)
@@ -57,191 +66,192 @@ fn device_token() -> Result<&'static str, String> {
 /// A public novel item returned to the renderer by the search command.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SearchNovel {
-    novel_id: i64,
+pub(crate) struct SearchNovel {
+    pub(crate) novel_id: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    media_id: Option<i64>,
-    novel_name: String,
-    author_name: String,
-    novel_cover: String,
-    last_update_time: String,
+    pub(crate) media_id: Option<i64>,
+    pub(crate) novel_name: String,
+    pub(crate) author_name: String,
+    pub(crate) novel_cover: String,
+    pub(crate) last_update_time: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    bookshelf_name: Option<String>,
+    pub(crate) bookshelf_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    bookshelf_type: Option<String>,
+    pub(crate) bookshelf_type: Option<String>,
 }
 
 /// Detailed public novel metadata used by the chapter selection view.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NovelDetail {
-    novel_id: i64,
-    novel_name: String,
-    author_name: String,
-    novel_cover: String,
-    last_update_time: String,
-    description: String,
-    is_finish: bool,
+pub(crate) struct NovelDetail {
+    pub(crate) novel_id: i64,
+    pub(crate) novel_name: String,
+    pub(crate) author_name: String,
+    pub(crate) novel_cover: String,
+    pub(crate) last_update_time: String,
+    pub(crate) description: String,
+    pub(crate) is_finish: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    type_name: Option<String>,
+    pub(crate) type_name: Option<String>,
 }
 
 /// A renderer-safe chapter collection for one SF novel volume.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ChapterVolume {
-    volume_id: i64,
-    title: String,
-    chapters: Vec<ChapterSummary>,
+pub(crate) struct ChapterVolume {
+    pub(crate) volume_id: i64,
+    pub(crate) title: String,
+    pub(crate) chapters: Vec<ChapterSummary>,
 }
 
 /// A renderer-safe chapter availability record.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ChapterSummary {
-    chap_id: i64,
-    title: String,
-    need_fire_money: i64,
-    is_vip: bool,
-    is_unlocked: bool,
-    downloaded: bool,
+pub(crate) struct ChapterSummary {
+    pub(crate) chap_id: i64,
+    pub(crate) title: String,
+    pub(crate) need_fire_money: i64,
+    pub(crate) is_vip: bool,
+    pub(crate) is_unlocked: bool,
+    pub(crate) downloaded: bool,
 }
 
 /// The authenticated SF bookshelf returned to the renderer without session data.
 #[derive(Clone, Debug, Serialize)]
-struct BookshelfCollection {
-    categories: Vec<String>,
-    items: Vec<SearchNovel>,
+pub(crate) struct BookshelfCollection {
+    pub(crate) categories: Vec<String>,
+    pub(crate) items: Vec<SearchNovel>,
 }
 
 /// Renderer-compatible native download task state.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NativeJob {
-    id: String,
-    title: String,
-    kind: String,
-    status: String,
-    progress: u8,
-    message: String,
+pub(crate) struct NativeJob {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) kind: String,
+    pub(crate) status: String,
+    pub(crate) progress: u8,
+    pub(crate) message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    file: Option<String>,
-    novel_id: Option<i64>,
+    pub(crate) file: Option<String>,
+    pub(crate) novel_id: Option<i64>,
 }
 
 /// Shared native task registry and cancellation flags.
 #[derive(Default)]
-struct NativeJobState {
-    jobs: Mutex<std::collections::HashMap<String, NativeJob>>,
-    cancellations: Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>,
-    specs: Mutex<std::collections::HashMap<String, NativeJobSpec>>,
+pub(crate) struct NativeJobState {
+    pub(crate) jobs: Mutex<std::collections::HashMap<String, NativeJob>>,
+    pub(crate) cancellations:
+        Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>,
+    pub(crate) specs: Mutex<std::collections::HashMap<String, NativeJobSpec>>,
 }
 
 /// Private inputs required to resume a native download task.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct NativeJobSpec {
-    kind: String,
-    novel_id: i64,
+pub(crate) struct NativeJobSpec {
+    pub(crate) kind: String,
+    pub(crate) novel_id: i64,
     #[serde(default)]
-    source_id: Option<i64>,
-    title: String,
-    chapter_ids: Vec<i64>,
+    pub(crate) source_id: Option<i64>,
+    pub(crate) title: String,
+    pub(crate) chapter_ids: Vec<i64>,
 }
 
 /// Persisted task data that permits user-controlled resumption after restart.
 #[derive(Default, Deserialize, Serialize)]
-struct PersistedNativeJobs {
-    jobs: std::collections::HashMap<String, NativeJob>,
-    specs: std::collections::HashMap<String, NativeJobSpec>,
+pub(crate) struct PersistedNativeJobs {
+    pub(crate) jobs: std::collections::HashMap<String, NativeJob>,
+    pub(crate) specs: std::collections::HashMap<String, NativeJobSpec>,
 }
 
 /// Native-only audio chapter record, including the upstream stream URL.
-struct NativeAudioChapter {
-    id: i64,
-    title: String,
-    volume: String,
-    source: String,
+pub(crate) struct NativeAudioChapter {
+    pub(crate) id: i64,
+    pub(crate) title: String,
+    pub(crate) volume: String,
+    pub(crate) source: String,
 }
 
 /// Renderer-safe audio catalog for a single SF work.
 #[derive(Debug, Serialize)]
-struct AudioCatalog {
-    title: String,
-    chapters: Vec<AudioChapterSummary>,
+pub(crate) struct AudioCatalog {
+    pub(crate) title: String,
+    pub(crate) chapters: Vec<AudioChapterSummary>,
 }
 
 /// Renderer-safe audio chapter row without the protected upstream stream URL.
 #[derive(Debug, Serialize)]
-struct AudioChapterSummary {
-    id: i64,
-    title: String,
-    volume: String,
-    downloaded: bool,
+pub(crate) struct AudioChapterSummary {
+    pub(crate) id: i64,
+    pub(crate) title: String,
+    pub(crate) volume: String,
+    pub(crate) downloaded: bool,
 }
 
 /// The renderer-safe authentication state for the current native session.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AuthStatus {
-    authenticated: bool,
-    app_authenticated: bool,
-    web_authenticated: bool,
+pub(crate) struct AuthStatus {
+    pub(crate) authenticated: bool,
+    pub(crate) app_authenticated: bool,
+    pub(crate) web_authenticated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    user_name: Option<String>,
+    pub(crate) user_name: Option<String>,
 }
 
 /// A renderer-safe snapshot of the authenticated SF account profile.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UserProfile {
-    account_id: i64,
-    nick_name: String,
-    avatar: String,
-    welfare_coin: i64,
-    fire_money_remain: i64,
-    coupons_remain: i64,
-    vip_level: i64,
+pub(crate) struct UserProfile {
+    pub(crate) account_id: i64,
+    pub(crate) nick_name: String,
+    pub(crate) avatar: String,
+    pub(crate) welfare_coin: i64,
+    pub(crate) fire_money_remain: i64,
+    pub(crate) coupons_remain: i64,
+    pub(crate) vip_level: i64,
 }
 
 /// Holds independently scoped SF sessions in native memory.
 #[derive(Default)]
-struct AuthSessionState {
-    session: Mutex<Option<NativeAuthSession>>,
+pub(crate) struct AuthSessionState {
+    pub(crate) session: Mutex<Option<NativeAuthSession>>,
 }
 
 /// App and Web cookies are intentionally separate and cannot be converted.
-struct NativeAuthSession {
-    app_cookie: Option<String>,
-    web_cookie: Option<String>,
-    user_name: String,
+pub(crate) struct NativeAuthSession {
+    pub(crate) app_cookie: Option<String>,
+    pub(crate) web_cookie: Option<String>,
+    pub(crate) user_name: String,
 }
 
 /// Native-only comic chapter record. The public comic site supplies chapter
 /// folders only on its web endpoint, so these values never leave the native
 /// download boundary except for renderer-safe availability metadata.
-struct NativeComicChapter {
-    id: i64,
-    title: String,
-    is_vip: bool,
-    is_unlocked: bool,
+pub(crate) struct NativeComicChapter {
+    pub(crate) id: i64,
+    pub(crate) title: String,
+    pub(crate) is_vip: bool,
+    pub(crate) is_unlocked: bool,
 }
 
 /// Renderer-safe comic catalog used by the chapter picker.
 #[derive(Debug, Serialize)]
-struct ComicCatalog {
-    title: String,
-    chapters: Vec<ComicChapterSummary>,
+pub(crate) struct ComicCatalog {
+    pub(crate) title: String,
+    pub(crate) chapters: Vec<ComicChapterSummary>,
 }
 
 /// One comic chapter without page URLs or source folder information.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ComicChapterSummary {
-    id: i64,
-    title: String,
-    is_vip: bool,
-    is_unlocked: bool,
-    downloaded: bool,
+pub(crate) struct ComicChapterSummary {
+    pub(crate) id: i64,
+    pub(crate) title: String,
+    pub(crate) is_vip: bool,
+    pub(crate) is_unlocked: bool,
+    pub(crate) downloaded: bool,
 }
 
 /// Windows 端加密保存的 App 登录会话序列化格式。
@@ -249,16 +259,16 @@ struct ComicChapterSummary {
 /// Cookie 在写入磁盘前必须由系统数据保护 API 加密。
 #[derive(Deserialize, Serialize)]
 struct PersistedAuthSession {
-    version: u8,
-    cookie: String,
-    user_name: String,
+    pub(crate) version: u8,
+    pub(crate) cookie: String,
+    pub(crate) user_name: String,
 }
 
 /// Windows 端加密保存的稳定设备身份序列化格式。
 #[derive(Deserialize, Serialize)]
 struct PersistedDeviceIdentity {
-    version: u8,
-    token: String,
+    pub(crate) version: u8,
+    pub(crate) token: String,
 }
 
 /// 返回 Windows 端加密 App 会话文件的私有存储路径。
@@ -297,7 +307,7 @@ fn protect_auth_data(input: &[u8]) -> Result<Vec<u8>, String> {
     use std::ptr;
     use windows_sys::Win32::Foundation::{GetLastError, LocalFree};
     use windows_sys::Win32::Security::Cryptography::{
-        CryptProtectData, CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN,
+        CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
     };
 
     let input_blob = CRYPT_INTEGER_BLOB {
@@ -340,7 +350,7 @@ fn unprotect_auth_data(input: &[u8]) -> Result<Vec<u8>, String> {
     use std::ptr;
     use windows_sys::Win32::Foundation::{GetLastError, LocalFree};
     use windows_sys::Win32::Security::Cryptography::{
-        CryptUnprotectData, CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN,
+        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
     };
 
     let input_blob = CRYPT_INTEGER_BLOB {
@@ -409,7 +419,9 @@ fn persist_desktop_auth_session(
 /// # 错误
 /// 已存在的会话文件无法读取或解密时返回错误。
 #[cfg(target_os = "windows")]
-fn restore_desktop_auth_session(app: &tauri::AppHandle) -> Result<Option<NativeAuthSession>, String> {
+pub(crate) fn restore_desktop_auth_session(
+    app: &tauri::AppHandle,
+) -> Result<Option<NativeAuthSession>, String> {
     let path = auth_session_path(app)?;
     if !path.is_file() {
         return Ok(None);
@@ -418,7 +430,8 @@ fn restore_desktop_auth_session(app: &tauri::AppHandle) -> Result<Option<NativeA
     let payload = unprotect_auth_data(&encrypted)?;
     let stored = serde_json::from_slice::<PersistedAuthSession>(&payload)
         .map_err(|error| format!("登录会话格式无效：{error}"))?;
-    if stored.version != 2 || stored.cookie.trim().is_empty() || stored.user_name.trim().is_empty() {
+    if stored.version != 2 || stored.cookie.trim().is_empty() || stored.user_name.trim().is_empty()
+    {
         return Ok(None);
     }
     Ok(Some(NativeAuthSession {
@@ -448,9 +461,16 @@ fn clear_desktop_auth_session(app: &tauri::AppHandle) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 fn persist_desktop_web_session(app: &tauri::AppHandle, cookie: &str) -> Result<(), String> {
     let path = web_session_path(app)?;
-    let payload = serde_json::to_vec(&PersistedAuthSession { version: 2, cookie: cookie.to_string(), user_name: "已登录 SF 账号".to_string() }).map_err(|e| format!("无法序列化网页登录会话：{e}"))?;
+    let payload = serde_json::to_vec(&PersistedAuthSession {
+        version: 2,
+        cookie: cookie.to_string(),
+        user_name: "已登录 SF 账号".to_string(),
+    })
+    .map_err(|e| format!("无法序列化网页登录会话：{e}"))?;
     let encrypted = protect_auth_data(&payload)?;
-    let parent = path.parent().ok_or_else(|| "网页登录会话目录无效".to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "网页登录会话目录无效".to_string())?;
     fs::create_dir_all(parent).map_err(|e| format!("无法创建网页登录会话目录：{e}"))?;
     fs::write(&path, encrypted).map_err(|e| format!("无法保存网页登录会话：{e}"))
 }
@@ -463,13 +483,25 @@ fn persist_desktop_web_session(app: &tauri::AppHandle, cookie: &str) -> Result<(
 /// # 错误
 /// 已存在的会话文件无法读取或解密时返回错误。
 #[cfg(target_os = "windows")]
-fn restore_desktop_web_session(app: &tauri::AppHandle) -> Result<Option<NativeAuthSession>, String> {
+pub(crate) fn restore_desktop_web_session(
+    app: &tauri::AppHandle,
+) -> Result<Option<NativeAuthSession>, String> {
     let path = web_session_path(app)?;
-    if !path.is_file() { return Ok(None); }
-    let payload = unprotect_auth_data(&fs::read(path).map_err(|e| format!("无法读取网页登录会话：{e}"))?)?;
-    let stored = serde_json::from_slice::<PersistedAuthSession>(&payload).map_err(|e| format!("网页登录会话格式无效：{e}"))?;
-    if stored.version != 2 || stored.cookie.trim().is_empty() { return Ok(None); }
-    Ok(Some(NativeAuthSession { app_cookie: None, web_cookie: Some(stored.cookie), user_name: stored.user_name }))
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let payload =
+        unprotect_auth_data(&fs::read(path).map_err(|e| format!("无法读取网页登录会话：{e}"))?)?;
+    let stored = serde_json::from_slice::<PersistedAuthSession>(&payload)
+        .map_err(|e| format!("网页登录会话格式无效：{e}"))?;
+    if stored.version != 2 || stored.cookie.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(NativeAuthSession {
+        app_cookie: None,
+        web_cookie: Some(stored.cookie),
+        user_name: stored.user_name,
+    }))
 }
 
 /// 删除 Windows 私有存储中的加密 Web 会话。
@@ -479,7 +511,9 @@ fn restore_desktop_web_session(app: &tauri::AppHandle) -> Result<Option<NativeAu
 #[cfg(target_os = "windows")]
 fn clear_desktop_web_session(app: &tauri::AppHandle) -> Result<(), String> {
     let path = web_session_path(app)?;
-    if path.exists() { fs::remove_file(path).map_err(|e| format!("无法清除网页登录会话：{e}"))?; }
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| format!("无法清除网页登录会话：{e}"))?;
+    }
     Ok(())
 }
 
@@ -488,7 +522,7 @@ fn clear_desktop_web_session(app: &tauri::AppHandle) -> Result<(), String> {
 /// # 错误
 /// 设备身份文件无法读写、加解密或应用数据目录无法解析时返回错误。
 #[cfg(target_os = "windows")]
-fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), String> {
     let path = app
         .path()
         .app_data_dir()
@@ -505,10 +539,15 @@ fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), String> {
         None
     }
     .unwrap_or_else(|| Uuid::new_v4().hyphenated().to_string().to_uppercase());
-    let directory = path.parent().ok_or_else(|| "设备身份目录无效".to_string())?;
+    let directory = path
+        .parent()
+        .ok_or_else(|| "设备身份目录无效".to_string())?;
     fs::create_dir_all(directory).map_err(|error| format!("无法创建设备身份目录：{error}"))?;
-    let payload = serde_json::to_vec(&PersistedDeviceIdentity { version: 1, token: token.clone() })
-        .map_err(|error| format!("无法序列化设备身份：{error}"))?;
+    let payload = serde_json::to_vec(&PersistedDeviceIdentity {
+        version: 1,
+        token: token.clone(),
+    })
+    .map_err(|error| format!("无法序列化设备身份：{error}"))?;
     let encrypted = protect_auth_data(&payload)?;
     let temporary = path.with_extension("bin.tmp");
     fs::write(&temporary, encrypted).map_err(|error| format!("无法保存设备身份：{error}"))?;
@@ -524,7 +563,7 @@ fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), String> {
 ///
 /// 此身份不会落盘，应用重启后会重新生成。
 #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
-fn initialize_device_identity(_app: &tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn initialize_device_identity(_app: &tauri::AppHandle) -> Result<(), String> {
     let _ = SF_DEVICE_TOKEN.set(Uuid::new_v4().hyphenated().to_string().to_uppercase());
     Ok(())
 }
@@ -540,14 +579,14 @@ fn is_valid_device_token(token: &str) -> bool {
 #[cfg(target_os = "android")]
 #[derive(Deserialize)]
 struct AndroidCookieResponse {
-    cookie: Option<String>,
+    pub(crate) cookie: Option<String>,
 }
 
 /// Android 原生插件返回的稳定设备身份容器。
 #[cfg(target_os = "android")]
 #[derive(Deserialize)]
 struct AndroidDeviceTokenResponse {
-    token: Option<String>,
+    pub(crate) token: Option<String>,
 }
 
 /// 保存只供 Rust 命令调用的 Android 原生认证插件句柄。
@@ -561,7 +600,7 @@ struct AndroidSfacgAuth<R: tauri::Runtime> {
 /// # 返回值
 /// 在命令运行前注册 Kotlin 实现的 Tauri 插件。
 #[cfg(target_os = "android")]
-fn android_sfacg_auth_plugin<R: tauri::Runtime>() -> TauriPlugin<R> {
+pub(crate) fn android_sfacg_auth_plugin<R: tauri::Runtime>() -> TauriPlugin<R> {
     tauri::plugin::Builder::new("sfacg-auth")
         .setup(|app, api| {
             let handle =
@@ -582,7 +621,7 @@ fn android_sfacg_auth_plugin<R: tauri::Runtime>() -> TauriPlugin<R> {
 /// # 错误
 /// Android 插件无法提供其自有 Cookie 存储时返回错误。
 #[cfg(target_os = "android")]
-async fn sync_android_auth_session(app: &tauri::AppHandle) -> Result<(), String> {
+pub(crate) async fn sync_android_auth_session(app: &tauri::AppHandle) -> Result<(), String> {
     let web_cookie = app
         .state::<AndroidSfacgAuth<tauri::Wry>>()
         .mobile_plugin_handle
@@ -606,9 +645,9 @@ async fn sync_android_auth_session(app: &tauri::AppHandle) -> Result<(), String>
         .map_err(|_| "登录会话状态不可用".to_string())?;
     *session = if app_cookie.is_some() || web_cookie.is_some() {
         Some(NativeAuthSession {
-        app_cookie,
-        web_cookie,
-        user_name: "已登录 SF 账号".to_string(),
+            app_cookie,
+            web_cookie,
+            user_name: "已登录 SF 账号".to_string(),
         })
     } else {
         None
@@ -621,7 +660,7 @@ async fn sync_android_auth_session(app: &tauri::AppHandle) -> Result<(), String>
 /// # 错误
 /// 插件调用失败或返回的令牌不是合法 UUID 时返回错误。
 #[cfg(target_os = "android")]
-async fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), String> {
+pub(crate) async fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), String> {
     let token = app
         .state::<AndroidSfacgAuth<tauri::Wry>>()
         .mobile_plugin_handle
@@ -640,10 +679,7 @@ async fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), String
 /// # 错误
 /// 插件无法写入其受管 Cookie 存储时返回错误。
 #[cfg(target_os = "android")]
-async fn persist_android_auth_session(
-    app: &tauri::AppHandle,
-    cookie: &str,
-) -> Result<(), String> {
+async fn persist_android_auth_session(app: &tauri::AppHandle, cookie: &str) -> Result<(), String> {
     app.state::<AndroidSfacgAuth<tauri::Wry>>()
         .mobile_plugin_handle
         .run_mobile_plugin_async::<Value>(
@@ -669,18 +705,24 @@ fn current_auth_status(app: &tauri::AppHandle) -> Result<AuthStatus, String> {
         .lock()
         .map_err(|_| "登录会话状态不可用".to_string())?;
     Ok(AuthStatus {
-        authenticated: session.as_ref().is_some_and(|value| value.app_cookie.is_some() || value.web_cookie.is_some()),
-        app_authenticated: session.as_ref().is_some_and(|value| value.app_cookie.is_some()),
-        web_authenticated: session.as_ref().is_some_and(|value| value.web_cookie.is_some()),
+        authenticated: session
+            .as_ref()
+            .is_some_and(|value| value.app_cookie.is_some() || value.web_cookie.is_some()),
+        app_authenticated: session
+            .as_ref()
+            .is_some_and(|value| value.app_cookie.is_some()),
+        web_authenticated: session
+            .as_ref()
+            .is_some_and(|value| value.web_cookie.is_some()),
         user_name: session.as_ref().map(|value| value.user_name.clone()),
     })
 }
 
 /// API chapter content and the identifiers needed for web comparison.
-struct ApiChapterContent {
-    content: String,
-    novel_id: i64,
-    volume_id: i64,
+pub(crate) struct ApiChapterContent {
+    pub(crate) content: String,
+    pub(crate) novel_id: i64,
+    pub(crate) volume_id: i64,
 }
 
 /// Builds the SF `SFSecurity` header without logging any credential material.
@@ -690,7 +732,7 @@ struct ApiChapterContent {
 ///
 /// # Errors
 /// Returns an error if the system clock or device identity is unavailable.
-fn security_header(nonce: &str) -> Result<String, String> {
+pub(crate) fn security_header(nonce: &str) -> Result<String, String> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "系统时间无效".to_string())?
@@ -707,14 +749,14 @@ fn security_header(nonce: &str) -> Result<String, String> {
 /// Extracts one numeric variable from the inline script emitted by the comic
 /// chapter page. The values originate from a fixed SF page, never from the
 /// renderer, and are used solely to call the matching image endpoint.
-fn extract_js_number(html: &str, variable: &str) -> Option<i64> {
+pub(crate) fn extract_js_number(html: &str, variable: &str) -> Option<i64> {
     let marker = format!("var {variable} =");
     let value = html.split(&marker).nth(1)?.split(';').next()?.trim();
     value.parse().ok()
 }
 
 /// Extracts one quoted inline JavaScript variable from a comic chapter page.
-fn extract_js_string(html: &str, variable: &str) -> Option<String> {
+pub(crate) fn extract_js_string(html: &str, variable: &str) -> Option<String> {
     let marker = format!("var {variable} =");
     let value = html.split(&marker).nth(1)?.split(';').next()?.trim();
     value
@@ -725,14 +767,19 @@ fn extract_js_string(html: &str, variable: &str) -> Option<String> {
 }
 
 /// Parses the chapter anchors exposed by a public SF comic work page.
-fn parse_comic_catalog(html: &str, folder: &str) -> Result<Vec<NativeComicChapter>, String> {
+pub(crate) fn parse_comic_catalog(
+    html: &str,
+    folder: &str,
+) -> Result<Vec<NativeComicChapter>, String> {
     let marker = format!("href=\"/mh/{folder}/");
     let mut remaining = html;
     let mut chapters = Vec::new();
     let mut seen = std::collections::HashSet::new();
     while let Some(position) = remaining.find(&marker) {
         remaining = &remaining[position + marker.len()..];
-        let Some(id_end) = remaining.find('/') else { break };
+        let Some(id_end) = remaining.find('/') else {
+            break;
+        };
         let Ok(id) = remaining[..id_end].parse::<i64>() else {
             continue;
         };
@@ -750,7 +797,12 @@ fn parse_comic_catalog(html: &str, folder: &str) -> Result<Vec<NativeComicChapte
         let is_vip = title.starts_with("VIP");
         let anchor_markup = &remaining[id_end..id_end + anchor_end];
         let is_unlocked = !is_vip || comic_anchor_is_unlocked(anchor_markup);
-        chapters.push(NativeComicChapter { id, title, is_vip, is_unlocked });
+        chapters.push(NativeComicChapter {
+            id,
+            title,
+            is_vip,
+            is_unlocked,
+        });
     }
     if chapters.is_empty() {
         return Err("SF 漫画目录格式无效".to_string());
@@ -800,7 +852,10 @@ fn strip_html_tags(value: &str) -> String {
 /// # Errors
 /// Returns an error for empty/oversized input or an unavailable upstream service.
 #[tauri::command]
-async fn search_novels(app: tauri::AppHandle, query: String) -> Result<Vec<SearchNovel>, String> {
+pub(crate) async fn search_novels(
+    app: tauri::AppHandle,
+    query: String,
+) -> Result<Vec<SearchNovel>, String> {
     let query = query.trim().to_string();
     if query.is_empty() {
         return Ok(Vec::new());
@@ -808,7 +863,7 @@ async fn search_novels(app: tauri::AppHandle, query: String) -> Result<Vec<Searc
     if query.chars().count() > 100 {
         return Err("搜索关键词不能超过 100 个字符".to_string());
     }
-    let client = AppClient::new(&app)?;
+    let client = app_endpoint_client(&app, EndpointCapability::Search)?;
     let response = client
         .get_data(
             "/search/novels/result/new",
@@ -888,7 +943,7 @@ async fn search_novels(app: tauri::AppHandle, query: String) -> Result<Vec<Searc
 ///
 /// # Errors
 /// Returns an error for zero, negative, or otherwise invalid identifiers.
-fn validate_novel_id(novel_id: i64) -> Result<(), String> {
+pub(crate) fn validate_novel_id(novel_id: i64) -> Result<(), String> {
     if novel_id <= 0 {
         return Err("小说编号无效".to_string());
     }
@@ -903,9 +958,12 @@ fn validate_novel_id(novel_id: i64) -> Result<(), String> {
 /// # Errors
 /// Returns an error for invalid identifiers or unavailable/malformed upstream metadata.
 #[tauri::command]
-async fn get_novel_details(app: tauri::AppHandle, novel_id: i64) -> Result<NovelDetail, String> {
+pub(crate) async fn get_novel_details(
+    app: tauri::AppHandle,
+    novel_id: i64,
+) -> Result<NovelDetail, String> {
     validate_novel_id(novel_id)?;
-    let client = AppClient::new(&app)?;
+    let client = app_endpoint_client(&app, EndpointCapability::NovelDetail)?;
     let detail = client
         .get_data(
             &format!("/novels/{novel_id}"),
@@ -972,12 +1030,12 @@ async fn get_novel_details(app: tauri::AppHandle, novel_id: i64) -> Result<Novel
 /// # Errors
 /// Returns an error for invalid identifiers or a malformed/unavailable SF directory.
 #[tauri::command]
-async fn get_chapter_volumes(
+pub(crate) async fn get_chapter_volumes(
     app: tauri::AppHandle,
     novel_id: i64,
 ) -> Result<Vec<ChapterVolume>, String> {
     validate_novel_id(novel_id)?;
-    let client = AppClient::new(&app)?;
+    let client = app_endpoint_client(&app, EndpointCapability::TextDirectory)?;
     let response = client
         .get_data(&format!("/novels/{novel_id}/dirs"), &[])
         .await?;
@@ -1044,11 +1102,17 @@ async fn get_chapter_volumes(
 /// # Errors
 /// Returns an error when no native session exists or SF rejects the audio request.
 #[tauri::command]
-async fn get_audio_chapters(app: tauri::AppHandle, novel_id: i64) -> Result<AudioCatalog, String> {
+pub(crate) async fn get_audio_chapters(
+    app: tauri::AppHandle,
+    novel_id: i64,
+) -> Result<AudioCatalog, String> {
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let client = WebClient::new(&app)?;
-    let (title, chapters) = client.audio_catalog(novel_id).await?;
+    let client = web_endpoint_client(&app, EndpointCapability::Audio)?;
+    let (title, chapters) = client
+        .audio_catalog(novel_id)
+        .await
+        .map_err(|error| EndpointCapability::Audio.unavailable_message(&error))?;
     let book_directory = library_directory(&app)?.join(safe_library_name(&title));
     let metadata =
         read_json_or_default::<StoredBookMetadata>(&book_directory.join(".novel-flow.json"))?;
@@ -1075,14 +1139,20 @@ async fn get_audio_chapters(app: tauri::AppHandle, novel_id: i64) -> Result<Audi
 /// only from explicit markers in the authenticated catalog; a login cookie by
 /// itself is never treated as chapter ownership.
 #[tauri::command]
-async fn get_comic_chapters(app: tauri::AppHandle, comic_id: i64) -> Result<ComicCatalog, String> {
+pub(crate) async fn get_comic_chapters(
+    app: tauri::AppHandle,
+    comic_id: i64,
+) -> Result<ComicCatalog, String> {
     validate_novel_id(comic_id)?;
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let app_client = AppClient::new(&app)?;
+    let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
     let (title, folder) = app_client.comic_identity(comic_id).await?;
-    let web_client = WebClient::new(&app)?;
-    let chapters = web_client.comic_catalog(&folder).await?;
+    let web_client = web_endpoint_client(&app, EndpointCapability::ComicCatalog)?;
+    let chapters = web_client
+        .comic_catalog(&folder)
+        .await
+        .map_err(|error| EndpointCapability::ComicCatalog.unavailable_message(&error))?;
     let book_directory = library_directory(&app)?.join(safe_library_name(&title));
     let metadata =
         read_json_or_default::<StoredBookMetadata>(&book_directory.join(".novel-flow.json"))?;
@@ -1119,17 +1189,14 @@ async fn get_comic_chapters(app: tauri::AppHandle, comic_id: i64) -> Result<Comi
 /// # Errors
 /// Returns an error if no authenticated native session exists or SF returns an invalid shelf.
 #[tauri::command]
-async fn get_bookshelf(
+pub(crate) async fn get_bookshelf(
     app: tauri::AppHandle,
     force_refresh: Option<bool>,
 ) -> Result<BookshelfCollection, String> {
     let _ = force_refresh;
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let client = AppClient::new(&app)?;
-    if !client.has_session() {
-        return Err("请先使用 App 登录 SF 账号".to_string());
-    }
+    let client = app_endpoint_client(&app, EndpointCapability::Bookshelf)?;
     let shelves = client
         .get_data(
             "/user/Pockets",
@@ -1226,7 +1293,7 @@ async fn get_bookshelf(
 /// # Errors
 /// Returns an error if Android cookie synchronization or native state access fails.
 #[tauri::command]
-async fn auth_status(app: tauri::AppHandle) -> Result<AuthStatus, String> {
+pub(crate) async fn auth_status(app: tauri::AppHandle) -> Result<AuthStatus, String> {
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
     current_auth_status(&app)
@@ -1246,7 +1313,7 @@ async fn auth_status(app: tauri::AppHandle) -> Result<AuthStatus, String> {
 /// Returns a redacted upstream error for invalid input, rejected credentials, or
 /// unavailable native state.
 #[tauri::command]
-async fn login_with_password(
+pub(crate) async fn login_with_password(
     app: tauri::AppHandle,
     username: String,
     password: String,
@@ -1258,7 +1325,7 @@ async fn login_with_password(
     if username.chars().count() > 128 || password.chars().count() > 512 {
         return Err("账号或密码长度无效".to_string());
     }
-    let client = AppClient::new(&app)?;
+    let client = app_endpoint_client(&app, EndpointCapability::AppPasswordLogin)?;
     let cookie = client.login_with_password(username, &password).await?;
     #[cfg(target_os = "android")]
     persist_android_auth_session(&app, &cookie).await?;
@@ -1285,24 +1352,23 @@ async fn login_with_password(
         .map(|policy| policy.android_device_report_enabled)
         .unwrap_or(true);
     if report_enabled {
-      if let Ok(authenticated_client) = AppClient::new(&app) {
-        match authenticated_client
-            .get_data("/user", &[])
-            .await
+        if let Ok(authenticated_client) =
+            app_endpoint_client(&app, EndpointCapability::AndroidDeviceReport)
         {
-            Ok(user) => {
-                if let Some(account_id) = user.get("accountId").and_then(Value::as_i64) {
-                    if let Err(error) = authenticated_client
-                        .report_android_device_info(account_id)
-                        .await
-                    {
-                        eprintln!("[sfacg] optional device report rejected: {error}");
+            match authenticated_client.get_data("/user", &[]).await {
+                Ok(user) => {
+                    if let Some(account_id) = user.get("accountId").and_then(Value::as_i64) {
+                        if let Err(error) = authenticated_client
+                            .report_android_device_info(account_id)
+                            .await
+                        {
+                            eprintln!("[sfacg] optional device report rejected: {error}");
+                        }
                     }
                 }
+                Err(error) => eprintln!("[sfacg] optional device report skipped: {error}"),
             }
-            Err(error) => eprintln!("[sfacg] optional device report skipped: {error}"),
         }
-      }
     } else {
         eprintln!("[sfacg] optional device report disabled by request policy");
     }
@@ -1322,7 +1388,7 @@ async fn login_with_password(
 /// Returns an explicit unsupported-platform error or a native error when the
 /// platform login surface cannot be opened or does not yield a valid session.
 #[tauri::command]
-async fn start_official_login(app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) async fn start_official_login(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         app.state::<AndroidSfacgAuth<tauri::Wry>>()
@@ -1414,7 +1480,8 @@ async fn start_official_login(app: tauri::AppHandle) -> Result<(), String> {
                     .session
                     .lock()
                     .map_err(|_| "登录会话状态不可用".to_string())?;
-                let existing_app_cookie = session.as_ref().and_then(|value| value.app_cookie.clone());
+                let existing_app_cookie =
+                    session.as_ref().and_then(|value| value.app_cookie.clone());
                 let user_name = session
                     .as_ref()
                     .map(|value| value.user_name.clone())
@@ -1506,7 +1573,7 @@ fn merge_sfacg_session_cookie(
 /// # Errors
 /// Returns an error when Android refuses to clear its application-owned cookie jar.
 #[tauri::command]
-async fn logout(app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) async fn logout(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "android")]
     app.state::<AndroidSfacgAuth<tauri::Wry>>()
         .mobile_plugin_handle
@@ -1533,7 +1600,7 @@ async fn logout(app: tauri::AppHandle) -> Result<(), String> {
 /// Returns an error when the platform-specific App session store cannot be
 /// cleared or the native state is unavailable.
 #[tauri::command]
-async fn logout_app_session(app: tauri::AppHandle) -> Result<AuthStatus, String> {
+pub(crate) async fn logout_app_session(app: tauri::AppHandle) -> Result<AuthStatus, String> {
     #[cfg(target_os = "android")]
     app.state::<AndroidSfacgAuth<tauri::Wry>>()
         .mobile_plugin_handle
@@ -1553,7 +1620,10 @@ async fn logout_app_session(app: tauri::AppHandle) -> Result<AuthStatus, String>
             current.user_name = "已登录 SF 账号".to_string();
         }
     }
-    if session.as_ref().is_some_and(|current| current.web_cookie.is_none()) {
+    if session
+        .as_ref()
+        .is_some_and(|current| current.web_cookie.is_none())
+    {
         *session = None;
     }
     drop(session);
@@ -1566,7 +1636,7 @@ async fn logout_app_session(app: tauri::AppHandle) -> Result<AuthStatus, String>
 /// Returns an error when the platform-specific website session store cannot be
 /// cleared or the native state is unavailable.
 #[tauri::command]
-async fn logout_web_session(app: tauri::AppHandle) -> Result<AuthStatus, String> {
+pub(crate) async fn logout_web_session(app: tauri::AppHandle) -> Result<AuthStatus, String> {
     #[cfg(target_os = "android")]
     app.state::<AndroidSfacgAuth<tauri::Wry>>()
         .mobile_plugin_handle
@@ -1583,7 +1653,10 @@ async fn logout_web_session(app: tauri::AppHandle) -> Result<AuthStatus, String>
     if let Some(current) = session.as_mut() {
         current.web_cookie = None;
     }
-    if session.as_ref().is_some_and(|current| current.app_cookie.is_none()) {
+    if session
+        .as_ref()
+        .is_some_and(|current| current.app_cookie.is_none())
+    {
         *session = None;
     }
     drop(session);
@@ -1601,16 +1674,12 @@ async fn logout_web_session(app: tauri::AppHandle) -> Result<AuthStatus, String>
 /// # Errors
 /// Returns an error when no authenticated native session is available.
 #[tauri::command]
-async fn verify_authenticated_request(app: tauri::AppHandle) -> Result<AuthStatus, String> {
-    let client = AppClient::new(&app)?;
-    if !client.has_session() {
-        return Err("请先使用 App 登录 SF 账号".to_string());
-    }
+pub(crate) async fn verify_authenticated_request(
+    app: tauri::AppHandle,
+) -> Result<AuthStatus, String> {
+    let client = app_endpoint_client(&app, EndpointCapability::AccountProfile)?;
     let _ = client
-        .get_data(
-            "/user",
-            &[("expand", "welfareCoin".to_string())],
-        )
+        .get_data("/user", &[("expand", "welfareCoin".to_string())])
         .await?;
     current_auth_status(&app)
 }
@@ -1623,18 +1692,12 @@ async fn verify_authenticated_request(app: tauri::AppHandle) -> Result<AuthStatu
 /// # Errors
 /// Returns an error if the session is unavailable or the upstream profile data is invalid.
 #[tauri::command]
-async fn get_user_profile(app: tauri::AppHandle) -> Result<UserProfile, String> {
+pub(crate) async fn get_user_profile(app: tauri::AppHandle) -> Result<UserProfile, String> {
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let client = AppClient::new(&app)?;
-    if !client.has_session() {
-        return Err("请先使用 App 登录 SF 账号".to_string());
-    }
+    let client = app_endpoint_client(&app, EndpointCapability::AccountProfile)?;
     let user = client
-        .get_data(
-            "/user",
-            &[("expand", "welfareCoin".to_string())],
-        )
+        .get_data("/user", &[("expand", "welfareCoin".to_string())])
         .await?;
     let money = client.get_data("/user/money", &[]).await?;
     let account_id = user
@@ -1680,4 +1743,3 @@ async fn get_user_profile(app: tauri::AppHandle) -> Result<UserProfile, String> 
     }
     Ok(profile)
 }
-

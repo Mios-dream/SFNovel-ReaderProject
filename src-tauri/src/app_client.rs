@@ -1,10 +1,16 @@
 //! SF App API 签名客户端及其 App 会话边界。
 
-use super::*;
+use crate::sfacg::{
+    device_token, security_header, validate_novel_id, ApiChapterContent, AuthSessionState,
+    SF_API_HOST, SF_API_PASSWORD, SF_API_USER,
+};
+use serde_json::Value;
+use tauri::Manager;
+use uuid::Uuid;
 
 /// 仅发送已签名的 SF App API 请求，并持有来自
 /// `NativeAuthSession.app_cookie` 的已过滤 App 会话快照。
-pub(super) struct AppClient {
+pub(crate) struct AppClient {
     client: reqwest::Client,
     app_cookie: Option<String>,
 }
@@ -14,7 +20,7 @@ impl AppClient {
     ///
     /// # 错误
     /// 当设备身份未初始化或 HTTP 客户端无法创建时返回错误。
-    pub(super) fn new(app: &tauri::AppHandle) -> Result<Self, String> {
+    pub(crate) fn new(app: &tauri::AppHandle) -> Result<Self, String> {
         let token = device_token()?.to_uppercase();
         let user_agent = format!("boluobao/5.0.36(android;34)/H5/{token}/H5");
         let app_cookie = Self::read_app_cookie(app)?;
@@ -27,7 +33,7 @@ impl AppClient {
     }
 
     /// 判断此客户端是否持有包含 `session_APP` 的 App 会话。
-    pub(super) fn has_session(&self) -> bool {
+    pub(crate) fn has_session(&self) -> bool {
         self.app_cookie.as_ref().is_some_and(|cookie| {
             cookie
                 .split(';')

@@ -1,183 +1,200 @@
+//! 本地书库、持久化设置、正文恢复字典和导出。
+//!
+//! 本模块拥有应用数据目录下的书库文件格式。下载模块通过受限的 crate 内接口
+//! 更新这些格式，但不会自行定义或迁移持久化模型。
+
+use crate::endpoint_policy::{app_endpoint_client, web_endpoint_client, EndpointCapability};
+use crate::sfacg::{NativeJobState, PersistedNativeJobs, DEFAULT_CONTENT_DICTIONARY};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::fs;
+use std::fs::File;
+use std::io::Write;
 use std::path::Path;
+use std::path::PathBuf;
+use tauri::Manager;
+use uuid::Uuid;
+use zip::write::SimpleFileOptions;
+use zip::ZipWriter;
 
 /// A renderer-safe summary of one locally stored book.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LibraryBook {
-    name: String,
-    updated_at: String,
+pub(crate) struct LibraryBook {
+    pub(crate) name: String,
+    pub(crate) updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    cover: Option<String>,
-    formats: LibraryFormats,
+    pub(crate) cover: Option<String>,
+    pub(crate) formats: LibraryFormats,
 }
 
 /// Describes which local media formats were found for a book.
 #[derive(Debug, Serialize)]
-struct LibraryFormats {
-    text: bool,
-    audio: bool,
-    comic: bool,
+pub(crate) struct LibraryFormats {
+    pub(crate) text: bool,
+    pub(crate) audio: bool,
+    pub(crate) comic: bool,
 }
 
 /// A renderer-safe local book detail record.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LocalBookDetail {
-    name: String,
+pub(crate) struct LocalBookDetail {
+    pub(crate) name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    novel: Option<LocalWorkMetadata>,
+    pub(crate) novel: Option<LocalWorkMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    audio: Option<LocalWorkMetadata>,
+    pub(crate) audio: Option<LocalWorkMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    comic: Option<LocalWorkMetadata>,
-    image_directory: String,
-    audio_tracks: Vec<LocalAudioTrack>,
-    epub_href: Option<String>,
-    chapter_volumes: Vec<LocalChapterVolume>,
-    comic_chapters: Vec<LocalComicChapter>,
+    pub(crate) comic: Option<LocalWorkMetadata>,
+    pub(crate) image_directory: String,
+    pub(crate) audio_tracks: Vec<LocalAudioTrack>,
+    pub(crate) epub_href: Option<String>,
+    pub(crate) chapter_volumes: Vec<LocalChapterVolume>,
+    pub(crate) comic_chapters: Vec<LocalComicChapter>,
 }
 
 /// Metadata for exactly one locally saved media type. Each source endpoint owns
 /// its own identity, cover, and descriptive fields.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LocalWorkMetadata {
-    id: i64,
+pub(crate) struct LocalWorkMetadata {
+    pub(crate) id: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    catalog_id: Option<i64>,
+    pub(crate) catalog_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    online_path: Option<String>,
-    title: String,
-    author: String,
-    description: String,
-    type_name: Option<String>,
-    tags: Vec<String>,
-    is_finished: Option<bool>,
-    score: Option<f64>,
-    chapter_count: Option<i64>,
-    character_count: Option<i64>,
-    view_count: Option<i64>,
-    mark_count: Option<i64>,
-    point_count: Option<i64>,
-    favorite_count: Option<i64>,
-    ticket_count: Option<i64>,
-    allow_download: Option<bool>,
-    latest_chapter_title: Option<String>,
-    latest_chapter_time: Option<String>,
-    last_update_time: Option<String>,
-    cover: Option<String>,
+    pub(crate) online_path: Option<String>,
+    pub(crate) title: String,
+    pub(crate) author: String,
+    pub(crate) description: String,
+    pub(crate) type_name: Option<String>,
+    pub(crate) tags: Vec<String>,
+    pub(crate) is_finished: Option<bool>,
+    pub(crate) score: Option<f64>,
+    pub(crate) chapter_count: Option<i64>,
+    pub(crate) character_count: Option<i64>,
+    pub(crate) view_count: Option<i64>,
+    pub(crate) mark_count: Option<i64>,
+    pub(crate) point_count: Option<i64>,
+    pub(crate) favorite_count: Option<i64>,
+    pub(crate) ticket_count: Option<i64>,
+    pub(crate) allow_download: Option<bool>,
+    pub(crate) latest_chapter_title: Option<String>,
+    pub(crate) latest_chapter_time: Option<String>,
+    pub(crate) last_update_time: Option<String>,
+    pub(crate) cover: Option<String>,
 }
 
 /// A locally playable audio track. The renderer converts the validated absolute
 /// path with Tauri's asset protocol before assigning it to an audio element.
 #[derive(Debug, Serialize)]
-struct LocalAudioTrack {
-    title: String,
-    href: String,
+pub(crate) struct LocalAudioTrack {
+    pub(crate) title: String,
+    pub(crate) href: String,
 }
 
 /// A local text chapter volume grouped in source order.
 #[derive(Debug, Serialize)]
-struct LocalChapterVolume {
-    volume: String,
-    chapters: Vec<LocalChapterSummary>,
+pub(crate) struct LocalChapterVolume {
+    pub(crate) volume: String,
+    pub(crate) chapters: Vec<LocalChapterSummary>,
 }
 
 /// A renderer-safe local chapter summary.
 #[derive(Debug, Serialize)]
-struct LocalChapterSummary {
-    id: i64,
-    title: String,
+pub(crate) struct LocalChapterSummary {
+    pub(crate) id: i64,
+    pub(crate) title: String,
 }
 
 /// The persisted metadata written by the native-compatible download format.
 #[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct StoredBookMetadata {
+pub(crate) struct StoredBookMetadata {
     #[serde(default)]
-    novel: Option<StoredWorkMetadata>,
+    pub(crate) novel: Option<StoredWorkMetadata>,
     #[serde(default)]
-    audio: Option<StoredWorkMetadata>,
+    pub(crate) audio: Option<StoredWorkMetadata>,
     #[serde(default)]
-    comic: Option<StoredWorkMetadata>,
+    pub(crate) comic: Option<StoredWorkMetadata>,
     #[serde(default)]
-    downloaded_text_chapter_ids: Option<Vec<i64>>,
+    pub(crate) downloaded_text_chapter_ids: Option<Vec<i64>>,
     #[serde(default)]
-    downloaded_audio_chapter_ids: Option<Vec<i64>>,
+    pub(crate) downloaded_audio_chapter_ids: Option<Vec<i64>>,
     #[serde(default)]
-    downloaded_comic_chapter_ids: Option<Vec<i64>>,
+    pub(crate) downloaded_comic_chapter_ids: Option<Vec<i64>>,
 }
 
 /// Persisted source metadata for one media type. It intentionally has no
 /// cross-media fallback fields: a comic ID must never be used as a novel ID.
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 #[serde(rename_all = "camelCase")]
-struct StoredWorkMetadata {
-    id: Option<i64>,
-    catalog_id: Option<i64>,
-    online_path: Option<String>,
-    title: Option<String>,
-    author: Option<String>,
-    description: Option<String>,
-    type_name: Option<String>,
+pub(crate) struct StoredWorkMetadata {
+    pub(crate) id: Option<i64>,
+    pub(crate) catalog_id: Option<i64>,
+    pub(crate) online_path: Option<String>,
+    pub(crate) title: Option<String>,
+    pub(crate) author: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) type_name: Option<String>,
     #[serde(default)]
-    tags: Vec<String>,
-    is_finished: Option<bool>,
-    score: Option<f64>,
-    chapter_count: Option<i64>,
-    character_count: Option<i64>,
-    view_count: Option<i64>,
-    mark_count: Option<i64>,
-    point_count: Option<i64>,
-    favorite_count: Option<i64>,
-    ticket_count: Option<i64>,
-    allow_download: Option<bool>,
-    latest_chapter_title: Option<String>,
-    latest_chapter_time: Option<String>,
-    last_update_time: Option<String>,
+    pub(crate) tags: Vec<String>,
+    pub(crate) is_finished: Option<bool>,
+    pub(crate) score: Option<f64>,
+    pub(crate) chapter_count: Option<i64>,
+    pub(crate) character_count: Option<i64>,
+    pub(crate) view_count: Option<i64>,
+    pub(crate) mark_count: Option<i64>,
+    pub(crate) point_count: Option<i64>,
+    pub(crate) favorite_count: Option<i64>,
+    pub(crate) ticket_count: Option<i64>,
+    pub(crate) allow_download: Option<bool>,
+    pub(crate) latest_chapter_title: Option<String>,
+    pub(crate) latest_chapter_time: Option<String>,
+    pub(crate) last_update_time: Option<String>,
 }
 
 /// One persisted text chapter from `.novel-flow-chapters.json`.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StoredChapter {
-    id: i64,
-    title: String,
-    volume: String,
-    content: String,
-    volume_index: i64,
-    chapter_index: i64,
+pub(crate) struct StoredChapter {
+    pub(crate) id: i64,
+    pub(crate) title: String,
+    pub(crate) volume: String,
+    pub(crate) content: String,
+    pub(crate) volume_index: i64,
+    pub(crate) chapter_index: i64,
 }
 
 /// Persisted chapter store shape written by the existing downloader.
 #[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct StoredChapterStore {
-    novel_id: i64,
-    chapters: std::collections::HashMap<String, StoredChapter>,
+pub(crate) struct StoredChapterStore {
+    pub(crate) novel_id: i64,
+    pub(crate) chapters: std::collections::HashMap<String, StoredChapter>,
 }
 
 /// The persisted request limits applied by native network download workers.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RequestPolicy {
-    request_interval_ms: u64,
-    max_concurrent_downloads: u8,
+pub(crate) struct RequestPolicy {
+    pub(crate) request_interval_ms: u64,
+    pub(crate) max_concurrent_downloads: u8,
     #[serde(default = "default_app_fallback_enabled")]
-    app_fallback_enabled: bool,
+    pub(crate) app_fallback_enabled: bool,
     #[serde(default = "default_android_device_report_enabled")]
-    android_device_report_enabled: bool,
+    pub(crate) android_device_report_enabled: bool,
 }
 
 /// A locally stored comic chapter and its ordered page files.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LocalComicChapter {
-    id: i64,
-    title: String,
+pub(crate) struct LocalComicChapter {
+    pub(crate) id: i64,
+    pub(crate) title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    cover: Option<String>,
-    pages: Vec<String>,
+    pub(crate) cover: Option<String>,
+    pub(crate) pages: Vec<String>,
 }
 
 /// 返回请求策略中“允许 App API 回退”的 serde 默认值。
@@ -212,10 +229,10 @@ impl Default for RequestPolicy {
 /// Renderer-safe result returned after reading or updating the正文恢复字典.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ContentDictionaryResult {
-    size: usize,
+pub(crate) struct ContentDictionaryResult {
+    pub(crate) size: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    added: Option<usize>,
+    pub(crate) added: Option<usize>,
 }
 
 /// Returns true for the CJK Unified Ideographs ranges used by SF正文内容.
@@ -303,7 +320,7 @@ fn load_content_dictionary(
 }
 
 /// Restores API-confused Han characters using the persisted web alignment map.
-fn decode_api_content(app: &tauri::AppHandle, content: &str) -> Result<String, String> {
+pub(crate) fn decode_api_content(app: &tauri::AppHandle, content: &str) -> Result<String, String> {
     let dictionary = load_content_dictionary(app)?;
     Ok(content
         .chars()
@@ -351,7 +368,9 @@ fn write_content_dictionary(
 /// # Errors
 /// Returns an error when the dictionary cannot be read or initialized.
 #[tauri::command]
-fn get_content_dictionary(app: tauri::AppHandle) -> Result<ContentDictionaryResult, String> {
+pub(crate) fn get_content_dictionary(
+    app: tauri::AppHandle,
+) -> Result<ContentDictionaryResult, String> {
     let dictionary = load_content_dictionary(&app)?;
     Ok(ContentDictionaryResult {
         size: dictionary.len(),
@@ -370,15 +389,15 @@ fn get_content_dictionary(app: tauri::AppHandle) -> Result<ContentDictionaryResu
 /// Returns an error when either source is unavailable, the character counts do
 /// not match, or an existing mapping conflicts with the observed web character.
 #[tauri::command]
-async fn update_content_dictionary(
+pub(crate) async fn update_content_dictionary(
     app: tauri::AppHandle,
     chapter_id: i64,
 ) -> Result<ContentDictionaryResult, String> {
-    let app_client = AppClient::new(&app)?;
+    let app_client = app_endpoint_client(&app, EndpointCapability::TextChapterApp)?;
     let api = app_client
         .chapter_content_with_metadata_from_api(chapter_id)
         .await?;
-    let web_client = WebClient::new(&app)?;
+    let web_client = web_endpoint_client(&app, EndpointCapability::TextChapterWeb)?;
     let web = web_client
         .chapter_content(api.novel_id, api.volume_id, chapter_id)
         .await?;
@@ -436,7 +455,7 @@ async fn update_content_dictionary(
 /// Downloads folder and the private application-data folder on desktop.
 ///
 /// Returns an error when the directory cannot be resolved or created.
-fn library_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn library_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     #[cfg(target_os = "android")]
     let directory = PathBuf::from("/storage/emulated/0/Download/SF Novel Flow");
     #[cfg(not(target_os = "android"))]
@@ -535,7 +554,10 @@ fn native_jobs_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 ///
 /// # Errors
 /// Returns an error when the task snapshot cannot be serialized or replaced.
-fn persist_native_jobs(app: &tauri::AppHandle, state: &NativeJobState) -> Result<(), String> {
+pub(crate) fn persist_native_jobs(
+    app: &tauri::AppHandle,
+    state: &NativeJobState,
+) -> Result<(), String> {
     let jobs = state
         .jobs
         .lock()
@@ -571,7 +593,7 @@ fn persist_native_jobs(app: &tauri::AppHandle, state: &NativeJobState) -> Result
 ///
 /// # Errors
 /// Returns an error when an existing snapshot is malformed or unreadable.
-fn restore_native_jobs(app: &tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn restore_native_jobs(app: &tauri::AppHandle) -> Result<(), String> {
     let path = native_jobs_path(app)?;
     if !path.exists() {
         return Ok(());
@@ -610,7 +632,7 @@ fn restore_native_jobs(app: &tauri::AppHandle) -> Result<(), String> {
 /// # Errors
 /// Returns an error when an existing policy file is unreadable or malformed.
 #[tauri::command]
-fn get_request_policy(app: tauri::AppHandle) -> Result<RequestPolicy, String> {
+pub(crate) fn get_request_policy(app: tauri::AppHandle) -> Result<RequestPolicy, String> {
     let path = request_policy_path(&app)?;
     if !path.exists() {
         return Ok(RequestPolicy::default());
@@ -634,7 +656,7 @@ fn get_request_policy(app: tauri::AppHandle) -> Result<RequestPolicy, String> {
 /// Returns an error when values are outside their safe range or the policy
 /// cannot be serialized or stored.
 #[tauri::command]
-fn save_request_policy(
+pub(crate) fn save_request_policy(
     app: tauri::AppHandle,
     policy: RequestPolicy,
 ) -> Result<RequestPolicy, String> {
@@ -673,7 +695,7 @@ fn save_request_policy(
 /// # Errors
 /// Returns an error if the library cannot be scanned.
 #[tauri::command]
-fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBook>, String> {
+pub(crate) fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBook>, String> {
     let directory = library_directory(&app)?;
     let entries = fs::read_dir(&directory).map_err(|error| format!("无法读取本地书库：{error}"))?;
     let mut books = Vec::new();
@@ -703,11 +725,7 @@ fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBook>, String>
                 .map(|file_name| entry.path().join("imgs").join(file_name))
                 .find(|cover| cover.is_file())
                 .map(|cover| cover.to_string_lossy().into_owned()),
-            formats: LibraryFormats {
-                text,
-                audio,
-                comic,
-            },
+            formats: LibraryFormats { text, audio, comic },
         });
     }
     books.sort_by(|left, right| left.name.cmp(&right.name));
@@ -820,7 +838,10 @@ fn read_local_audio_tracks(directory: &PathBuf) -> Result<Vec<LocalAudioTrack>, 
 /// # Errors
 /// Returns an error when the book directory or a malformed chapter store cannot be read.
 #[tauri::command]
-fn get_local_book(app: tauri::AppHandle, name: String) -> Result<LocalBookDetail, String> {
+pub(crate) fn get_local_book(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<LocalBookDetail, String> {
     let directory = local_book_directory(&app, &name)?;
     let metadata = read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?;
     let store =
@@ -851,9 +872,10 @@ fn get_local_book(app: tauri::AppHandle, name: String) -> Result<LocalBookDetail
             });
     }
     let epub_name = format!("{}.epub", name);
-    let epub_href = directory.join(&epub_name).is_file().then(|| {
-        directory.join(&epub_name).to_string_lossy().into_owned()
-    });
+    let epub_href = directory
+        .join(&epub_name)
+        .is_file()
+        .then(|| directory.join(&epub_name).to_string_lossy().into_owned());
     let audio_tracks = read_local_audio_tracks(&directory)?;
     let comic_chapters = read_local_comic_chapters(&directory)?;
     Ok(LocalBookDetail {
@@ -884,11 +906,13 @@ fn local_work_metadata(
 ) -> Option<LocalWorkMetadata> {
     let metadata = metadata?;
     let id = metadata.id?;
-    let cover = directory
-        .join("imgs")
-        .join(cover_file)
-        .is_file()
-        .then(|| directory.join("imgs").join(cover_file).to_string_lossy().into_owned());
+    let cover = directory.join("imgs").join(cover_file).is_file().then(|| {
+        directory
+            .join("imgs")
+            .join(cover_file)
+            .to_string_lossy()
+            .into_owned()
+    });
     Some(LocalWorkMetadata {
         id,
         catalog_id: metadata.catalog_id,
@@ -925,13 +949,18 @@ fn read_local_comic_chapters(directory: &PathBuf) -> Result<Vec<LocalComicChapte
         return Ok(Vec::new());
     }
     let mut chapters = Vec::new();
-    for entry in fs::read_dir(root).map_err(|error| format!("无法读取漫画目录：{error}"))? {
+    for entry in fs::read_dir(root).map_err(|error| format!("无法读取漫画目录：{error}"))?
+    {
         let entry = entry.map_err(|error| format!("读取漫画章节失败：{error}"))?;
         let chapter_dir = entry.path();
         if !chapter_dir.is_dir() || !chapter_dir.join(".complete").is_file() {
             continue;
         }
-        let Some(id) = entry.file_name().to_str().and_then(|value| value.parse::<i64>().ok()) else {
+        let Some(id) = entry
+            .file_name()
+            .to_str()
+            .and_then(|value| value.parse::<i64>().ok())
+        else {
             continue;
         };
         let title = fs::read_to_string(chapter_dir.join(".complete"))
@@ -943,7 +972,15 @@ fn read_local_comic_chapters(directory: &PathBuf) -> Result<Vec<LocalComicChapte
             .filter_map(Result::ok)
             .filter(|item| item.path().is_file() && item.file_name() != ".complete")
             .map(|item| item.path())
-            .filter(|path| matches!(path.extension().and_then(|value| value.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("jpg" | "jpeg" | "png" | "webp" | "avif")))
+            .filter(|path| {
+                matches!(
+                    path.extension()
+                        .and_then(|value| value.to_str())
+                        .map(str::to_ascii_lowercase)
+                        .as_deref(),
+                    Some("jpg" | "jpeg" | "png" | "webp" | "avif")
+                )
+            })
             .collect::<Vec<_>>();
         pages.sort();
         if !pages.is_empty() {
@@ -973,10 +1010,19 @@ fn read_local_comic_chapters(directory: &PathBuf) -> Result<Vec<LocalComicChapte
 /// # 错误
 /// 书籍或章节不存在、目录未通过校验或页面信息无法读取时返回错误。
 #[tauri::command]
-fn get_local_comic_chapter(app: tauri::AppHandle, name: String, chapter_id: i64) -> Result<LocalComicChapter, String> {
-    if chapter_id <= 0 { return Err("漫画章节参数无效".to_string()); }
+pub(crate) fn get_local_comic_chapter(
+    app: tauri::AppHandle,
+    name: String,
+    chapter_id: i64,
+) -> Result<LocalComicChapter, String> {
+    if chapter_id <= 0 {
+        return Err("漫画章节参数无效".to_string());
+    }
     let directory = local_book_directory(&app, &name)?;
-    read_local_comic_chapters(&directory)?.into_iter().find(|chapter| chapter.id == chapter_id).ok_or_else(|| "本地漫画章节不存在".to_string())
+    read_local_comic_chapters(&directory)?
+        .into_iter()
+        .find(|chapter| chapter.id == chapter_id)
+        .ok_or_else(|| "本地漫画章节不存在".to_string())
 }
 
 /// Reads one downloaded text chapter without exposing its filesystem path.
@@ -989,7 +1035,7 @@ fn get_local_comic_chapter(app: tauri::AppHandle, name: String, chapter_id: i64)
 /// # Errors
 /// Returns an error for invalid IDs, missing books, malformed stores, or absent chapters.
 #[tauri::command]
-fn get_local_chapter(
+pub(crate) fn get_local_chapter(
     app: tauri::AppHandle,
     name: String,
     chapter_id: i64,
@@ -1013,14 +1059,14 @@ fn get_local_chapter(
 /// A renderer-safe description of one generated local export file.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LocalExport {
-    href: String,
-    file_name: String,
+pub(crate) struct LocalExport {
+    pub(crate) href: String,
+    pub(crate) file_name: String,
 }
 
 /// Ensures Android can write the public download directory used by the library.
 #[tauri::command]
-async fn ensure_external_storage_access(app: tauri::AppHandle) -> Result<bool, String> {
+pub(crate) async fn ensure_external_storage_access(app: tauri::AppHandle) -> Result<bool, String> {
     #[cfg(target_os = "android")]
     {
         let result = app
@@ -1223,7 +1269,7 @@ fn write_epub_export(
 /// # Errors
 /// Returns an error for unsupported formats, missing local resources, or export failures.
 #[tauri::command]
-async fn export_local_book(
+pub(crate) async fn export_local_book(
     app: tauri::AppHandle,
     name: String,
     format: String,
@@ -1232,7 +1278,10 @@ async fn export_local_book(
     if !ensure_external_storage_access(app.clone()).await? {
         return Err("请在系统设置中允许本应用管理所有文件，然后重试导出".to_string());
     }
-    if !matches!(format.as_str(), "epub" | "markdown" | "txt" | "audio" | "comic") {
+    if !matches!(
+        format.as_str(),
+        "epub" | "markdown" | "txt" | "audio" | "comic"
+    ) {
         return Err("不支持的导出格式".to_string());
     }
     let directory = local_book_directory(&app, &name)?;
@@ -1291,7 +1340,11 @@ async fn export_local_book(
         app.path()
             .temp_dir()
             .map_err(|error| format!("无法解析导出临时目录：{error}"))?
-            .join(format!(".sf-export-{}.{}", Uuid::new_v4(), expected_extension))
+            .join(format!(
+                ".sf-export-{}.{}",
+                Uuid::new_v4(),
+                expected_extension
+            ))
     } else {
         PathBuf::from(requested_path)
     };
@@ -1361,8 +1414,8 @@ async fn export_local_book(
                 .map_err(|error| format!("无法完成有声导出：{error}"))?;
         }
         "comic" => {
-            let file = File::create(&target)
-                .map_err(|error| format!("无法创建漫画导出：{error}"))?;
+            let file =
+                File::create(&target).map_err(|error| format!("无法创建漫画导出：{error}"))?;
             let mut archive = ZipWriter::new(file);
             let options =
                 SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -1385,8 +1438,8 @@ async fn export_local_book(
                             options,
                         )
                         .map_err(|error| format!("无法创建漫画归档条目：{error}"))?;
-                    let bytes = fs::read(page)
-                        .map_err(|error| format!("无法读取漫画页面：{error}"))?;
+                    let bytes =
+                        fs::read(page).map_err(|error| format!("无法读取漫画页面：{error}"))?;
                     archive
                         .write_all(&bytes)
                         .map_err(|error| format!("无法写入漫画导出：{error}"))?;
@@ -1454,9 +1507,11 @@ async fn export_local_book(
 /// # Errors
 /// Returns an error if an existing metadata file cannot be decoded.
 fn metadata_novel_id(directory: &PathBuf) -> Result<Option<i64>, String> {
-    Ok(read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?
-        .novel
-        .and_then(|work| work.id))
+    Ok(
+        read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?
+            .novel
+            .and_then(|work| work.id),
+    )
 }
 
 /// Deletes one local book directory after validating it remains below the app library root.
@@ -1468,7 +1523,7 @@ fn metadata_novel_id(directory: &PathBuf) -> Result<Option<i64>, String> {
 /// # Errors
 /// Returns an error when the book cannot be resolved or filesystem removal fails.
 #[tauri::command]
-fn delete_local_book(app: tauri::AppHandle, name: String) -> Result<(), String> {
+pub(crate) fn delete_local_book(app: tauri::AppHandle, name: String) -> Result<(), String> {
     let directory = local_book_directory(&app, &name)?;
     fs::remove_dir_all(directory).map_err(|error| format!("删除本地书籍失败：{error}"))
 }
@@ -1480,7 +1535,7 @@ fn delete_local_book(app: tauri::AppHandle, name: String) -> Result<(), String> 
 ///
 /// # Errors
 /// Returns an error when an existing file is not valid UTF-8 JSON of the requested type.
-fn read_json_or_default<T>(path: &PathBuf) -> Result<T, String>
+pub(crate) fn read_json_or_default<T>(path: &PathBuf) -> Result<T, String>
 where
     T: for<'de> Deserialize<'de> + Default,
 {
@@ -1499,7 +1554,7 @@ where
 ///
 /// # Returns
 /// A bounded filesystem-safe title, or a stable fallback when all characters are removed.
-fn safe_library_name(value: &str) -> String {
+pub(crate) fn safe_library_name(value: &str) -> String {
     let mut result = value
         .chars()
         .map(|character| {
@@ -1518,4 +1573,3 @@ fn safe_library_name(value: &str) -> String {
     }
     result.chars().take(120).collect()
 }
-

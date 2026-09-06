@@ -1,3 +1,5 @@
+//! 面向渲染进程的非敏感运行时诊断命令。
+
 /// 返回原生运行时的非敏感诊断描述。
 ///
 /// 此命令仅用于验证 Vue 到 Rust 的 IPC 链路，不暴露文件路径、凭据或网络状态。
@@ -8,7 +10,7 @@
 /// # 返回值
 /// 适合在开发诊断视图展示的问候文本。
 #[tauri::command]
-fn greet(name: &str) -> String {
+pub(crate) fn greet(name: &str) -> String {
     let subject = if name.trim().is_empty() {
         "Novel Flow"
     } else {
@@ -24,7 +26,6 @@ fn greet(name: &str) -> String {
 /// # 返回值
 /// 应用包声明的语义化版本号。
 #[tauri::command]
-fn app_runtime_version(app: tauri::AppHandle) -> String {
+pub(crate) fn app_runtime_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
-
