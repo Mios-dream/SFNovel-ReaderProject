@@ -141,4 +141,5 @@ export type RequestPolicy = {
   requestIntervalMs: number;
   maxConcurrentDownloads: number;
   appFallbackEnabled: boolean;
+  androidDeviceReportEnabled: boolean;
 };

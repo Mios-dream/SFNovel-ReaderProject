@@ -45,14 +45,18 @@ if (!desk) throw new Error("Desk context is unavailable");
     @login="desk.login"
     @browser-login="desk.browserLogin"
     @logout="desk.logout"
+    @logout-app="desk.logoutApp"
+    @logout-web="desk.logoutWeb"
   />
   <AccountProfileModal
     :open="desk.accountOpen.value"
+    :auth="desk.auth.value"
     :profile="desk.accountProfile.value"
     :loading="desk.accountProfileLoading.value"
     :error="desk.accountProfileError.value"
     @close="desk.accountOpen.value = false"
     @logout="desk.logout"
+    @manage-connections="desk.manageConnections"
   />
   <SettingModal
     :open="desk.requestPolicyOpen.value"

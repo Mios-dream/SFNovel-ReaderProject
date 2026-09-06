@@ -139,6 +139,26 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve()
     }
 
+    /** Clears only the encrypted App API session without touching website cookies. */
+    @Command
+    fun clearAppSessionCookie(invoke: Invoke) {
+        activity.getSharedPreferences(DEVICE_PREFS, Activity.MODE_PRIVATE).edit()
+            .remove(APP_SESSION_KEY).apply()
+        invoke.resolve()
+    }
+
+    /** Clears only website cookies without touching the separately encrypted App session. */
+    @Command
+    fun clearWebSessionCookie(invoke: Invoke) {
+        val manager = CookieManager.getInstance()
+        for (url in SFACG_COOKIE_URLS) {
+            manager.setCookie(url, ".SFCommunity=; Max-Age=0; Path=/; Secure")
+            manager.setCookie(url, "session_PC=; Max-Age=0; Path=/; Secure")
+        }
+        manager.flush()
+        invoke.resolve()
+    }
+
     /** Checks Android's special shared-storage access and opens its settings page when needed. */
     @Command
     fun ensureExternalStorageAccess(invoke: Invoke) {

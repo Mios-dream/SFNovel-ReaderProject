@@ -42,9 +42,12 @@ export function useDeskAuth(notify: Notify) {
         username,
         password,
       });
-      credentialsOpen.value = false;
       await loadAccountProfile();
-      notify("SF 账号已登录到当前会话");
+      notify(
+        auth.value.webAuthenticated
+          ? "App 高级能力已连接"
+          : "App 高级能力已连接，可选择继续连接网站功能",
+      );
     } catch (error) {
       notify(nativeErrorMessage(error, "SF 账号密码登录失败"));
     } finally {
@@ -62,8 +65,11 @@ export function useDeskAuth(notify: Notify) {
         return;
       }
       auth.value = result;
-      credentialsOpen.value = false;
-      notify("SF 账号已登录到当前会话");
+      notify(
+        auth.value.appAuthenticated
+          ? "网站功能已连接"
+          : "网站功能已连接，可选择继续连接 App 高级能力",
+      );
     } catch (error) {
       notify(nativeErrorMessage(error, "无法打开官方登录窗口"));
     } finally {
@@ -85,6 +91,27 @@ export function useDeskAuth(notify: Notify) {
     }
   }
 
+  async function logoutApp() {
+    try {
+      auth.value = await invoke<AuthStatus>("logout_app_session");
+      accountProfile.value = undefined;
+      accountProfileError.value = "";
+      accountOpen.value = false;
+      notify("App 登录凭证已退出，网站功能不受影响");
+    } catch (error) {
+      notify(nativeErrorMessage(error, "退出 App 登录失败"));
+    }
+  }
+
+  async function logoutWeb() {
+    try {
+      auth.value = await invoke<AuthStatus>("logout_web_session");
+      notify("网站登录凭证已退出，App 功能不受影响");
+    } catch (error) {
+      notify(nativeErrorMessage(error, "退出网站登录失败"));
+    }
+  }
+
   async function openAccount() {
     if (!auth.value.appAuthenticated) {
       credentialsOpen.value = true;
@@ -92,6 +119,11 @@ export function useDeskAuth(notify: Notify) {
     }
     accountOpen.value = true;
     await loadAccountProfile();
+  }
+
+  function manageConnections() {
+    accountOpen.value = false;
+    credentialsOpen.value = true;
   }
 
   return {
@@ -107,6 +139,9 @@ export function useDeskAuth(notify: Notify) {
     login,
     browserLogin,
     logout,
+    logoutApp,
+    logoutWeb,
     openAccount,
+    manageConnections,
   };
 }

@@ -28,6 +28,7 @@ const defaultPolicy: RequestPolicy = {
   requestIntervalMs: 500,
   maxConcurrentDownloads: 1,
   appFallbackEnabled: true,
+  androidDeviceReportEnabled: true,
 };
 // 使用本地草稿编辑，只有提交表单时才将设置发送给后端。
 const draft = reactive<RequestPolicy>({ ...props.policy });
@@ -123,6 +124,30 @@ function resetDraft() {
                 <span class="toggle" aria-hidden="true"></span>
                 <span>{{
                   draft.appFallbackEnabled ? "已启用" : "已关闭"
+                }}</span>
+              </label>
+            </div>
+          </section>
+          <section class="settings-group dictionary-group">
+            <header class="settings-group-header">
+              <strong>安全</strong>
+            </header>
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>App 设备信息上报（实验）</strong>
+                <small
+                  >App
+                  登录成功后尝试上报当前安装信息，可能会减少账号风控风险；默认开启</small
+                >
+              </div>
+              <label class="setting-control toggle-control">
+                <input
+                  v-model="draft.androidDeviceReportEnabled"
+                  type="checkbox"
+                />
+                <span class="toggle" aria-hidden="true"></span>
+                <span>{{
+                  draft.androidDeviceReportEnabled ? "已启用" : "已关闭"
                 }}</span>
               </label>
             </div>

@@ -9,6 +9,7 @@ export function useRequestPolicy(notify: Notify) {
     requestIntervalMs: 500,
     maxConcurrentDownloads: 1,
     appFallbackEnabled: true,
+    androidDeviceReportEnabled: true,
   });
   const requestPolicySaving = ref(false);
   const contentDictionarySize = ref(0);

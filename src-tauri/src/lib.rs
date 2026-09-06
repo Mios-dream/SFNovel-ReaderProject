@@ -88,6 +88,8 @@ pub fn run() {
             login_with_password,
             start_official_login,
             logout,
+            logout_app_session,
+            logout_web_session,
             verify_authenticated_request,
             get_user_profile
         ])

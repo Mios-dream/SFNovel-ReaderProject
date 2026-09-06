@@ -4,20 +4,24 @@ import {
   CircleUserRound,
   Coins,
   Flame,
+  Globe2,
   LoaderCircle,
   LogOut,
+  Settings2,
+  Smartphone,
   Ticket,
   X,
 } from "lucide-vue-next";
-import type { UserProfile } from "../types";
+import type { AuthStatus, UserProfile } from "../types";
 
 const props = defineProps<{
   open: boolean;
+  auth: AuthStatus;
   profile?: UserProfile;
   loading: boolean;
   error: string;
 }>();
-const emit = defineEmits<{ close: []; logout: [] }>();
+const emit = defineEmits<{ close: []; logout: []; manageConnections: [] }>();
 const avatarFailed = ref(false);
 
 watch(
@@ -94,8 +98,26 @@ const number = (value: number | undefined) =>
         <CircleUserRound :size="28" />
         <p>{{ error || "暂未获取到账号资料" }}</p>
       </div>
+      <section class="credential-summary" aria-label="登录凭证状态">
+        <strong>登录凭证</strong>
+        <div class="credential-icons">
+          <span
+            v-if="auth.appAuthenticated"
+            class="credential-icon app"
+            title="App 高级能力已连接"
+          ><Smartphone :size="18" /></span>
+          <span
+            v-if="auth.webAuthenticated"
+            class="credential-icon web"
+            title="网站功能已连接"
+          ><Globe2 :size="18" /></span>
+        </div>
+      </section>
+      <button class="connections-button" @click="emit('manageConnections')">
+        <Settings2 :size="17" />管理登录连接
+      </button>
       <button class="logout-button" @click="emit('logout')">
-        <LogOut :size="17" />退出账户
+        <LogOut :size="17" />退出全部账户
       </button>
     </section>
   </div>
@@ -233,6 +255,48 @@ const number = (value: number | undefined) =>
   margin-left: auto;
   color: #9a563f;
 }
+.credential-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid #ecd8ce;
+  border-radius: 10px;
+  background: #fffaf7;
+}
+.credential-summary > strong {
+  color: #7b564c;
+  font-size: 13px;
+}
+.credential-icons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-height: 32px;
+}
+.credential-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: #967b70;
+  background: #f4e7e1;
+  place-items: center;
+}
+.credential-icon.app {
+  color: #875a35;
+  background: #fff0dc;
+}
+.credential-icon.web {
+  color: #3f796b;
+  background: #e3f4ed;
+}
+.connections-button,
 .logout-button {
   display: flex;
   align-items: center;
@@ -247,6 +311,20 @@ const number = (value: number | undefined) =>
   background: transparent;
   font-size: 13px;
   font-weight: 600;
+}
+.connections-button {
+  margin-top: 22px;
+  border: 1px solid #efd0c0;
+  color: #8d5948;
+  background: #fffaf7;
+}
+.connections-button:hover {
+  border-color: var(--theme-color);
+  color: var(--theme-color-dark);
+  background: #fff0e7;
+}
+.logout-button {
+  margin-top: 10px;
 }
 .logout-button:hover {
   color: #fff;

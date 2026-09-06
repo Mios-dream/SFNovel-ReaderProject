@@ -165,6 +165,8 @@ struct RequestPolicy {
     max_concurrent_downloads: u8,
     #[serde(default = "default_app_fallback_enabled")]
     app_fallback_enabled: bool,
+    #[serde(default = "default_android_device_report_enabled")]
+    android_device_report_enabled: bool,
 }
 
 /// A locally stored comic chapter and its ordered page files.
@@ -185,6 +187,13 @@ fn default_app_fallback_enabled() -> bool {
     true
 }
 
+/// 返回请求策略中“允许 App 设备信息上报”的默认值。
+///
+/// 该接口属于实验项，默认开启以保持当前行为；用户可在设置中关闭。
+fn default_android_device_report_enabled() -> bool {
+    true
+}
+
 impl Default for RequestPolicy {
     /// Creates conservative defaults that reduce upstream request pressure.
     ///
@@ -195,6 +204,7 @@ impl Default for RequestPolicy {
             request_interval_ms: 500,
             max_concurrent_downloads: 1,
             app_fallback_enabled: true,
+            android_device_report_enabled: true,
         }
     }
 }

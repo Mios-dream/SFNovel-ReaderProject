@@ -1270,9 +1270,10 @@ async fn login_with_password(
             .session
             .lock()
             .map_err(|_| "登录会话状态不可用".to_string())?;
+        let existing_web_cookie = session.as_ref().and_then(|value| value.web_cookie.clone());
         *session = Some(NativeAuthSession {
             app_cookie: Some(cookie),
-            web_cookie: None,
+            web_cookie: existing_web_cookie,
             user_name: username.to_string(),
         });
     }
@@ -1280,7 +1281,11 @@ async fn login_with_password(
     // Device reporting is an optional post-login diagnostic. It must not turn
     // a successful credential login into a failure when the endpoint is absent,
     // restricted, or unrelated to App API authorization.
-    if let Ok(authenticated_client) = AppClient::new(&app) {
+    let report_enabled = get_request_policy(app.clone())
+        .map(|policy| policy.android_device_report_enabled)
+        .unwrap_or(true);
+    if report_enabled {
+      if let Ok(authenticated_client) = AppClient::new(&app) {
         match authenticated_client
             .get_data("/user", &[])
             .await
@@ -1297,6 +1302,9 @@ async fn login_with_password(
             }
             Err(error) => eprintln!("[sfacg] optional device report skipped: {error}"),
         }
+      }
+    } else {
+        eprintln!("[sfacg] optional device report disabled by request policy");
     }
     current_auth_status(&app)
 }
@@ -1406,10 +1414,16 @@ async fn start_official_login(app: tauri::AppHandle) -> Result<(), String> {
                     .session
                     .lock()
                     .map_err(|_| "登录会话状态不可用".to_string())?;
+                let existing_app_cookie = session.as_ref().and_then(|value| value.app_cookie.clone());
+                let user_name = session
+                    .as_ref()
+                    .map(|value| value.user_name.clone())
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| "已登录 SF 账号".to_string());
                 *session = Some(NativeAuthSession {
-                    app_cookie: None,
+                    app_cookie: existing_app_cookie,
                     web_cookie: Some(cookie),
-                    user_name: "已登录 SF 账号".to_string(),
+                    user_name,
                 });
                 drop(session);
                 let _ = login_window.close();
@@ -1511,6 +1525,69 @@ async fn logout(app: tauri::AppHandle) -> Result<(), String> {
         clear_desktop_web_session(&app)?;
     }
     Ok(())
+}
+
+/// Clears only the native App API session while preserving any website session.
+///
+/// # Errors
+/// Returns an error when the platform-specific App session store cannot be
+/// cleared or the native state is unavailable.
+#[tauri::command]
+async fn logout_app_session(app: tauri::AppHandle) -> Result<AuthStatus, String> {
+    #[cfg(target_os = "android")]
+    app.state::<AndroidSfacgAuth<tauri::Wry>>()
+        .mobile_plugin_handle
+        .run_mobile_plugin_async::<Value>("clearAppSessionCookie", ())
+        .await
+        .map_err(|error| format!("无法清除 Android App 登录会话：{error}"))?;
+    #[cfg(target_os = "windows")]
+    clear_desktop_auth_session(&app)?;
+    let auth_state = app.state::<AuthSessionState>();
+    let mut session = auth_state
+        .session
+        .lock()
+        .map_err(|_| "登录会话状态不可用".to_string())?;
+    if let Some(current) = session.as_mut() {
+        current.app_cookie = None;
+        if current.web_cookie.is_some() {
+            current.user_name = "已登录 SF 账号".to_string();
+        }
+    }
+    if session.as_ref().is_some_and(|current| current.web_cookie.is_none()) {
+        *session = None;
+    }
+    drop(session);
+    current_auth_status(&app)
+}
+
+/// Clears only the official website session while preserving any App API session.
+///
+/// # Errors
+/// Returns an error when the platform-specific website session store cannot be
+/// cleared or the native state is unavailable.
+#[tauri::command]
+async fn logout_web_session(app: tauri::AppHandle) -> Result<AuthStatus, String> {
+    #[cfg(target_os = "android")]
+    app.state::<AndroidSfacgAuth<tauri::Wry>>()
+        .mobile_plugin_handle
+        .run_mobile_plugin_async::<Value>("clearWebSessionCookie", ())
+        .await
+        .map_err(|error| format!("无法清除 Android 网站登录会话：{error}"))?;
+    #[cfg(target_os = "windows")]
+    clear_desktop_web_session(&app)?;
+    let auth_state = app.state::<AuthSessionState>();
+    let mut session = auth_state
+        .session
+        .lock()
+        .map_err(|_| "登录会话状态不可用".to_string())?;
+    if let Some(current) = session.as_mut() {
+        current.web_cookie = None;
+    }
+    if session.as_ref().is_some_and(|current| current.app_cookie.is_none()) {
+        *session = None;
+    }
+    drop(session);
+    current_auth_status(&app)
 }
 
 /// Verifies that the current native session can be used by authenticated SF requests.
