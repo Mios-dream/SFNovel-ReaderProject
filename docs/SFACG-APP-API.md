@@ -1,6 +1,6 @@
-# SFACG App API 登录与签名
+# SFACG App API 登录、签名与匿名内容接口
 
-> 验证日期：2026-09-05。本文只记录登录和请求签名协议。该协议可能被 SF 随时调整，不代表稳定的公开 API。
+> 匿名接口实测日期：2026-09-06。本文记录登录、请求签名及无登录会话的内容接口。该协议可能被 SF 随时调整，不代表稳定的公开 API。
 
 ## 已验证的登录方法
 
@@ -32,7 +32,7 @@
 每个请求都需要发送以下格式的 `SFSecurity` 头：
 
 ```text
-nonce={大写 UUID v4}&timestamp={Unix 毫秒}&devicetoken={deviceToken}&sign={大写 MD5}
+nonce={大写 UUID v4}&timestamp={Unix 秒}&devicetoken={deviceToken}&sign={大写 MD5}
 ```
 
 `sign` 的计算步骤：
@@ -40,6 +40,24 @@ nonce={大写 UUID v4}&timestamp={Unix 毫秒}&devicetoken={deviceToken}&sign={�
 1. 生成大写 UUID nonce。
 2. 拼接 `nonce + timestamp + deviceToken + salt`。
 3. 对拼接结果计算 MD5，并转为大写十六进制。
+
+其中 `timestamp` 为 Unix 秒级时间戳。请求签名与 Basic Auth 是 App 协议字段，并不等于用户登录；下文“匿名”均表示请求不发送 `.SFCommunity`、`session_APP` 或其他 Cookie。
+
+## 已验证的匿名内容接口
+
+以下结果使用当前 Rust `AppClient` 的请求画像，且明确省略 `Cookie` 请求头；每个目标只请求一次。验证样本为小说 `155640`、漫画 `2937`、有声专辑 `137`、章节 `8436696`。记录只保留路由、响应状态和响应是否含数据。
+
+| 路由 | HTTP / 业务状态 | 是否有 `data` | 当前用途与处理 |
+| --- | --- | --- | --- |
+| `GET /search/novels/result/new` | `200 / 200` | 是 | 搜索小说、有声与漫画。匿名 App 请求。 |
+| `GET /novels/{novelId}` | `200 / 200` | 是 | 小说详情、封面和下载元数据。匿名 App 请求。 |
+| `GET /novels/{novelId}/dirs` | `200 / 200` | 是 | 文字小说分卷与章节目录。匿名 App 请求。 |
+| `GET /albums/{albumId}` | `200 / 200` | 是 | 有声专辑详情、封面和补充元数据。匿名 App 请求。 |
+| `GET /comics/{comicId}` | `200 / 200` | 是 | 漫画名称及网页目录 `folderName` 映射。匿名 App 请求。 |
+| `GET /Chaps/{chapterId}` | `401 / 401`，`errorCode 507` | 否 | 不可匿名。正文继续网页优先；仅在用户显式启用回退且具备 App 会话时使用 App。 |
+| `GET /albums/{albumId}/chaps` | `401 / 401`，`errorCode 507` | 否 | 不可匿名，且不作为有声目录来源；继续使用官方网页 AJAX。 |
+
+实现约束：所有表中已验证的公开接口必须通过 `AppClient::get_public_data` 请求。该方法仍发送协议所需的 Basic Auth、`SFSecurity` 与安装级设备标识，但强制不携带 App 会话。不要把“匿名 App 内容接口”扩展为账户、书架、正文、购买或设备上报接口，也不要根据一次成功推断 VIP 章节访问权限。
 
 ## Nonce 流程
 

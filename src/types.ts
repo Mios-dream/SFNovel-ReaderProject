@@ -2,6 +2,7 @@
 export type ViewName =
   | "discover"
   | "bookshelf"
+  | "remoteDetail"
   | "library"
   | "libraryDetail"
   | "reader"
@@ -19,11 +20,24 @@ export type Novel = {
   lastUpdateTime: string;
   bookshelfName?: string;
   bookshelfType?: "novel" | "audio" | "comic";
+  /** Public web path used to open a comic without App identity lookup. */
+  sourcePath?: string;
   categoryName?: string;
   typeId?: number;
   description?: string;
   isFinish?: boolean;
   typeName?: string;
+  tags?: string[];
+  score?: number;
+  chapterCount?: number;
+  characterCount?: number;
+  viewCount?: number;
+  markCount?: number;
+  pointCount?: number;
+  favoriteCount?: number;
+  ticketCount?: number;
+  latestChapterTitle?: string;
+  latestChapterTime?: string;
 };
 
 export type Job = {

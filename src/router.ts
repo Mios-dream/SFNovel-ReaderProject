@@ -6,6 +6,7 @@ import LocalAudioPlayerPage from "./pages/LocalAudioPlayerPage.vue";
 import LocalBookDetailPage from "./pages/LocalBookDetailPage.vue";
 import LocalComicReaderPage from "./pages/LocalComicReaderPage.vue";
 import LocalReaderPage from "./pages/LocalReaderPage.vue";
+import RemoteBookDetailPage from "./pages/RemoteBookDetailPage.vue";
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -13,6 +14,7 @@ export const router = createRouter({
     { path: "/", redirect: "/discover" },
     { path: "/discover", component: DiscoverPage },
     { path: "/bookshelf", component: BookshelfPage },
+    { path: "/remote-book", component: RemoteBookDetailPage },
     { path: "/library", component: LibraryPage },
     { path: "/library/:name", component: LocalBookDetailPage },
     { path: "/reader", component: LocalReaderPage },

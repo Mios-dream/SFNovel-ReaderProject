@@ -16,7 +16,8 @@ const desk = requireDesk();
 const route = useRoute();
 const router = useRouter();
 const active = computed<ViewName>(() => {
-  if (route.path === "/bookshelf") return "bookshelf";
+  if (route.path === "/bookshelf" || route.path === "/remote-book")
+    return "bookshelf";
   if (route.path === "/library") return "library";
   return "discover";
 });

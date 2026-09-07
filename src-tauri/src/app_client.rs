@@ -54,6 +54,7 @@ impl AppClient {
         &self,
         method: reqwest::Method,
         path: &str,
+        include_session: bool,
     ) -> Result<reqwest::RequestBuilder, String> {
         let nonce = Uuid::new_v4().to_string().to_uppercase();
         let mut request = self
@@ -64,8 +65,10 @@ impl AppClient {
             .header("Accept-Language", "zh-Hans-CN;q=1")
             .header("Content-Type", "application/json")
             .header("SFSecurity", security_header(&nonce)?);
-        if let Some(cookie) = self.app_cookie.as_deref() {
-            request = request.header(reqwest::header::COOKIE, cookie);
+        if include_session {
+            if let Some(cookie) = self.app_cookie.as_deref() {
+                request = request.header(reqwest::header::COOKIE, cookie);
+            }
         }
         Ok(request)
     }
@@ -81,7 +84,7 @@ impl AppClient {
         query: &[(&str, String)],
     ) -> Result<Value, String> {
         let response = self
-            .signed_request(reqwest::Method::GET, path)?
+            .signed_request(reqwest::Method::GET, path, true)?
             .query(query)
             .send()
             .await
@@ -114,13 +117,63 @@ impl AppClient {
         Ok(body.get("data").cloned().unwrap_or(body))
     }
 
+    /// 请求已验证为公开的 App API 资源，并且绝不发送本地 App 会话 Cookie。
+    ///
+    /// 该方法仅用于经实测确认可匿名访问的作品发现与元数据端点。协议 Basic
+    /// Auth、请求签名和安装设备标识仍是 App API 的必要请求字段；“匿名”仅指
+    /// 不附带 `.SFCommunity` 或 `session_APP`。章节正文、书架和账户端点不得
+    /// 使用本方法。
+    ///
+    /// # 错误
+    /// 请求失败、上游拒绝请求或响应不是有效 JSON 时返回错误。
+    pub(super) async fn get_public_data(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<Value, String> {
+        let response = self
+            .signed_request(reqwest::Method::GET, path, false)?
+            .query(query)
+            .send()
+            .await
+            .map_err(|error| format!("SF 匿名 App 请求失败：{error}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.json::<Value>().await.unwrap_or(Value::Null);
+            let api_code = body
+                .get("status")
+                .and_then(|value| value.get("errorCode"))
+                .and_then(Value::as_i64);
+            let api_message = body
+                .get("status")
+                .and_then(|value| value.get("msg"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty());
+            eprintln!(
+                "[sfacg] Anonymous App request rejected: path={path}, http={}, api_code={api_code:?}, message={api_message:?}",
+                status.as_u16(),
+            );
+            return Err(match api_message {
+                Some(message) => {
+                    format!("SF 匿名 App 请求返回 HTTP {}：{message}", status.as_u16())
+                }
+                None => format!("SF 匿名 App 请求返回 HTTP {}", status.as_u16()),
+            });
+        }
+        let body = response
+            .json::<Value>()
+            .await
+            .map_err(|error| format!("SF 匿名 App 响应格式无效：{error}"))?;
+        Ok(body.get("data").cloned().unwrap_or(body))
+    }
+
     /// Sends a signed JSON POST request and returns its unwrapped data payload.
     ///
     /// This is kept private to native-side integrations whose request body is
     /// defined by the App protocol; no arbitrary renderer payload reaches it.
     pub(super) async fn post_data(&self, path: &str, body: &Value) -> Result<Value, String> {
         let response = self
-            .signed_request(reqwest::Method::POST, path)?
+            .signed_request(reqwest::Method::POST, path, true)?
             .json(body)
             .send()
             .await
@@ -198,7 +251,7 @@ impl AppClient {
         password: &str,
     ) -> Result<String, String> {
         let response = self
-            .signed_request(reqwest::Method::POST, "/sessions")?
+            .signed_request(reqwest::Method::POST, "/sessions", false)?
             .json(&serde_json::json!({
                 "userName": username,
                 "passWord": password,
@@ -282,7 +335,9 @@ impl AppClient {
     /// 漫画编号无效或上游未返回标题、目录标识时返回错误。
     pub(super) async fn comic_identity(&self, comic_id: i64) -> Result<(String, String), String> {
         validate_novel_id(comic_id)?;
-        let detail = self.get_data(&format!("/comics/{comic_id}"), &[]).await?;
+        let detail = self
+            .get_public_data(&format!("/comics/{comic_id}"), &[])
+            .await?;
         let title = detail
             .get("comicName")
             .and_then(Value::as_str)

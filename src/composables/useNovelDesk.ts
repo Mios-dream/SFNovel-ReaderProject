@@ -1,6 +1,7 @@
 import { onBackButtonPress } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import type { ViewName } from "../types";
+import type { Novel, ViewName } from "../types";
 import { useChapterPicker } from "./useChapterPicker";
 import { useDeskAuth } from "./useDeskAuth";
 import { useDeskBookshelf } from "./useDeskBookshelf";
@@ -8,6 +9,31 @@ import { useDeskJobs } from "./useDeskJobs";
 import { useDeskLibrary } from "./useDeskLibrary";
 import { useNovelSearch } from "./useNovelSearch";
 import { useRequestPolicy } from "./useRequestPolicy";
+
+type RemoteMediaType = "novel" | "audio" | "comic";
+type RemoteMedia = Partial<Record<RemoteMediaType, Novel>>;
+
+function remoteMediaType(novel: Novel): RemoteMediaType {
+  return novel.bookshelfType || "novel";
+}
+
+function normalizeRemoteWorkName(value: string) {
+  return value.replace(/\s+/g, "").trim();
+}
+
+function isSameRemoteWork(candidate: Novel, source: Novel) {
+  if (
+    normalizeRemoteWorkName(candidate.novelName) !==
+    normalizeRemoteWorkName(source.novelName)
+  ) {
+    return false;
+  }
+  return !source.authorName ||
+    source.authorName === "未知作者" ||
+    !candidate.authorName ||
+    candidate.authorName === "未知作者" ||
+    candidate.authorName === source.authorName;
+}
 
 /**
  * Composes the desktop's domain modules and owns cross-domain navigation.
@@ -18,9 +44,14 @@ export function useNovelDesk() {
   const libraryDetailReturnView = ref<ViewName>("library");
   const queueOpen = ref(false);
   const toast = ref("");
+  const remoteBook = ref<Novel>();
+  const remoteBookLoading = ref(false);
+  const remoteMedia = ref<RemoteMedia>({});
+  const remoteMediaDetecting = ref(false);
   let toastTimer: number | undefined;
   let stopBackListener: { unregister: () => Promise<void> } | undefined;
   let disposed = false;
+  let remoteBookRequest = 0;
 
   function notify(message: string) {
     toast.value = message;
@@ -59,9 +90,77 @@ export function useNovelDesk() {
     refreshJobs: jobs.refreshJobs,
   });
 
+  async function openRemoteBookDetail(novel: Novel, preserveMedia = false) {
+    const request = ++remoteBookRequest;
+    remoteBook.value = novel;
+    remoteBookLoading.value = true;
+    active.value = "remoteDetail";
+    if (!preserveMedia) {
+      remoteMedia.value = { [remoteMediaType(novel)]: novel };
+      remoteMediaDetecting.value = true;
+    } else {
+      remoteMediaDetecting.value = false;
+    }
+    try {
+      const details = novel.bookshelfType === "comic"
+        ? novel.sourcePath
+          ? await invoke<Partial<Novel>>("get_comic_details", {
+              comicId: novel.novelId,
+              sourcePath: novel.sourcePath,
+            })
+          : undefined
+        : novel.bookshelfType === "audio"
+          ? novel.mediaId
+            ? await invoke<Partial<Novel>>("get_audio_details", {
+                albumId: novel.mediaId,
+                novelId: novel.novelId,
+              })
+            : undefined
+          : await invoke<Partial<Novel>>("get_novel_details", {
+              novelId: novel.novelId,
+            });
+      if (details && request === remoteBookRequest) {
+        remoteBook.value = { ...novel, ...details };
+        remoteMedia.value = {
+          ...remoteMedia.value,
+          [remoteMediaType(novel)]: remoteBook.value,
+        };
+      }
+    } catch (error) {
+      if (request === remoteBookRequest)
+        notify(error instanceof Error ? error.message : "读取作品详情失败");
+    } finally {
+      if (request === remoteBookRequest) remoteBookLoading.value = false;
+    }
+
+    if (preserveMedia) return;
+    try {
+      const candidates = await invoke<Novel[]>("search_novels", {
+        query: novel.novelName,
+      });
+      if (request !== remoteBookRequest) return;
+      const detected: RemoteMedia = { ...remoteMedia.value };
+      for (const candidate of candidates) {
+        if (isSameRemoteWork(candidate, novel)) {
+          detected[remoteMediaType(candidate)] = candidate;
+        }
+      }
+      remoteMedia.value = detected;
+    } catch {
+      // Detail remains usable when the optional media-variant probe is unavailable.
+    } finally {
+      if (request === remoteBookRequest) remoteMediaDetecting.value = false;
+    }
+  }
+
+  function selectRemoteMedia(media: RemoteMediaType) {
+    const target = remoteMedia.value[media];
+    if (target) void openRemoteBookDetail(target, true);
+  }
+
   function navigate(view: ViewName) {
     active.value = view;
-    if (view === "bookshelf") void bookshelf.refreshBookshelf();
+    if (view === "bookshelf") void bookshelf.loadBookshelf();
   }
 
   function continueDownload(mode: "novel" | "audio" | "comic") {
@@ -127,6 +226,7 @@ export function useNovelDesk() {
     }
     if (active.value === "libraryDetail")
       active.value = library.backFromLibraryDetail();
+    if (active.value === "remoteDetail") active.value = "bookshelf";
   }
 
   function blockCopy(event: ClipboardEvent) {
@@ -163,6 +263,12 @@ export function useNovelDesk() {
     ...chapterPicker,
     ...auth,
     ...requestPolicy,
+    remoteBook,
+    remoteBookLoading,
+    remoteMedia,
+    remoteMediaDetecting,
+    openRemoteBookDetail,
+    selectRemoteMedia,
     continueDownload,
     navigate,
     formatDate,

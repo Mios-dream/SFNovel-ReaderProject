@@ -12,9 +12,10 @@ defineProps<{
   formatDate: (value: string) => string;
 }>();
 
-// 卡片根据作品类型向父级发出对应的下载请求。
+// 卡片主体进入详情，右侧操作按钮向父级发出对应的下载请求。
 const emit = defineEmits<{
   select: [novel: Novel, mode: "text" | "audio" | "comic"];
+  detail: [novel: Novel];
 }>();
 </script>
 
@@ -23,28 +24,8 @@ const emit = defineEmits<{
     class="novel-card glass clickable-card"
     role="button"
     tabindex="0"
-    @click="
-      emit(
-        'select',
-        novel,
-        novel.bookshelfType === 'audio'
-          ? 'audio'
-          : novel.bookshelfType === 'comic'
-            ? 'comic'
-            : 'text',
-      )
-    "
-    @keydown.enter="
-      emit(
-        'select',
-        novel,
-        novel.bookshelfType === 'audio'
-          ? 'audio'
-          : novel.bookshelfType === 'comic'
-            ? 'comic'
-            : 'text',
-      )
-    "
+    @click="emit('detail', novel)"
+    @keydown.enter.self="emit('detail', novel)"
   >
     <img
       v-if="novel.novelCover"

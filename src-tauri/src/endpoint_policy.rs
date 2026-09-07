@@ -22,6 +22,8 @@ pub(crate) enum EndpointCapability {
     Search,
     /// 读取小说详情。
     NovelDetail,
+    /// 读取有声专辑详情。
+    AudioDetail,
     /// 读取文字小说目录。
     TextDirectory,
     /// 从网页读取文字正文。
@@ -34,10 +36,12 @@ pub(crate) enum EndpointCapability {
     ComicIdentity,
     /// 读取漫画网页目录。
     ComicCatalog,
+    /// 读取漫画网页详情、封面与简介。
+    ComicDetail,
     /// 读取漫画网页章节、图片列表与图片资源。
     ComicPages,
-    /// 读取 App 书架。
-    Bookshelf,
+    /// 读取公开网页火袋中的小说与漫画。
+    WebBookshelf,
     /// 读取 App 账户资料与余额。
     AccountProfile,
     /// 在登录后提交实验性设备信息。
@@ -104,6 +108,12 @@ impl EndpointCapability {
                 route_template: "GET api.sfacg.com/novels/{novelId}",
                 session: Optional,
             },
+            AudioDetail => EndpointPolicy {
+                name: "有声专辑详情",
+                client: App,
+                route_template: "GET api.sfacg.com/albums/{albumId}",
+                session: Optional,
+            },
             TextDirectory => EndpointPolicy {
                 name: "文字目录",
                 client: App,
@@ -140,6 +150,12 @@ impl EndpointCapability {
                 route_template: "GET manhua.sfacg.com/mh/{folder}/",
                 session: Optional,
             },
+            ComicDetail => EndpointPolicy {
+                name: "漫画详情",
+                client: Web,
+                route_template: "GET manhua.sfacg.com/mh/{folder}/",
+                session: Optional,
+            },
             ComicPages => EndpointPolicy {
                 name: "漫画章节与图片",
                 client: Web,
@@ -147,10 +163,11 @@ impl EndpointCapability {
                     "GET manhua.sfacg.com/mh/{folder}/{chapterId}/; GET ajax/Common.ashx?op=getPics",
                 session: Optional,
             },
-            Bookshelf => EndpointPolicy {
-                name: "书架",
-                client: App,
-                route_template: "GET api.sfacg.com/user/Pockets",
+            WebBookshelf => EndpointPolicy {
+                name: "网页书架",
+                client: Web,
+                route_template:
+                    "GET passport.sfacg.com/Ajax/GetLoginInfo.ashx; GET p.sfacg.com/u/{name}/",
                 session: Required,
             },
             AccountProfile => EndpointPolicy {
@@ -248,8 +265,8 @@ mod tests {
         assert_eq!(audio.client, ClientKind::Web);
         assert_eq!(audio.session, SessionRequirement::Required);
 
-        let shelf = EndpointCapability::Bookshelf.policy();
-        assert_eq!(shelf.client, ClientKind::App);
+        let shelf = EndpointCapability::WebBookshelf.policy();
+        assert_eq!(shelf.client, ClientKind::Web);
         assert_eq!(shelf.session, SessionRequirement::Required);
 
         let text = EndpointCapability::TextChapterWeb.policy();

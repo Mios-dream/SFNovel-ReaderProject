@@ -229,7 +229,7 @@ async fn run_text_download(
         )?;
         store.novel_id = novel_id;
         let directory_data = app_client
-            .get_data(&format!("/novels/{novel_id}/dirs"), &[])
+            .get_public_data(&format!("/novels/{novel_id}/dirs"), &[])
             .await?;
         let requested =
             chapter_ids.map(|ids| ids.into_iter().collect::<std::collections::HashSet<_>>());
@@ -417,7 +417,7 @@ async fn enrich_local_book(
     novel_id: i64,
 ) -> Result<(), String> {
     let detail = client
-        .get_data(
+        .get_public_data(
             &format!("/novels/{novel_id}"),
             &[(
                 "expand",
@@ -564,7 +564,7 @@ async fn enrich_local_audio_book(
 ) -> Result<(), String> {
     if let Some(album_id) = album_id {
         let detail = client
-            .get_data(
+            .get_public_data(
                 &format!("/albums/{album_id}"),
                 &[("expand", "intro,typeName,sysTags,latestchapter".to_string())],
             )
@@ -706,7 +706,7 @@ async fn fetch_novel_big_cover(
     novel_id: i64,
 ) -> Result<Option<String>, String> {
     let detail = client
-        .get_data(
+        .get_public_data(
             &format!("/novels/{novel_id}"),
             &[("expand", "bigNovelCover".to_string())],
         )
@@ -770,7 +770,7 @@ async fn enrich_local_comic_book(
     comic_id: i64,
 ) -> Result<(), String> {
     let detail = client
-        .get_data(
+        .get_public_data(
             &format!("/comics/{comic_id}"),
             &[(
                 "expand",
@@ -1096,6 +1096,7 @@ async fn run_comic_download(
     app: tauri::AppHandle,
     job_id: String,
     comic_id: i64,
+    source_path: Option<String>,
     title: String,
     chapter_ids: Vec<i64>,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
@@ -1104,10 +1105,19 @@ async fn run_comic_download(
     let result: Result<String, String> = async {
         #[cfg(target_os = "android")]
         sync_android_auth_session(&app).await?;
-        let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
         let web_client = web_endpoint_client(&app, EndpointCapability::ComicCatalog)?;
         let pages_client = web_endpoint_client(&app, EndpointCapability::ComicPages)?;
-        let (_catalog_title, folder) = app_client.comic_identity(comic_id).await?;
+        let folder = if let Some(folder) = source_path.filter(|value| {
+            !value.is_empty()
+                && value.len() <= 100
+                && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        }) {
+            folder
+        } else {
+            let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
+            let (_, folder) = app_client.comic_identity(comic_id).await?;
+            folder
+        };
         let catalog = web_client
             .comic_catalog(&folder)
             .await
@@ -1139,14 +1149,6 @@ async fn run_comic_download(
         comic_metadata
             .description
             .get_or_insert_with(|| "暂无简介".to_string());
-        let _ = enrich_local_comic_book(
-            &app_client,
-            &web_client,
-            &directory,
-            comic_metadata,
-            comic_id,
-        )
-        .await;
         let mut downloaded = metadata
             .downloaded_comic_chapter_ids
             .take()
@@ -1333,6 +1335,7 @@ pub(crate) async fn create_text_download(
                 kind: "text".to_string(),
                 novel_id,
                 source_id: None,
+                source_path: None,
                 title: title.clone(),
                 chapter_ids: chapter_ids.clone(),
             },
@@ -1419,6 +1422,7 @@ pub(crate) async fn create_audio_download(
                 kind: "audio".to_string(),
                 novel_id,
                 source_id: album_id,
+                source_path: None,
                 title: title.clone(),
                 chapter_ids: chapter_ids.clone(),
             },
@@ -1442,6 +1446,7 @@ pub(crate) async fn create_audio_download(
 pub(crate) async fn create_comic_download(
     app: tauri::AppHandle,
     comic_id: i64,
+    source_path: Option<String>,
     title: String,
     chapter_ids: Vec<i64>,
 ) -> Result<NativeJob, String> {
@@ -1457,9 +1462,18 @@ pub(crate) async fn create_comic_download(
     }
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
     let web_client = web_endpoint_client(&app, EndpointCapability::ComicCatalog)?;
-    let (_catalog_title, folder) = app_client.comic_identity(comic_id).await?;
+    let folder = if let Some(folder) = source_path.clone().filter(|value| {
+        !value.is_empty()
+            && value.len() <= 100
+            && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    }) {
+        folder
+    } else {
+        let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
+        let (_, folder) = app_client.comic_identity(comic_id).await?;
+        folder
+    };
     let catalog = web_client
         .comic_catalog(&folder)
         .await
@@ -1513,6 +1527,7 @@ pub(crate) async fn create_comic_download(
                 kind: "comic".to_string(),
                 novel_id: comic_id,
                 source_id: Some(comic_id),
+                source_path: source_path.clone(),
                 title: title.clone(),
                 chapter_ids: chapter_ids.clone(),
             },
@@ -1522,6 +1537,7 @@ pub(crate) async fn create_comic_download(
         app,
         id,
         comic_id,
+        source_path,
         title,
         chapter_ids,
         cancelled,
@@ -1614,6 +1630,7 @@ pub(crate) fn resume_download_job(
             kind: spec.kind.clone(),
             novel_id: spec.novel_id,
             source_id: spec.source_id,
+            source_path: spec.source_path.clone(),
             title: spec.title.clone(),
             chapter_ids: spec.chapter_ids.clone(),
         })
@@ -1645,6 +1662,7 @@ pub(crate) fn resume_download_job(
             app,
             job_id,
             comic_id,
+            spec.source_path,
             spec.title,
             spec.chapter_ids,
             cancelled,

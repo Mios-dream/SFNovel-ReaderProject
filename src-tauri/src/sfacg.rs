@@ -78,6 +78,8 @@ pub(crate) struct SearchNovel {
     pub(crate) bookshelf_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) bookshelf_type: Option<String>,
+    #[serde(rename = "sourcePath", skip_serializing_if = "Option::is_none")]
+    pub(crate) source_path: Option<String>,
 }
 
 /// Detailed public novel metadata used by the chapter selection view.
@@ -93,6 +95,30 @@ pub(crate) struct NovelDetail {
     pub(crate) is_finish: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) type_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) chapter_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) character_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) view_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) mark_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) point_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) favorite_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ticket_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) latest_chapter_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) latest_chapter_time: Option<String>,
+    #[serde(rename = "sourcePath", skip_serializing_if = "Option::is_none")]
+    pub(crate) source_path: Option<String>,
 }
 
 /// A renderer-safe chapter collection for one SF novel volume.
@@ -154,6 +180,8 @@ pub(crate) struct NativeJobSpec {
     pub(crate) novel_id: i64,
     #[serde(default)]
     pub(crate) source_id: Option<i64>,
+    #[serde(default)]
+    pub(crate) source_path: Option<String>,
     pub(crate) title: String,
     pub(crate) chapter_ids: Vec<i64>,
 }
@@ -170,6 +198,8 @@ pub(crate) struct NativeAudioChapter {
     pub(crate) id: i64,
     pub(crate) title: String,
     pub(crate) volume: String,
+    pub(crate) is_vip: bool,
+    pub(crate) is_unlocked: bool,
     pub(crate) source: String,
 }
 
@@ -186,6 +216,8 @@ pub(crate) struct AudioChapterSummary {
     pub(crate) id: i64,
     pub(crate) title: String,
     pub(crate) volume: String,
+    pub(crate) is_vip: bool,
+    pub(crate) is_unlocked: bool,
     pub(crate) downloaded: bool,
 }
 
@@ -865,7 +897,7 @@ pub(crate) async fn search_novels(
     }
     let client = app_endpoint_client(&app, EndpointCapability::Search)?;
     let response = client
-        .get_data(
+        .get_public_data(
             "/search/novels/result/new",
             &[
                 ("page", "0".to_string()),
@@ -930,6 +962,19 @@ pub(crate) async fn search_novels(
                     .to_string(),
                 bookshelf_name: None,
                 bookshelf_type: Some(kind.to_string()),
+                source_path: (kind == "comic")
+                    .then(|| {
+                        item.get("folderName")
+                            .or_else(|| item.get("sourcePath"))
+                            .and_then(Value::as_str)
+                            .filter(|value| {
+                                !value.is_empty()
+                                    && value.len() <= 100
+                                    && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+                            })
+                            .map(str::to_string)
+                    })
+                    .flatten(),
             });
         }
     }
@@ -965,7 +1010,7 @@ pub(crate) async fn get_novel_details(
     validate_novel_id(novel_id)?;
     let client = app_endpoint_client(&app, EndpointCapability::NovelDetail)?;
     let detail = client
-        .get_data(
+        .get_public_data(
             &format!("/novels/{novel_id}"),
             &[(
                 "expand",
@@ -992,6 +1037,12 @@ pub(crate) async fn get_novel_details(
         novel_cover: detail
             .get("novelCover")
             .and_then(Value::as_str)
+            .or_else(|| {
+                detail
+                    .get("expand")
+                    .and_then(|value| value.get("bigNovelCover"))
+                    .and_then(Value::as_str)
+            })
             .unwrap_or_default()
             .to_string(),
         last_update_time: detail
@@ -1016,6 +1067,185 @@ pub(crate) async fn get_novel_details(
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
             .map(ToString::to_string),
+        tags: detail
+            .get("expand")
+            .and_then(|value| value.get("sysTags"))
+            .and_then(Value::as_array)
+            .map(|tags| {
+                tags.iter()
+                    .filter_map(|tag| {
+                        tag.as_str()
+                            .or_else(|| tag.get("tagName").and_then(Value::as_str))
+                    })
+                    .map(str::trim)
+                    .filter(|tag| !tag.is_empty())
+                    .map(ToString::to_string)
+                    .take(8)
+                    .collect()
+            }),
+        score: detail.get("point").and_then(Value::as_f64),
+        chapter_count: detail
+            .get("expand")
+            .and_then(|value| value.get("chapterCount"))
+            .and_then(Value::as_i64),
+        character_count: detail.get("charCount").and_then(Value::as_i64),
+        view_count: detail.get("viewTimes").and_then(Value::as_i64),
+        mark_count: detail.get("markCount").and_then(Value::as_i64),
+        point_count: detail
+            .get("expand")
+            .and_then(|value| value.get("pointCount"))
+            .and_then(Value::as_i64),
+        favorite_count: detail
+            .get("expand")
+            .and_then(|value| value.get("fav"))
+            .and_then(Value::as_i64),
+        ticket_count: detail
+            .get("expand")
+            .and_then(|value| value.get("ticket"))
+            .and_then(Value::as_i64),
+        latest_chapter_title: detail
+            .get("expand")
+            .and_then(|value| {
+                value
+                    .get("latestChapter")
+                    .or_else(|| value.get("latestchapter"))
+            })
+            .and_then(|value| value.get("title"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        latest_chapter_time: detail
+            .get("expand")
+            .and_then(|value| {
+                value
+                    .get("latestChapter")
+                    .or_else(|| value.get("latestchapter"))
+            })
+            .and_then(|value| value.get("addTime"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        source_path: None,
+    })
+}
+
+/// 读取有声专辑的公开元数据，同时保留有声目录所需的来源小说编号。
+///
+/// # 参数
+/// * `app` - 用于构造原生 App 客户端的应用句柄。
+/// * `album_id` - SF 有声专辑编号，必须为正数。
+/// * `novel_id` - 有声目录使用的来源小说编号，必须为正数。
+///
+/// # 错误
+/// 当编号无效、上游不可用或元数据格式异常时返回错误。
+#[tauri::command]
+pub(crate) async fn get_audio_details(
+    app: tauri::AppHandle,
+    album_id: i64,
+    novel_id: i64,
+) -> Result<NovelDetail, String> {
+    validate_novel_id(album_id)?;
+    validate_novel_id(novel_id)?;
+    let client = app_endpoint_client(&app, EndpointCapability::AudioDetail)?;
+    let detail = client
+        .get_public_data(
+            &format!("/albums/{album_id}"),
+            &[("expand", "intro,typeName,sysTags,latestchapter".to_string())],
+        )
+        .await?;
+    let text = |keys: &[&str]| {
+        keys.iter().find_map(|key| {
+            detail
+                .get(*key)
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(ToString::to_string)
+                .or_else(|| {
+                    detail
+                        .get("expand")
+                        .and_then(|expand| expand.get(*key))
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .map(ToString::to_string)
+                })
+        })
+    };
+    let tags = detail
+        .get("sysTags")
+        .or_else(|| detail.get("tags"))
+        .or_else(|| {
+            detail
+                .get("expand")
+                .and_then(|expand| expand.get("sysTags"))
+        })
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|tag| {
+                    tag.as_str()
+                        .or_else(|| tag.get("tagName").and_then(Value::as_str))
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToString::to_string)
+                })
+                .take(8)
+                .collect()
+        });
+    let latest = detail.get("expand").and_then(|expand| {
+        expand
+            .get("latestChapter")
+            .or_else(|| expand.get("latestchapter"))
+    });
+    Ok(NovelDetail {
+        novel_id,
+        novel_name: text(&["name", "albumName", "novelName"])
+            .unwrap_or_else(|| "未命名有声作品".to_string()),
+        author_name: text(&["authorName", "author", "anchorName"])
+            .unwrap_or_else(|| "未知作者".to_string()),
+        novel_cover: text(&[
+            "coverBig",
+            "coverMedium",
+            "coverSmall",
+            "albumCover",
+            "cover",
+        ])
+        .unwrap_or_default(),
+        last_update_time: text(&["lastUpdateTime", "updateTime"]).unwrap_or_default(),
+        description: text(&["intro", "description", "content"])
+            .unwrap_or_else(|| "暂无简介".to_string()),
+        is_finish: detail
+            .get("isFinished")
+            .or_else(|| detail.get("isFinish"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        type_name: text(&["typeName", "categoryName"]),
+        tags,
+        score: detail.get("point").and_then(Value::as_f64),
+        chapter_count: detail
+            .get("chapterCount")
+            .or_else(|| {
+                detail
+                    .get("expand")
+                    .and_then(|expand| expand.get("chapterCount"))
+            })
+            .and_then(Value::as_i64),
+        character_count: detail.get("charCount").and_then(Value::as_i64),
+        view_count: detail
+            .get("visitTimes")
+            .or_else(|| detail.get("viewTimes"))
+            .and_then(Value::as_i64),
+        mark_count: detail.get("markCount").and_then(Value::as_i64),
+        point_count: detail.get("pointCount").and_then(Value::as_i64),
+        favorite_count: detail.get("fav").and_then(Value::as_i64),
+        ticket_count: detail.get("ticket").and_then(Value::as_i64),
+        latest_chapter_title: latest
+            .and_then(|value| value.get("title"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        latest_chapter_time: latest
+            .and_then(|value| value.get("addTime"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        source_path: None,
     })
 }
 
@@ -1037,7 +1267,7 @@ pub(crate) async fn get_chapter_volumes(
     validate_novel_id(novel_id)?;
     let client = app_endpoint_client(&app, EndpointCapability::TextDirectory)?;
     let response = client
-        .get_data(&format!("/novels/{novel_id}/dirs"), &[])
+        .get_public_data(&format!("/novels/{novel_id}/dirs"), &[])
         .await?;
     let volumes = response
         .get("volumeList")
@@ -1130,6 +1360,8 @@ pub(crate) async fn get_audio_chapters(
                 id: chapter.id,
                 title: chapter.title,
                 volume: chapter.volume,
+                is_vip: chapter.is_vip,
+                is_unlocked: chapter.is_unlocked,
             })
             .collect(),
     })
@@ -1142,13 +1374,26 @@ pub(crate) async fn get_audio_chapters(
 pub(crate) async fn get_comic_chapters(
     app: tauri::AppHandle,
     comic_id: i64,
+    source_path: Option<String>,
+    title_hint: Option<String>,
 ) -> Result<ComicCatalog, String> {
     validate_novel_id(comic_id)?;
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
-    let (title, folder) = app_client.comic_identity(comic_id).await?;
     let web_client = web_endpoint_client(&app, EndpointCapability::ComicCatalog)?;
+    let (title, folder) = if let Some(folder) = source_path.filter(|value| {
+        !value.is_empty()
+            && value.len() <= 100
+            && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    }) {
+        (
+            title_hint.unwrap_or_else(|| format!("漫画 {comic_id}")),
+            folder,
+        )
+    } else {
+        let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
+        app_client.comic_identity(comic_id).await?
+    };
     let chapters = web_client
         .comic_catalog(&folder)
         .await
@@ -1176,6 +1421,44 @@ pub(crate) async fn get_comic_chapters(
     })
 }
 
+/// 通过漫画网页目录标识读取漫画详情；缺少目录标识时先解析公开漫画身份。
+///
+/// # 参数
+/// * `app` - 用于读取原生 Web 会话的 Tauri 应用句柄。
+/// * `comic_id` - 书架条目携带的公开漫画编号。
+/// * `source_path` - 可选的 Web 漫画目录标识，例如 `XJYQS`。
+///
+/// # 错误
+/// 当漫画身份、网页不可访问或页面格式无效时返回错误。
+#[tauri::command]
+pub(crate) async fn get_comic_details(
+    app: tauri::AppHandle,
+    comic_id: i64,
+    source_path: Option<String>,
+) -> Result<NovelDetail, String> {
+    validate_novel_id(comic_id)?;
+    let folder = source_path.filter(|value| {
+        !value.is_empty()
+            && value.len() <= 100
+            && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    });
+    let folder = if let Some(folder) = folder {
+        folder
+    } else {
+        let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
+        let (_, folder) = app_client.comic_identity(comic_id).await?;
+        folder
+    };
+    let web_client = web_endpoint_client(&app, EndpointCapability::ComicDetail)?;
+    let mut detail = web_client
+        .comic_details(&folder)
+        .await
+        .map_err(|error| EndpointCapability::ComicDetail.unavailable_message(&error))?;
+    detail.novel_id = comic_id;
+    detail.source_path = Some(folder);
+    Ok(detail)
+}
+
 /// Synchronizes the authenticated user's SF bookshelf through the native request layer.
 ///
 /// The `force_refresh` parameter is accepted for API parity with the old renderer
@@ -1196,87 +1479,25 @@ pub(crate) async fn get_bookshelf(
     let _ = force_refresh;
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let client = app_endpoint_client(&app, EndpointCapability::Bookshelf)?;
-    let shelves = client
-        .get_data(
-            "/user/Pockets",
-            &[("expand", "novels,albums,comics".to_string())],
-        )
-        .await?;
-    let shelves = shelves
-        .as_array()
-        .ok_or_else(|| "SF 未返回有效书架数据".to_string())?;
-    let mut categories = Vec::new();
+    let client = web_endpoint_client(&app, EndpointCapability::WebBookshelf)?;
+    let public_shelf = client.public_bookshelf().await?;
+    let categories = public_shelf.categories;
     let mut items = Vec::new();
-    for shelf in shelves {
-        let category = shelf
-            .get("name")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or("未分类")
-            .to_string();
-        if !categories.contains(&category) {
-            categories.push(category.clone());
-        }
-        let Some(expand) = shelf.get("expand") else {
-            continue;
-        };
-        for (key, kind) in [
-            ("novels", "novel"),
-            ("albums", "audio"),
-            ("comics", "comic"),
-        ] {
-            let Some(records) = expand.get(key).and_then(Value::as_array) else {
-                continue;
-            };
-            for record in records {
-                let Some(novel_id) = record
-                    .get("novelId")
-                    .or_else(|| record.get("comicId"))
-                    .and_then(Value::as_i64)
-                else {
-                    continue;
-                };
-                items.push(SearchNovel {
-                    novel_id,
-                    media_id: if kind == "audio" {
-                        record.get("albumId").and_then(Value::as_i64)
-                    } else if kind == "comic" {
-                        record.get("comicId").and_then(Value::as_i64)
-                    } else {
-                        None
-                    },
-                    novel_name: record
-                        .get("novelName")
-                        .or_else(|| record.get("comicName"))
-                        .or_else(|| record.get("name"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("未命名作品")
-                        .to_string(),
-                    author_name: record
-                        .get("authorName")
-                        .and_then(Value::as_str)
-                        .unwrap_or("未知作者")
-                        .to_string(),
-                    novel_cover: record
-                        .get("novelCover")
-                        .or_else(|| record.get("coverBig"))
-                        .or_else(|| record.get("comicCover"))
-                        .or_else(|| record.get("coverMedium"))
-                        .or_else(|| record.get("coverSmall"))
-                        .or_else(|| record.get("cover"))
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    last_update_time: record
-                        .get("lastUpdateTime")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    bookshelf_name: Some(category.clone()),
-                    bookshelf_type: Some(kind.to_string()),
-                });
-            }
+    for (category, record) in public_shelf.items {
+        if !items.iter().any(|item: &SearchNovel| {
+            item.novel_id == record.id && item.bookshelf_type.as_deref() == Some(record.kind)
+        }) {
+            items.push(SearchNovel {
+                novel_id: record.id,
+                media_id: None,
+                novel_name: record.title,
+                author_name: record.author,
+                novel_cover: record.cover,
+                last_update_time: String::new(),
+                bookshelf_name: Some(category),
+                bookshelf_type: Some(record.kind.to_string()),
+                source_path: record.source_path,
+            });
         }
     }
     Ok(BookshelfCollection { categories, items })

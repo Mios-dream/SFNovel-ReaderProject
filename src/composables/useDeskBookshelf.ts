@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { computed, ref, type Ref } from "vue";
+import { computed, ref, watch, type Ref } from "vue";
 import type { AuthStatus, Novel } from "../types";
 import { nativeErrorMessage, type Notify } from "./deskShared";
 
@@ -20,9 +20,11 @@ export function useDeskBookshelf({
   const bookshelf = ref<Novel[]>([]);
   const bookshelfGroupNames = ref<string[]>([]);
   const bookshelfLoading = ref(false);
+  const bookshelfLoaded = ref(false);
   const bookshelfCategory = ref("全部");
   const bookshelfPage = ref(1);
   const bookshelfPageSize = 12;
+  let bookshelfRequest: Promise<void> | undefined;
 
   const bookshelfCategoryFor = (novel: Novel) =>
     novel.bookshelfName || "未分类";
@@ -52,11 +54,19 @@ export function useDeskBookshelf({
     ),
   );
 
-  async function refreshBookshelf(forceRefresh = false) {
+  function clearBookshelfCache() {
+    bookshelf.value = [];
+    bookshelfGroupNames.value = [];
+    bookshelfLoaded.value = false;
+    bookshelfCategory.value = "全部";
+    bookshelfPage.value = 1;
+  }
+
+  async function requestBookshelf(forceRefresh: boolean) {
     await refreshAuthStatus();
-    if (!auth.value.appAuthenticated) {
+    if (!auth.value.webAuthenticated) {
       requestCredentials();
-      notify("登录后即可读取 SF 书架");
+      notify("登录网站后即可读取公开书架");
       return;
     }
     bookshelfLoading.value = true;
@@ -66,6 +76,7 @@ export function useDeskBookshelf({
       });
       bookshelf.value = response.items;
       bookshelfGroupNames.value = response.categories;
+      bookshelfLoaded.value = true;
       if (!bookshelfCategories.value.includes(bookshelfCategory.value))
         bookshelfCategory.value = "全部";
       bookshelfPage.value = 1;
@@ -75,6 +86,30 @@ export function useDeskBookshelf({
       bookshelfLoading.value = false;
     }
   }
+
+  function loadBookshelf() {
+    if (bookshelfLoaded.value) return Promise.resolve();
+    if (bookshelfRequest) return bookshelfRequest;
+    bookshelfRequest = requestBookshelf(false).finally(() => {
+      bookshelfRequest = undefined;
+    });
+    return bookshelfRequest;
+  }
+
+  function refreshBookshelf() {
+    if (bookshelfRequest) return bookshelfRequest;
+    bookshelfRequest = requestBookshelf(true).finally(() => {
+      bookshelfRequest = undefined;
+    });
+    return bookshelfRequest;
+  }
+
+  watch(
+    () => auth.value.webAuthenticated,
+    (webAuthenticated, previousWebAuthenticated) => {
+      if (!webAuthenticated && previousWebAuthenticated) clearBookshelfCache();
+    },
+  );
 
   function selectBookshelfCategory(category: string) {
     bookshelfCategory.value = category;
@@ -97,6 +132,7 @@ export function useDeskBookshelf({
     filteredBookshelf,
     bookshelfTotalPages,
     pagedBookshelf,
+    loadBookshelf,
     refreshBookshelf,
     selectBookshelfCategory,
     setBookshelfPage,

@@ -28,6 +28,7 @@ if (!desk) throw new Error("Desk context is unavailable");
     @update:selected-ids="desk.selectedChapterIds.value = $event"
     @toggle-all="desk.toggleAllChapters"
     @confirm="desk.confirmChapterDownload"
+    @switch-mode="desk.switchChapterMode"
   />
   <DownloadQueueModal
     :open="desk.queueOpen.value"

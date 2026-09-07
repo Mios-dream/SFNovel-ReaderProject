@@ -33,6 +33,22 @@
         <LoaderCircle class="spin" :size="24" />正在读取章节目录
       </div>
       <template v-else>
+        <nav
+          v-if="downloadModes.length > 1"
+          class="download-tabs"
+          aria-label="下载类型"
+        >
+          <button
+            v-for="item in downloadModes"
+            :key="item.mode"
+            class="download-tab"
+            :class="{ active: mode === item.mode }"
+            @click="emit('switch-mode', item.mode)"
+          >
+            <BookOpen v-if="item.mode === 'text'" :size="15" />
+            <Headphones v-else :size="15" />{{ item.label }}
+          </button>
+        </nav>
         <button
           class="select-all"
           :disabled="!selectableIds.length"
@@ -203,6 +219,7 @@ const emit = defineEmits<{
   "update:selectedIds": [value: number[]];
   toggleAll: [];
   confirm: [];
+  "switch-mode": [mode: ChapterMode];
 }>();
 
 type TextChapter = ChapterVolume["chapters"][number];
@@ -229,6 +246,12 @@ const allChapters = computed<SelectableChapter[]>(() =>
       ? props.audioChapters
       : props.comicChapters,
 );
+const downloadModes = computed(() => {
+  const modes: Array<{ mode: ChapterMode; label: string }> = [];
+  if (props.volumes.length) modes.push({ mode: "text", label: "小说" });
+  if (props.audioChapters.length) modes.push({ mode: "audio", label: "有声" });
+  return modes;
+});
 const selectableIds = computed(() =>
   allChapters.value
     .filter(canDownload)
@@ -385,6 +408,32 @@ function toggleChapter(id: number, checked: boolean) {
   background: #ffe5d5;
   place-items: center;
 }
+.download-tabs {
+  display: flex;
+  gap: 6px;
+  /* padding: 4px; */
+  border-radius: 10px;
+  background: #f8e8df;
+  border: 1px solid #f0d9d0;
+}
+.download-tab {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 7px;
+  color: #94675c;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+.download-tab.active {
+  color: #fff;
+  background: var(--theme-color);
+}
 .close-button {
   position: absolute;
   top: 16px;
@@ -429,7 +478,7 @@ function toggleChapter(id: number, checked: boolean) {
 }
 .select-all {
   width: 100%;
-  margin: 8px 0;
+  margin-top: 8px;
   padding: 8px 11px;
   border: 0;
   border-radius: 9px;

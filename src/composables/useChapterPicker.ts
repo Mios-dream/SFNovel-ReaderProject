@@ -35,21 +35,24 @@ export function useChapterPicker({
     comicChapters.value = [];
     selectedChapterIds.value = [];
     try {
-      // Text and audio entries use the novel detail endpoint for the header
-      // description. Comics have a separate identity and must never call
-      // `/novels/{id}`.
-      const info =
-        mode === "comic"
-          ? {}
-          : await invoke<Partial<Novel>>("get_novel_details", {
-              novelId: novel.novelId,
-            }).catch(() => ({}));
-      chapterNovel.value = { ...novel, ...info };
       if (mode === "text") {
+        chapterNovel.value = {
+          ...novel,
+          ...(await invoke<Partial<Novel>>("get_novel_details", {
+            novelId: novel.novelId,
+          }).catch(() => ({}))),
+        };
         chapterVolumes.value = await invoke<ChapterVolume[]>(
           "get_chapter_volumes",
           { novelId: novel.novelId },
         );
+        if (auth.value.webAuthenticated) {
+          const audio = await invoke<{ chapters: Chapter[] }>(
+            "get_audio_chapters",
+            { novelId: novel.novelId },
+          ).catch(() => undefined);
+          audioChapters.value = audio?.chapters || [];
+        }
       } else if (mode === "audio") {
         if (!auth.value.webAuthenticated) {
           throw new Error("请先使用官方网页登录 Web 服务再下载有声内容");
@@ -60,9 +63,22 @@ export function useChapterPicker({
         );
         audioChapters.value = audio.chapters;
       } else {
+        if (novel.sourcePath) {
+          const details = await invoke<Partial<Novel>>("get_comic_details", {
+            comicId: novel.novelId,
+            sourcePath: novel.sourcePath,
+          }).catch(() => undefined);
+          if (details) {
+            chapterNovel.value = { ...novel, ...details };
+          }
+        }
         const comic = await invoke<{ chapters: Chapter[] }>(
           "get_comic_chapters",
-          { comicId: novel.novelId },
+          {
+            comicId: novel.novelId,
+            sourcePath: novel.sourcePath,
+            titleHint: novel.novelName,
+          },
         );
         comicChapters.value = comic.chapters;
       }
@@ -106,6 +122,14 @@ export function useChapterPicker({
       selectedChapterIds.value.length === selectable.length ? [] : selectable;
   }
 
+  function switchChapterMode(mode: ChapterMode) {
+    if (mode === "text" && !chapterVolumes.value.length) return;
+    if (mode === "audio" && !audioChapters.value.length) return;
+    if (mode === "comic" && !comicChapters.value.length) return;
+    chapterMode.value = mode;
+    selectedChapterIds.value = allChapterIds().filter((id) => isDownloadable(id));
+  }
+
   async function confirmChapterDownload() {
     const novel = chapterNovel.value;
     if (!novel || !selectedChapterIds.value.length)
@@ -126,6 +150,7 @@ export function useChapterPicker({
             })
           : await invoke<Job>("create_comic_download", {
               comicId: novel.novelId,
+              sourcePath: novel.sourcePath,
               title: novel.novelName,
               chapterIds: selectedChapterIds.value,
             });
@@ -150,5 +175,6 @@ export function useChapterPicker({
     openChapterPicker,
     toggleAllChapters,
     confirmChapterDownload,
+    switchChapterMode,
   };
 }

@@ -54,7 +54,7 @@ function jumpToPage(event: Event) {
           class="icon-button"
           title="刷新书架"
           :disabled="desk.bookshelfLoading.value"
-          @click="desk.refreshBookshelf(true)"
+          @click="desk.refreshBookshelf()"
         >
           <RefreshCw
             :class="{ spin: desk.bookshelfLoading.value }"
@@ -91,6 +91,7 @@ function jumpToPage(event: Event) {
             :novel="novel"
             :format-date="desk.formatDate"
             @select="desk.openChapterPicker"
+            @detail="desk.openRemoteBookDetail"
           />
         </div>
         <div v-else class="empty-state">
