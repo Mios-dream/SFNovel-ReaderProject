@@ -21,15 +21,51 @@ export function useDeskAuth(notify: Notify) {
   }
 
   async function loadAccountProfile() {
-    if (!auth.value.appAuthenticated) return;
+    if (!auth.value.webAuthenticated) {
+      accountProfile.value = undefined;
+      accountProfileError.value = "";
+      return false;
+    }
     accountProfileLoading.value = true;
     accountProfileError.value = "";
     try {
-      const profile = await invoke<UserProfile>("get_user_profile");
+      const profile = await invoke<UserProfile>("get_web_user_profile");
       accountProfile.value = profile;
       auth.value = { ...auth.value, userName: profile.nickName };
+      if (auth.value.appAuthenticated) {
+        try {
+          const appProfile = await invoke<UserProfile>("get_user_profile");
+          accountProfile.value = {
+            ...profile,
+            accountId: profile.accountId || appProfile.accountId,
+            appDetailsAvailable: appProfile.appDetailsAvailable,
+            webDetailsAvailable: profile.webDetailsAvailable,
+            vipDetailsAvailable:
+              profile.vipDetailsAvailable || appProfile.vipDetailsAvailable,
+            vipSystem: profile.vipDetailsAvailable
+              ? profile.vipSystem
+              : appProfile.vipSystem,
+            welfareCoin: appProfile.welfareCoin,
+            fireMoneyRemain: appProfile.fireMoneyRemain,
+            couponsRemain: appProfile.couponsRemain,
+            monthlyTicket: profile.monthlyTicket,
+            vipLevel: profile.vipDetailsAvailable
+              ? profile.vipLevel
+              : appProfile.vipLevel,
+            vipName: profile.vipName,
+          };
+        } catch (error) {
+          accountProfileError.value = nativeErrorMessage(
+            error,
+            "App 余额资料暂不可用",
+          );
+        }
+      }
+      return true;
     } catch (error) {
+      accountProfile.value = undefined;
       accountProfileError.value = nativeErrorMessage(error, "读取账户资料失败");
+      return false;
     } finally {
       accountProfileLoading.value = false;
     }
@@ -65,6 +101,10 @@ export function useDeskAuth(notify: Notify) {
         return;
       }
       auth.value = result;
+      if (!(await loadAccountProfile())) {
+        notify(accountProfileError.value || "网页登录会话已失效");
+        return;
+      }
       notify(
         auth.value.appAuthenticated
           ? "网站功能已连接"
@@ -94,9 +134,12 @@ export function useDeskAuth(notify: Notify) {
   async function logoutApp() {
     try {
       auth.value = await invoke<AuthStatus>("logout_app_session");
-      accountProfile.value = undefined;
-      accountProfileError.value = "";
-      accountOpen.value = false;
+      if (auth.value.webAuthenticated) await loadAccountProfile();
+      else {
+        accountProfile.value = undefined;
+        accountProfileError.value = "";
+        accountOpen.value = false;
+      }
       notify("App 登录凭证已退出，网站功能不受影响");
     } catch (error) {
       notify(nativeErrorMessage(error, "退出 App 登录失败"));
@@ -106,6 +149,9 @@ export function useDeskAuth(notify: Notify) {
   async function logoutWeb() {
     try {
       auth.value = await invoke<AuthStatus>("logout_web_session");
+      accountProfile.value = undefined;
+      accountProfileError.value = "";
+      accountOpen.value = false;
       notify("网站登录凭证已退出，App 功能不受影响");
     } catch (error) {
       notify(nativeErrorMessage(error, "退出网站登录失败"));
@@ -113,7 +159,7 @@ export function useDeskAuth(notify: Notify) {
   }
 
   async function openAccount() {
-    if (!auth.value.appAuthenticated) {
+    if (!auth.value.webAuthenticated) {
       credentialsOpen.value = true;
       return;
     }

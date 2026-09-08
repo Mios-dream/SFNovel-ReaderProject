@@ -517,6 +517,10 @@ impl AppClient {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
+            app_details_available: true,
+            web_details_available: false,
+            vip_details_available: true,
+            vip_system: "legacy".to_string(),
             welfare_coin: user
                 .get("expand")
                 .and_then(|value| value.get("welfareCoin"))
@@ -530,7 +534,9 @@ impl AppClient {
                 .get("couponsRemain")
                 .and_then(Value::as_i64)
                 .unwrap_or(0),
+            monthly_ticket: 0,
             vip_level: money.get("vipLevel").and_then(Value::as_i64).unwrap_or(0),
+            vip_name: String::new(),
         })
     }
 

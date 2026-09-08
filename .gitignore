@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+cookie.cache.txt
 src-tauri/target
 src-tauri/ocr-worker/ocr_worker.exe
 src-tauri/ocr-worker/build

@@ -147,10 +147,16 @@ export type UserProfile = {
   accountId: number;
   nickName: string;
   avatar: string;
+  appDetailsAvailable: boolean;
+  webDetailsAvailable: boolean;
+  vipDetailsAvailable: boolean;
+  vipSystem: "new" | "legacy";
   welfareCoin: number;
   fireMoneyRemain: number;
   couponsRemain: number;
+  monthlyTicket: number;
   vipLevel: number;
+  vipName: string;
 };
 /** 下载请求限流设置，与服务端 config.json 的 requestPolicy 对应。 */
 export type RequestPolicy = {

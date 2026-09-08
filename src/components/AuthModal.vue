@@ -26,8 +26,7 @@ const activeTab = ref<"password" | "official">("official");
 watch(
   () => props.open,
   (open) => {
-    if (open)
-      activeTab.value = props.auth.appAuthenticated ? "official" : "password";
+    if (open) activeTab.value = "official";
   },
 );
 /**
@@ -56,7 +55,7 @@ function submit() {
         <X :size="20" /></button
       ><span class="modal-icon"><KeyRound :size="22" /></span>
       <h2>SF 账号连接</h2>
-      <p>提供两种登录凭证以使用全部应用功能</p>
+      <p>提供登录凭证以使用相应平台的功能</p>
       <div class="login-tabs" role="tablist" aria-label="登录方式">
         <button
           class="login-tab"
@@ -84,7 +83,7 @@ function submit() {
           <span class="connection-icon app"><Smartphone :size="21" /></span>
           <div class="connection-copy">
             <strong>App 高级能力已连接</strong>
-            <small>书架、账户资料和 App 限制章节可用</small>
+            <small>App 限制章节可用</small>
           </div>
           <CircleCheck class="connection-check" :size="20" />
           <button

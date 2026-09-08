@@ -270,10 +270,16 @@ pub(crate) struct UserProfile {
     pub(crate) account_id: i64,
     pub(crate) nick_name: String,
     pub(crate) avatar: String,
+    pub(crate) app_details_available: bool,
+    pub(crate) web_details_available: bool,
+    pub(crate) vip_details_available: bool,
+    pub(crate) vip_system: String,
     pub(crate) welfare_coin: i64,
     pub(crate) fire_money_remain: i64,
     pub(crate) coupons_remain: i64,
+    pub(crate) monthly_ticket: i64,
     pub(crate) vip_level: i64,
+    pub(crate) vip_name: String,
 }
 
 /// 在原生内存中保存相互隔离的 SF 会话。
@@ -1466,6 +1472,33 @@ pub(crate) async fn get_user_profile(app: tauri::AppHandle) -> Result<UserProfil
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
     let client = app_endpoint_client(&app, EndpointCapability::AccountProfile)?;
+    let profile = client.get_user_profile().await?;
+    let auth_state = app.state::<AuthSessionState>();
+    let mut session = auth_state
+        .session
+        .lock()
+        .map_err(|_| "登录会话状态不可用".to_string())?;
+    if let Some(session) = session.as_mut() {
+        session.user_name = profile.nick_name.clone();
+    }
+    Ok(profile)
+}
+
+/// 通过官方网页登录信息接口验证 Web 会话并读取基础账户资料。
+///
+/// 此命令只使用 `session_PC`，从网页账户中心读取火券、代券和月票，并通过网页 VIP
+/// 接口读取新 VIP 资料。调用方不得将 Web Cookie 用于 App 接口。
+///
+/// # 参数
+/// * `app` - 用于读取仅原生层可见 Web 会话的应用句柄。
+///
+/// # 错误
+/// 未连接 Web 凭证、网页登录会话失效或上游资料格式无效时返回错误。
+#[tauri::command]
+pub(crate) async fn get_web_user_profile(app: tauri::AppHandle) -> Result<UserProfile, String> {
+    #[cfg(target_os = "android")]
+    sync_android_auth_session(&app).await?;
+    let client = web_endpoint_client(&app, EndpointCapability::WebAccountProfile)?;
     let profile = client.get_user_profile().await?;
     let auth_state = app.state::<AuthSessionState>();
     let mut session = auth_state

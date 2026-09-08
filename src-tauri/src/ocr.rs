@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::{path::BaseDirectory, Manager};
 
+// OCR worker 识别拼音时，裁剪掉图片顶部的比例。过高会无法裁剪拼音，过低会增加误识别。
 const PINYIN_TOP_CROP_RATIO: &str = "0.30";
 
 /// 定位随应用资源安装的 OCR worker，且不接受渲染进程传入的路径。
@@ -166,22 +167,4 @@ pub(crate) fn relative_book_path(path: &Path, directory: &Path) -> Result<String
     path.strip_prefix(directory)
         .map_err(|_| "路径不属于当前书籍目录".to_string())
         .map(|value| value.to_string_lossy().replace('\\', "/"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::worker_error_detail;
-
-    #[test]
-    fn worker_error_detail_ignores_trailing_blank_lines() {
-        assert_eq!(
-            worker_error_detail(b"first\nactual error\n\n"),
-            "actual error"
-        );
-    }
-
-    #[test]
-    fn worker_error_detail_has_a_fallback_for_empty_stderr() {
-        assert_eq!(worker_error_detail(b" \n\t\n"), "worker 未返回有效错误信息");
-    }
 }

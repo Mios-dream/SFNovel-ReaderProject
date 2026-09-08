@@ -70,27 +70,42 @@ const number = (value: number | undefined) =>
           <div>
             <p>SF 账号</p>
             <h2 id="account-profile-title">{{ profile.nickName }}</h2>
-            <small>ID: {{ profile.accountId }}</small>
+            <small v-if="profile.accountId">ID: {{ profile.accountId }}</small>
           </div>
         </header>
 
-        <div class="balance-grid" aria-label="账户余额">
+        <div
+          v-if="profile.webDetailsAvailable || profile.appDetailsAvailable"
+          class="balance-grid"
+          aria-label="账户余额"
+        >
           <article>
-            <Flame :size="18" /><span>火币</span
+            <Flame :size="18" /><span>火券</span
             ><strong>{{ number(profile.fireMoneyRemain) }}</strong>
           </article>
           <article>
             <Ticket :size="18" /><span>代券</span
             ><strong>{{ number(profile.couponsRemain) }}</strong>
           </article>
-          <article>
+          <article v-if="profile.appDetailsAvailable">
             <Coins :size="18" /><span>金币</span
             ><strong>{{ number(profile.welfareCoin) }}</strong>
           </article>
+          <article>
+            <Ticket :size="18" /><span>月票</span
+            ><strong>{{ number(profile.monthlyTicket) }}</strong>
+          </article>
         </div>
-        <div class="membership">
+        <div v-if="profile.vipDetailsAvailable" class="membership">
           <CircleUserRound :size="17" /><span>VIP 等级</span
-          ><strong>VIP {{ profile.vipLevel }}</strong>
+          ><strong>{{
+            profile.vipSystem === "new"
+              ? `VIP ${profile.vipLevel} / ${profile.vipName}`
+              : `VIP ${profile.vipLevel}`
+          }}</strong>
+        </div>
+        <div v-else class="app-details-hint">
+          <Smartphone :size="17" />暂时无法读取 VIP 资料
         </div>
         <p v-if="error" class="error-message">{{ error }}</p>
       </template>
@@ -105,12 +120,14 @@ const number = (value: number | undefined) =>
             v-if="auth.appAuthenticated"
             class="credential-icon app"
             title="App 高级能力已连接"
-          ><Smartphone :size="18" /></span>
+            ><Smartphone :size="18"
+          /></span>
           <span
             v-if="auth.webAuthenticated"
             class="credential-icon web"
             title="网站功能已连接"
-          ><Globe2 :size="18" /></span>
+            ><Globe2 :size="18"
+          /></span>
         </div>
       </section>
       <button class="connections-button" @click="emit('manageConnections')">
@@ -254,6 +271,22 @@ const number = (value: number | undefined) =>
 .membership strong {
   margin-left: auto;
   color: #9a563f;
+}
+.app-details-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed #efd0c0;
+  border-radius: 10px;
+  color: #8a655b;
+  background: #fffaf7;
+  font-size: 12px;
+}
+.app-details-hint svg {
+  flex: 0 0 auto;
+  color: #875a35;
 }
 .credential-summary {
   display: flex;

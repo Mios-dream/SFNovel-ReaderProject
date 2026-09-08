@@ -44,6 +44,8 @@ pub(crate) enum EndpointCapability {
     ComicPages,
     /// 读取公开网页火袋中的小说与漫画。
     WebBookshelf,
+    /// 验证 Web 登录会话并读取网页可提供的基础账户资料。
+    WebAccountProfile,
     /// 读取 App 账户资料与余额。
     AccountProfile,
     /// 在登录后提交实验性设备信息。
@@ -176,6 +178,12 @@ impl EndpointCapability {
                 client: Web,
                 route_template:
                     "GET passport.sfacg.com/Ajax/GetLoginInfo.ashx; GET p.sfacg.com/u/{name}/",
+                session: Required,
+            },
+            WebAccountProfile => EndpointPolicy {
+                name: "网页账户资料、余额与 VIP",
+                client: Web,
+                route_template: "GET passport.sfacg.com/Ajax/GetLoginInfo.ashx; GET m.sfacg.com/my/; GET pages.sfacg.com/api/User?expand=newVip; GET pages.sfacg.com/api/common/vipInfo",
                 session: Required,
             },
             AccountProfile => EndpointPolicy {

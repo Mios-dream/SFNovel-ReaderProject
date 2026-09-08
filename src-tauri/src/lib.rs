@@ -111,7 +111,8 @@ pub fn run() {
             sfacg::logout_app_session,
             sfacg::logout_web_session,
             sfacg::verify_authenticated_request,
-            sfacg::get_user_profile
+            sfacg::get_user_profile,
+            sfacg::get_web_user_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

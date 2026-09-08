@@ -1,7 +1,8 @@
 //! SF 网页客户端及其 Web 会话边界。
 
 use crate::sfacg::{
-    validate_novel_id, AuthSessionState, NativeAudioChapter, NativeComicChapter, SF_WEB_USER_AGENT,
+    validate_novel_id, AuthSessionState, NativeAudioChapter, NativeComicChapter, UserProfile,
+    SF_WEB_USER_AGENT,
 };
 use crate::utils::cookie::{filter_cookie_header, has_cookie_name};
 use serde_json::Value;
@@ -79,6 +80,89 @@ impl WebClient {
             .ok_or_else(|| "请先使用官方网页登录 Web 服务".to_string())
     }
 
+    /// 验证网页登录会话并解析网页端账户资料、余额、月票和 VIP 等级。
+    pub(super) async fn get_user_profile(&self) -> Result<UserProfile, String> {
+        self.require_session()?;
+        let account = self.get_login_info().await?;
+        let mut profile = user_profile_from_login_info(&account)?;
+        let my_html = self
+            .page_request("https://m.sfacg.com/my/", Some("https://m.sfacg.com/"))
+            .send()
+            .await
+            .map_err(|error| format!("无法读取 SF 网页账户中心：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("SF 网页账户中心请求被拒绝：{error}"))?
+            .text()
+            .await
+            .map_err(|error| format!("SF 网页账户中心格式无效：{error}"))?;
+        let account_text = strip_html_text(&my_html);
+        let month_ticket = extract_numbers_after_text(&account_text, "月票")
+            .first()
+            .copied()
+            .unwrap_or(0);
+        let wallet = extract_numbers_after_text(&account_text, "我的钱包");
+        let fire_money = wallet.first().copied().unwrap_or(0);
+        let coupons = wallet.get(1).copied().unwrap_or(0);
+        profile.web_details_available = true;
+        profile.fire_money_remain = fire_money;
+        profile.coupons_remain = coupons;
+        profile.monthly_ticket = month_ticket;
+        // 新旧 VIP 接口都会存在；由 newVip.isNewVip 决定当前账户采用哪套体系。
+        // VIP 资料是独立的可选补充，失败不阻断 Web 基础资料和余额显示。
+        if let Ok(details) = self.get_web_vip_details().await {
+            profile.vip_system = details.system.to_string();
+            profile.vip_level = details.level;
+            profile.vip_name = details.name;
+            profile.vip_details_available = true;
+        }
+        Ok(profile)
+    }
+
+    /// 根据 `newVip.isNewVip` 选择新 VIP 或旧 VIP 资料。
+    async fn get_web_vip_details(&self) -> Result<WebVipDetails, String> {
+        let payload = self
+            .ajax_request(
+                "https://pages.sfacg.com/api/User?expand=newVip",
+                "https://pages.sfacg.com/h5/app/common/help/Vip.html",
+            )
+            .send()
+            .await
+            .map_err(|error| format!("无法读取 SF VIP 资料：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("SF VIP 资料请求被拒绝：{error}"))?
+            .json::<Value>()
+            .await
+            .map_err(|error| format!("SF VIP 资料格式无效：{error}"))?;
+        let new_vip = web_new_vip_details_from_payload(&payload)?;
+        if new_vip.is_new {
+            return Ok(WebVipDetails {
+                system: "new",
+                level: new_vip.level,
+                name: new_vip.name,
+            });
+        }
+
+        let payload = self
+            .ajax_request(
+                "https://pages.sfacg.com/api/common/vipInfo",
+                "https://pages.sfacg.com/h5/app/common/help/Vip.html",
+            )
+            .send()
+            .await
+            .map_err(|error| format!("无法读取 SF 旧 VIP 资料：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("SF 旧 VIP 资料请求被拒绝：{error}"))?
+            .json::<Value>()
+            .await
+            .map_err(|error| format!("SF 旧 VIP 资料格式无效：{error}"))?;
+        let level = web_old_vip_level_from_payload(&payload)?;
+        Ok(WebVipDetails {
+            system: "legacy",
+            level,
+            name: String::new(),
+        })
+    }
+
     /// 使用本实例的 Web Cookie 创建统一的导航型网页请求。
     ///
     /// # 参数
@@ -100,6 +184,19 @@ impl WebClient {
             request = request.header(reqwest::header::REFERER, referer);
         }
         self.with_web_cookie(request)
+    }
+
+    /// 请求官方网页登录信息，不返回原始响应给调用方。
+    async fn get_login_info(&self) -> Result<String, String> {
+        self.page_request("https://passport.sfacg.com/Ajax/GetLoginInfo.ashx", None)
+            .send()
+            .await
+            .map_err(|error| format!("无法读取 SF 网页账号信息：{error}"))?
+            .error_for_status()
+            .map_err(|error| format!("SF 网页账号信息请求被拒绝：{error}"))?
+            .text()
+            .await
+            .map_err(|error| format!("SF 网页账号信息格式无效：{error}"))
     }
 
     /// 使用本实例 Web Cookie 和端点同源 Referer 创建 AJAX 请求。
@@ -257,16 +354,10 @@ impl WebClient {
     /// 注意：有声书架会被刻意忽略；仅在用户打开小说后才按需探测有声内容。
     pub(super) async fn get_public_bookshelf(&self) -> Result<PublicShelf, String> {
         self.require_session()?;
-        let account = self
-            .page_request("https://passport.sfacg.com/Ajax/GetLoginInfo.ashx", None)
-            .send()
-            .await
-            .map_err(|error| format!("无法读取 SF 网页账号信息：{error}"))?
-            .error_for_status()
-            .map_err(|error| format!("SF 网页账号信息请求被拒绝：{error}"))?
-            .text()
-            .await
-            .map_err(|error| format!("SF 网页账号信息格式无效：{error}"))?;
+        let account = self.get_login_info().await?;
+        if extract_js_field(&account, "login").as_deref() != Some("true") {
+            return Err("网页登录会话已失效".to_string());
+        }
         let name = extract_js_field(&account, "name")
             .filter(|value| is_safe_account_name(value))
             .ok_or_else(|| "SF 网页账号信息未返回有效书架名称".to_string())?;
@@ -776,27 +867,169 @@ fn html_tag_attribute(tag: &str, name: &str) -> Option<String> {
     (!value[..end].is_empty()).then(|| value[..end].to_string())
 }
 
-/// 从官方登录信息端点返回的短 JavaScript 响应中提取一个带引号字段。
+/// 从官方登录信息端点返回的短 JavaScript 响应中提取字段。
 fn extract_js_field(value: &str, field: &str) -> Option<String> {
-    for marker in [format!("{field}:\""), format!("{field}:'")] {
-        let Some(marker_start) = value.find(&marker) else {
-            continue;
-        };
-        let start = marker_start + marker.len();
-        let Some(quote) = marker.chars().last() else {
-            continue;
-        };
-        let Some(relative_end) = value[start..].find(quote) else {
-            continue;
-        };
-        let end = relative_end + start;
-        let text = value[start..end].trim();
-        if !text.is_empty() {
-            return Some(text.to_string());
+    let marker = format!("{field}:");
+    let marker_start = value.find(&marker)?;
+    let rest = value[marker_start + marker.len()..].trim_start();
+    if let Some(quote) = rest.chars().next().filter(|c| *c == '\'' || *c == '"') {
+        let start = quote.len_utf8();
+        let end = rest[start..].find(quote)? + start;
+        return (!rest[start..end].trim().is_empty()).then(|| rest[start..end].trim().to_string());
+    }
+    let token = rest
+        .split(|character: char| {
+            character == ',' || character == '}' || character == ']' || character.is_whitespace()
+        })
+        .next()
+        .unwrap_or("")
+        .trim();
+    (!token.is_empty()).then(|| token.to_string())
+}
+
+/// 从官方登录信息响应生成不含 Cookie 的网页基础账户资料。
+fn user_profile_from_login_info(value: &str) -> Result<UserProfile, String> {
+    if extract_js_field(value, "login").as_deref() != Some("true") {
+        return Err("网页登录会话已失效".to_string());
+    }
+    let nick_name = ["nickname", "nickName"]
+        .iter()
+        .find_map(|field| extract_js_field(value, field))
+        .ok_or_else(|| "SF 网页账号信息未返回昵称".to_string())?;
+    let avatar = ["avatar", "userAvatar", "portrait", "headImg", "headimg"]
+        .iter()
+        .find_map(|field| extract_js_field(value, field))
+        .unwrap_or_default();
+    let account_id = ["accountId", "accountid", "userId", "userid"]
+        .iter()
+        .find_map(|field| extract_js_number_field(value, field))
+        .unwrap_or(0);
+    Ok(UserProfile {
+        account_id,
+        nick_name,
+        avatar,
+        app_details_available: false,
+        web_details_available: false,
+        vip_details_available: false,
+        vip_system: String::new(),
+        welfare_coin: 0,
+        fire_money_remain: 0,
+        coupons_remain: 0,
+        monthly_ticket: 0,
+        vip_level: 0,
+        vip_name: String::new(),
+    })
+}
+
+/// 从官方登录信息端点的 JavaScript 字面量提取一个整数栏位。
+fn extract_js_number_field(value: &str, field: &str) -> Option<i64> {
+    let marker = format!("{field}:");
+    let start = value.find(&marker)? + marker.len();
+    let value = value[start..].trim_start();
+    let value = value
+        .strip_prefix('"')
+        .or_else(|| value.strip_prefix('\''))
+        .unwrap_or(value);
+    let digits = value
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>();
+    digits.parse().ok().filter(|number: &i64| *number > 0)
+}
+
+/// 从网页纯文本中提取指定标签之后的连续数字。
+fn extract_numbers_after_text(value: &str, marker: &str) -> Vec<i64> {
+    let Some(start) = value.find(marker).map(|index| index + marker.len()) else {
+        return Vec::new();
+    };
+    let mut numbers = Vec::new();
+    let mut digits = String::new();
+    for character in value[start..].chars().take(120) {
+        if character.is_ascii_digit() {
+            digits.push(character);
+        } else if !digits.is_empty() {
+            if let Ok(number) = digits.parse() {
+                numbers.push(number);
+            }
+            digits.clear();
+        }
+        if numbers.len() >= 4 {
+            break;
         }
     }
-    None
+    if !digits.is_empty() {
+        if let Ok(number) = digits.parse() {
+            numbers.push(number);
+        }
+    }
+    numbers
 }
+
+struct NewVipDetails {
+    is_new: bool,
+    level: i64,
+    name: String,
+}
+
+struct WebVipDetails {
+    system: &'static str,
+    level: i64,
+    name: String,
+}
+
+/// 从 `newVip` 响应中提取新旧体系标记、等级和名称。
+fn web_new_vip_details_from_payload(payload: &Value) -> Result<NewVipDetails, String> {
+    if payload
+        .get("status")
+        .and_then(|status| status.get("errorCode"))
+        .and_then(Value::as_i64)
+        != Some(200)
+    {
+        return Err("SF VIP 资料请求未成功".to_string());
+    }
+    let vip = payload
+        .get("data")
+        .and_then(|data| data.get("expand"))
+        .and_then(|expand| expand.get("newVip"))
+        .ok_or_else(|| "SF VIP 资料未返回等级".to_string())?;
+    let is_new = vip
+        .get("isNewVip")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "SF VIP 资料未返回体系标记".to_string())?;
+    let level = vip
+        .get("level")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "SF VIP 资料未返回等级".to_string())?;
+    let name = vip
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Ok(NewVipDetails {
+        is_new,
+        level,
+        name,
+    })
+}
+
+/// 从旧 VIP 接口提取当前旧体系等级。
+fn web_old_vip_level_from_payload(payload: &Value) -> Result<i64, String> {
+    if payload
+        .get("status")
+        .and_then(|status| status.get("errorCode"))
+        .and_then(Value::as_i64)
+        != Some(200)
+    {
+        return Err("SF 旧 VIP 资料请求未成功".to_string());
+    }
+    payload
+        .get("data")
+        .and_then(|data| data.get("vipLevel"))
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "SF 旧 VIP 资料未返回等级".to_string())
+}
+
+
 
 /// 判断账户名是否符合网页端点允许的受限字符和长度规则。
 fn is_safe_account_name(value: &str) -> bool {
