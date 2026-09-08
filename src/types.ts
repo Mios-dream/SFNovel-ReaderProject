@@ -67,9 +67,11 @@ export type ChapterVolume = {
   chapters: Array<{
     chapId: number;
     title: string;
-    needFireMoney: number;
     isVip: boolean;
-    isUnlocked: boolean;
+    /** Web-visible text shape; this is not an entitlement result. */
+    contentKind: "text" | "imageVip" | "encryptedVip" | "unknown";
+    /** Only chapter-resource requests can change this from unknown. */
+    accessState: "unknown" | "available" | "unavailable" | "sessionExpired";
     downloaded: boolean;
   }>;
 };

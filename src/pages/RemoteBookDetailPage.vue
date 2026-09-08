@@ -258,6 +258,12 @@ function groupChaptersByVolume(chapters: Chapter[]) {
     chapters: groupedChapters,
   }));
 }
+
+function textChapterBadge(kind: ChapterVolume["chapters"][number]["contentKind"]) {
+  if (kind === "imageVip") return "图片 OCR";
+  if (kind === "encryptedVip") return "加密 OCR";
+  return "VIP";
+}
 </script>
 
 <template>
@@ -580,9 +586,9 @@ function groupChaptersByVolume(chapters: Chapter[]) {
                   class="remote-chapter-row"
                 >
                   <strong>{{ chapter.title }}</strong>
-                  <span v-if="chapter.isVip" class="chapter-badge vip"
-                    >VIP</span
-                  >
+                  <span v-if="chapter.isVip" class="chapter-badge vip">{{
+                    textChapterBadge(chapter.contentKind)
+                  }}</span>
                 </div>
               </div>
             </section>
@@ -672,7 +678,9 @@ function groupChaptersByVolume(chapters: Chapter[]) {
               class="remote-drawer-row"
             >
               <strong>{{ chapter.title }}</strong>
-              <span v-if="chapter.isVip" class="chapter-badge vip">VIP</span>
+              <span v-if="chapter.isVip" class="chapter-badge vip">{{
+                textChapterBadge(chapter.contentKind)
+              }}</span>
               <ChevronRight :size="16" />
             </div>
           </section>

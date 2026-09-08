@@ -13,8 +13,12 @@ mod downloads;
 mod endpoint_policy;
 /// 本地书库、导出、设置和持久化。
 mod library;
+/// 桌面端本地图片 OCR worker 桥接。
+mod ocr;
 /// SFACG 远程查询、认证与会话生命周期。
 mod sfacg;
+/// 不承载业务规则的原生层共享工具。
+mod utils;
 /// SF 网页、AJAX 和静态资源客户端。
 mod web_client;
 
@@ -44,7 +48,7 @@ pub fn run() {
             tauri::async_runtime::block_on(initialize_device_identity(&app.handle()))?;
             #[cfg(not(target_os = "android"))]
             initialize_device_identity(&app.handle())?;
-            // A malformed recovery snapshot must not block application startup.
+            // 恢复快照格式错误不能阻止应用启动；用户可在下载队列中手动重建任务。
             let _ = restore_native_jobs(&app.handle());
             #[cfg(target_os = "windows")]
             if let Ok(Some(session)) = restore_desktop_auth_session(&app.handle()) {

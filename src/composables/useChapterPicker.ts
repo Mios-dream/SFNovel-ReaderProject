@@ -63,14 +63,11 @@ export function useChapterPicker({
         );
         audioChapters.value = audio.chapters;
       } else {
-        if (novel.sourcePath) {
-          const details = await invoke<Partial<Novel>>("get_comic_details", {
-            comicId: novel.novelId,
-            sourcePath: novel.sourcePath,
-          }).catch(() => undefined);
-          if (details) {
-            chapterNovel.value = { ...novel, ...details };
-          }
+        const details = await invoke<Partial<Novel>>("get_comic_details", {
+          comicId: novel.novelId,
+        }).catch(() => undefined);
+        if (details) {
+          chapterNovel.value = { ...novel, ...details };
         }
         const comic = await invoke<{ chapters: Chapter[] }>(
           "get_comic_chapters",
@@ -109,7 +106,14 @@ export function useChapterPicker({
       : mode === "audio"
         ? audioChapters.value.find((item) => item.id === id)
         : comicChapters.value.find((item) => item.id === id);
-    return chapter && !chapter.downloaded && (!chapter.isVip || chapter.isUnlocked);
+    if (!chapter || chapter.downloaded) return false;
+    // Text catalogue sales markers do not prove account entitlement. The native
+    // downloader validates access only when it requests the selected resource.
+    return (
+      mode === "text" ||
+      !chapter.isVip ||
+      ("isUnlocked" in chapter && chapter.isUnlocked)
+    );
   }
 
   function selectDownloadableChapters() {

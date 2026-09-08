@@ -96,7 +96,7 @@ function submit() {
           </button>
         </div>
         <template v-else>
-          <p>用于下载部分仅限 App 的章节。但可能会导致账号风险。</p>
+          <p>下载部分特殊的章节，但可能会导致账号风险，非必要不建议使用。</p>
           <form class="login-form" @submit.prevent="submit">
             <input
               v-model="username"

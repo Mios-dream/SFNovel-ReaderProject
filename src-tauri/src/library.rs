@@ -5,6 +5,7 @@
 
 use crate::endpoint_policy::{app_endpoint_client, web_endpoint_client, EndpointCapability};
 use crate::sfacg::{NativeJobState, PersistedNativeJobs, DEFAULT_CONTENT_DICTIONARY};
+use crate::utils::json::{read_or_default, write_atomically};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
@@ -17,7 +18,7 @@ use uuid::Uuid;
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
-/// A renderer-safe summary of one locally stored book.
+/// 一个本地存储书籍的渲染进程安全摘要。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LibraryBook {
@@ -28,7 +29,7 @@ pub(crate) struct LibraryBook {
     pub(crate) formats: LibraryFormats,
 }
 
-/// Describes which local media formats were found for a book.
+/// 描述一本书已存在的本地媒体格式。
 #[derive(Debug, Serialize)]
 pub(crate) struct LibraryFormats {
     pub(crate) text: bool,
@@ -36,7 +37,7 @@ pub(crate) struct LibraryFormats {
     pub(crate) comic: bool,
 }
 
-/// A renderer-safe local book detail record.
+/// 本地书籍详情的渲染进程安全记录。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LocalBookDetail {
@@ -54,8 +55,9 @@ pub(crate) struct LocalBookDetail {
     pub(crate) comic_chapters: Vec<LocalComicChapter>,
 }
 
-/// Metadata for exactly one locally saved media type. Each source endpoint owns
-/// its own identity, cover, and descriptive fields.
+/// 恰好一种本地媒体类型的元数据。
+///
+/// 每个来源端点独立拥有自己的标识、封面和描述字段，禁止跨媒体类型复用。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LocalWorkMetadata {
@@ -85,29 +87,30 @@ pub(crate) struct LocalWorkMetadata {
     pub(crate) cover: Option<String>,
 }
 
-/// A locally playable audio track. The renderer converts the validated absolute
-/// path with Tauri's asset protocol before assigning it to an audio element.
+/// 可在本地播放的一条有声轨道。
+///
+/// 渲染进程需先通过 Tauri 资源协议转换已校验的绝对路径，再将其赋给音频元素。
 #[derive(Debug, Serialize)]
 pub(crate) struct LocalAudioTrack {
     pub(crate) title: String,
     pub(crate) href: String,
 }
 
-/// A local text chapter volume grouped in source order.
+/// 按来源顺序分组的本地文字章节卷。
 #[derive(Debug, Serialize)]
 pub(crate) struct LocalChapterVolume {
     pub(crate) volume: String,
     pub(crate) chapters: Vec<LocalChapterSummary>,
 }
 
-/// A renderer-safe local chapter summary.
+/// 本地章节的渲染进程安全摘要。
 #[derive(Debug, Serialize)]
 pub(crate) struct LocalChapterSummary {
     pub(crate) id: i64,
     pub(crate) title: String,
 }
 
-/// The persisted metadata written by the native-compatible download format.
+/// 由原生兼容下载格式写入的持久化元数据。
 #[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StoredBookMetadata {
@@ -125,8 +128,9 @@ pub(crate) struct StoredBookMetadata {
     pub(crate) downloaded_comic_chapter_ids: Option<Vec<i64>>,
 }
 
-/// Persisted source metadata for one media type. It intentionally has no
-/// cross-media fallback fields: a comic ID must never be used as a novel ID.
+/// 一种媒体类型的持久化来源元数据。
+///
+/// 不提供跨媒体回退字段：漫画编号绝不能作为小说编号使用。
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StoredWorkMetadata {
@@ -154,7 +158,7 @@ pub(crate) struct StoredWorkMetadata {
     pub(crate) last_update_time: Option<String>,
 }
 
-/// One persisted text chapter from `.novel-flow-chapters.json`.
+/// `.novel-flow-chapters.json` 中的一条持久化文字章节。
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StoredChapter {
@@ -164,9 +168,15 @@ pub(crate) struct StoredChapter {
     pub(crate) content: String,
     pub(crate) volume_index: i64,
     pub(crate) chapter_index: i64,
+    /// 正文来源：`web` 表示 HTML/App 文本，`webVipOcr` 表示本地识别的图片正文。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) content_source: Option<String>,
+    /// 使用 OCR 时保留的已授权图片或 GIF 来源相对路径。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ocr_source_path: Option<String>,
 }
 
-/// Persisted chapter store shape written by the existing downloader.
+/// 现有下载器写入的持久化章节存储结构。
 #[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StoredChapterStore {
@@ -174,7 +184,7 @@ pub(crate) struct StoredChapterStore {
     pub(crate) chapters: std::collections::HashMap<String, StoredChapter>,
 }
 
-/// The persisted request limits applied by native network download workers.
+/// 原生网络下载任务使用的持久化请求限制。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RequestPolicy {
@@ -186,7 +196,7 @@ pub(crate) struct RequestPolicy {
     pub(crate) android_device_report_enabled: bool,
 }
 
-/// A locally stored comic chapter and its ordered page files.
+/// 一条本地存储的漫画章节及其有序页面文件。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LocalComicChapter {
@@ -212,10 +222,10 @@ fn default_android_device_report_enabled() -> bool {
 }
 
 impl Default for RequestPolicy {
-    /// Creates conservative defaults that reduce upstream request pressure.
+    /// 创建降低上游请求压力的保守默认策略。
     ///
-    /// # Returns
-    /// A one-request worker with a 500 ms interval between requests.
+    /// # 返回值
+    /// 并发数为一、两次请求间隔为 500 毫秒的下载策略。
     fn default() -> Self {
         Self {
             request_interval_ms: 500,
@@ -226,7 +236,7 @@ impl Default for RequestPolicy {
     }
 }
 
-/// Renderer-safe result returned after reading or updating the正文恢复字典.
+/// 读取或更新正文恢复字典后返回的渲染进程安全结果。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ContentDictionaryResult {
@@ -235,13 +245,13 @@ pub(crate) struct ContentDictionaryResult {
     pub(crate) added: Option<usize>,
 }
 
-/// Returns true for the CJK Unified Ideographs ranges used by SF正文内容.
+/// 判断字符是否属于 SF 正文中使用的中日韩统一表意文字范围。
 ///
-/// # Arguments
-/// * `character` - Unicode scalar value to classify.
+/// # 参数
+/// * `character` - 待分类的 Unicode 标量值。
 ///
-/// # Returns
-/// `true` when the scalar is a Han character that can participate in a mapping.
+/// # 返回值
+/// 可参与字典映射的汉字时返回 `true`。
 fn is_han_character(character: char) -> bool {
     matches!(
         character,
@@ -251,13 +261,13 @@ fn is_han_character(character: char) -> bool {
     )
 }
 
-/// Resolves the user-editable正文恢复字典 below the private app data folder.
+/// 解析位于应用私有数据目录内、可由用户编辑的正文恢复字典路径。
 ///
-/// # Arguments
-/// * `app` - Application handle used to resolve the platform data path.
+/// # 参数
+/// * `app` - 用于解析平台数据目录的应用句柄。
 ///
-/// # Errors
-/// Returns an error when the app data directory cannot be resolved.
+/// # 错误
+/// 无法解析应用数据目录时返回错误。
 fn content_dictionary_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -265,14 +275,13 @@ fn content_dictionary_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|error| format!("无法解析正文恢复字典路径：{error}"))
 }
 
-/// Validates a JSON dictionary and drops entries that are not one Han scalar
-/// mapped to another Han scalar.
+/// 校验 JSON 字典，并丢弃不是单个汉字到单个汉字映射的条目。
 ///
-/// # Arguments
-/// * `value` - Parsed JSON value from the embedded or persisted dictionary.
+/// # 参数
+/// * `value` - 从内置或持久化字典解析得到的 JSON 值。
 ///
-/// # Returns
-/// A conflict-safe map containing only valid one-character mappings.
+/// # 返回值
+/// 仅包含有效单字符映射且可安全合并的字典。
 fn valid_content_dictionary(value: Value) -> std::collections::HashMap<String, String> {
     let Some(entries) = value.as_object() else {
         return std::collections::HashMap::new();
@@ -293,13 +302,13 @@ fn valid_content_dictionary(value: Value) -> std::collections::HashMap<String, S
         .collect()
 }
 
-/// Loads the persisted正文恢复字典 and seeds it from the bundled defaults once.
+/// 加载持久化正文恢复字典；首次不存在时以随包默认值初始化。
 ///
-/// # Arguments
-/// * `app` - Application handle used to resolve private app storage.
+/// # 参数
+/// * `app` - 用于解析应用私有存储的应用句柄。
 ///
-/// # Errors
-/// Returns an error when an existing dictionary is malformed or cannot be saved.
+/// # 错误
+/// 已存在字典格式错误或无法保存初始化字典时返回错误。
 fn load_content_dictionary(
     app: &tauri::AppHandle,
 ) -> Result<std::collections::HashMap<String, String>, String> {
@@ -319,7 +328,7 @@ fn load_content_dictionary(
     Ok(defaults)
 }
 
-/// Restores API-confused Han characters using the persisted web alignment map.
+/// 使用持久化的网页对齐映射恢复 API 中混淆的汉字。
 pub(crate) fn decode_api_content(app: &tauri::AppHandle, content: &str) -> Result<String, String> {
     let dictionary = load_content_dictionary(app)?;
     Ok(content
@@ -333,40 +342,29 @@ pub(crate) fn decode_api_content(app: &tauri::AppHandle, content: &str) -> Resul
         .collect())
 }
 
-/// Persists a validated dictionary through a sibling temporary file.
+/// 通过同目录临时文件替换方式持久化已校验字典。
 ///
-/// # Arguments
-/// * `app` - Application handle used to resolve private app storage.
-/// * `dictionary` - Validated character mapping to store.
+/// # 参数
+/// * `app` - 用于解析应用私有存储的应用句柄。
+/// * `dictionary` - 待保存的已校验字符映射。
 ///
-/// # Errors
-/// Returns an error when serialization or filesystem replacement fails.
+/// # 错误
+/// 序列化或替换文件失败时返回错误。
 fn write_content_dictionary(
     app: &tauri::AppHandle,
     dictionary: &std::collections::HashMap<String, String>,
 ) -> Result<(), String> {
     let path = content_dictionary_path(app)?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| "无法解析正文恢复字典目录".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| format!("无法创建正文恢复字典目录：{error}"))?;
-    let temporary = path.with_extension("json.tmp");
-    let payload = serde_json::to_vec_pretty(dictionary)
-        .map_err(|error| format!("无法序列化正文恢复字典：{error}"))?;
-    fs::write(&temporary, payload).map_err(|error| format!("无法写入正文恢复字典：{error}"))?;
-    if path.exists() {
-        fs::remove_file(&path).map_err(|error| format!("无法替换正文恢复字典：{error}"))?;
-    }
-    fs::rename(&temporary, &path).map_err(|error| format!("无法完成正文恢复字典写入：{error}"))
+    write_atomically(&path, dictionary, "正文恢复字典")
 }
 
-/// Returns the number of valid mappings in the private正文恢复字典.
+/// 返回私有正文恢复字典中的有效映射数量。
 ///
-/// # Arguments
-/// * `app` - Application handle used to resolve private app storage.
+/// # 参数
+/// * `app` - 用于解析应用私有存储的应用句柄。
 ///
-/// # Errors
-/// Returns an error when the dictionary cannot be read or initialized.
+/// # 错误
+/// 无法读取或初始化字典时返回错误。
 #[tauri::command]
 pub(crate) fn get_content_dictionary(
     app: tauri::AppHandle,
@@ -378,16 +376,14 @@ pub(crate) fn get_content_dictionary(
     })
 }
 
-/// Aligns API-confused Han characters with the same chapter's web正文 and saves
-/// only non-conflicting mappings in the private dictionary.
+/// 用同一章节的网页正文对齐 API 混淆汉字，并仅保存无冲突映射。
 ///
-/// # Arguments
-/// * `app` - Application handle used for native session state and storage.
-/// * `chapter_id` - Positive public chapter identifier used for alignment.
+/// # 参数
+/// * `app` - 用于访问原生会话状态和存储的应用句柄。
+/// * `chapter_id` - 用于对齐的正数公开章节编号。
 ///
-/// # Errors
-/// Returns an error when either source is unavailable, the character counts do
-/// not match, or an existing mapping conflicts with the observed web character.
+/// # 错误
+/// 任一来源不可用、字符数量不一致，或已有映射与网页字符冲突时返回错误。
 #[tauri::command]
 pub(crate) async fn update_content_dictionary(
     app: tauri::AppHandle,
@@ -395,7 +391,7 @@ pub(crate) async fn update_content_dictionary(
 ) -> Result<ContentDictionaryResult, String> {
     let app_client = app_endpoint_client(&app, EndpointCapability::TextChapterApp)?;
     let api = app_client
-        .chapter_content_with_metadata_from_api(chapter_id)
+        .get_chapter_content_and_metadata(chapter_id)
         .await?;
     let web_client = web_endpoint_client(&app, EndpointCapability::TextChapterWeb)?;
     let web = web_client
@@ -440,21 +436,16 @@ pub(crate) async fn update_content_dictionary(
     })
 }
 
-/// Resolves the application-owned library directory without accepting a path
-/// from the renderer.
+/// 解析应用自有书库目录，不接受渲染进程传入的路径。
 ///
-/// The directory is created below the platform application-data directory and
-/// is therefore writable on both Windows and Android without broad filesystem
-/// permissions.
+/// 此目录位于平台应用数据目录下，因此 Windows 和 Android 均可写入，无需授予宽泛
+/// 文件系统权限。Android 使用公开下载目录，桌面端使用私有应用数据目录。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to resolve the platform data path.
+/// # 参数
+/// * `app` - 用于解析平台数据目录的 Tauri 应用句柄。
 ///
-/// # Errors
-/// Returns the application library directory, using the public Android
-/// Downloads folder and the private application-data folder on desktop.
-///
-/// Returns an error when the directory cannot be resolved or created.
+/// # 错误
+/// 无法解析或创建书库目录时返回错误。
 pub(crate) fn library_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     #[cfg(target_os = "android")]
     let directory = PathBuf::from("/storage/emulated/0/Download/SF Novel Flow");
@@ -471,7 +462,7 @@ pub(crate) fn library_directory(app: &tauri::AppHandle) -> Result<PathBuf, Strin
     Ok(directory)
 }
 
-/// Moves an existing private Android library into the public download folder once.
+/// 将已有 Android 私有书库一次性迁移至公开下载目录。
 #[cfg(target_os = "android")]
 fn migrate_legacy_android_library(app: &tauri::AppHandle, target: &PathBuf) -> Result<(), String> {
     if target.exists() {
@@ -514,14 +505,13 @@ fn copy_directory_contents(source: &PathBuf, target: &PathBuf) -> std::io::Resul
     Ok(())
 }
 
-/// Resolves the native settings file without accepting a renderer-controlled
-/// location.
+/// 解析原生请求策略文件，不接受渲染进程控制的位置。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to resolve the application-data path.
+/// # 参数
+/// * `app` - 用于解析应用数据目录的 Tauri 应用句柄。
 ///
-/// # Errors
-/// Returns an error when the application-data directory cannot be resolved.
+/// # 错误
+/// 无法解析应用数据目录时返回错误。
 fn request_policy_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -529,13 +519,13 @@ fn request_policy_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|error| format!("无法解析请求策略文件：{error}"))
 }
 
-/// Resolves the private task-state snapshot used to recover paused downloads.
+/// 解析用于恢复已暂停下载任务的私有状态快照路径。
 ///
-/// # Arguments
-/// * `app` - Application handle used to resolve the app data path.
+/// # 参数
+/// * `app` - 用于解析应用数据路径的应用句柄。
 ///
-/// # Errors
-/// Returns an error when the platform app data path cannot be resolved.
+/// # 错误
+/// 无法解析平台应用数据路径时返回错误。
 fn native_jobs_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -543,17 +533,16 @@ fn native_jobs_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|error| format!("无法解析下载任务文件：{error}"))
 }
 
-/// Persists renderer-safe jobs and private resume specifications atomically.
+/// 以临时文件替换方式持久化渲染进程安全的任务和私有续传规格。
 ///
-/// Cookies, passwords, output paths, and cancellation handles are intentionally
-/// excluded from the snapshot.
+/// 快照刻意排除 Cookie、密码、输出路径和取消句柄。
 ///
-/// # Arguments
-/// * `app` - Application handle used to resolve native storage.
-/// * `state` - Shared in-memory download task state.
+/// # 参数
+/// * `app` - 用于解析原生存储位置的应用句柄。
+/// * `state` - 共享的内存下载任务状态。
 ///
-/// # Errors
-/// Returns an error when the task snapshot cannot be serialized or replaced.
+/// # 错误
+/// 任务快照无法序列化或替换时返回错误。
 pub(crate) fn persist_native_jobs(
     app: &tauri::AppHandle,
     state: &NativeJobState,
@@ -569,30 +558,18 @@ pub(crate) fn persist_native_jobs(
         .map_err(|_| "下载任务状态不可用".to_string())?
         .clone();
     let path = native_jobs_path(app)?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| "无法解析下载任务目录".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| format!("无法创建下载任务目录：{error}"))?;
-    let payload = serde_json::to_vec_pretty(&PersistedNativeJobs { jobs, specs })
-        .map_err(|error| format!("无法序列化下载任务：{error}"))?;
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, payload).map_err(|error| format!("无法写入下载任务：{error}"))?;
-    if path.exists() {
-        fs::remove_file(&path).map_err(|error| format!("无法替换下载任务：{error}"))?;
-    }
-    fs::rename(&temporary, &path).map_err(|error| format!("无法完成下载任务写入：{error}"))
+    write_atomically(&path, &PersistedNativeJobs { jobs, specs }, "下载任务")
 }
 
-/// Loads task state after startup and makes unfinished jobs explicitly paused.
+/// 启动后加载任务状态，并将未完成任务显式标记为暂停。
 ///
-/// The app never resumes an upstream request automatically after a process
-/// restart; the user must select continue from the download queue.
+/// 进程重启后绝不自动恢复上游请求；用户必须在下载队列中手动继续。
 ///
-/// # Arguments
-/// * `app` - Application handle used to access native state and app data.
+/// # 参数
+/// * `app` - 用于访问原生状态和应用数据的应用句柄。
 ///
-/// # Errors
-/// Returns an error when an existing snapshot is malformed or unreadable.
+/// # 错误
+/// 已存在快照格式错误或无法读取时返回错误。
 pub(crate) fn restore_native_jobs(app: &tauri::AppHandle) -> Result<(), String> {
     let path = native_jobs_path(app)?;
     if !path.exists() {
@@ -623,38 +600,29 @@ pub(crate) fn restore_native_jobs(app: &tauri::AppHandle) -> Result<(), String> 
     persist_native_jobs(app, &state)
 }
 
-/// Reads the persisted request policy, returning conservative defaults when no
-/// settings file has been created yet.
+/// 读取或初始化原生下载任务使用的请求限制
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to resolve private application data.
+/// # 参数
+/// * `app` - 用于解析私有应用数据的 Tauri 应用句柄。
 ///
-/// # Errors
-/// Returns an error when an existing policy file is unreadable or malformed.
+/// # 错误
+/// 已存在策略文件无法读取或格式错误时返回错误。
 #[tauri::command]
 pub(crate) fn get_request_policy(app: tauri::AppHandle) -> Result<RequestPolicy, String> {
-    let path = request_policy_path(&app)?;
-    if !path.exists() {
-        return Ok(RequestPolicy::default());
-    }
-    let contents =
-        fs::read_to_string(&path).map_err(|error| format!("无法读取请求策略：{error}"))?;
-    serde_json::from_str(&contents).map_err(|error| format!("请求策略格式无效：{error}"))
+    read_or_default(&request_policy_path(&app)?, "请求策略")
 }
 
-/// Validates and persists request limits for future native download tasks.
+/// 校验并持久化后续原生下载任务使用的请求限制。
 ///
-/// The renderer cannot select the output path. The file is written through a
-/// sibling temporary file and then replaced to avoid leaving partial JSON after
-/// an interrupted write.
+/// 渲染进程不能指定输出路径。文件经同目录临时文件完成写入再替换，避免中断后在目标
+/// 路径留下不完整 JSON。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to resolve private application data.
-/// * `policy` - Candidate interval and concurrency values from the renderer.
+/// # 参数
+/// * `app` - 用于解析私有应用数据的 Tauri 应用句柄。
+/// * `policy` - 渲染进程提交的请求间隔和并发候选值。
 ///
-/// # Errors
-/// Returns an error when values are outside their safe range or the policy
-/// cannot be serialized or stored.
+/// # 错误
+/// 值不在安全范围内，或策略无法序列化、保存时返回错误。
 #[tauri::command]
 pub(crate) fn save_request_policy(
     app: tauri::AppHandle,
@@ -667,33 +635,20 @@ pub(crate) fn save_request_policy(
         return Err("最大并发下载数必须在 1 到 4 之间".to_string());
     }
 
-    let path = request_policy_path(&app)?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| "无法解析请求策略目录".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| format!("无法创建请求策略目录：{error}"))?;
-    let temporary = path.with_extension("json.tmp");
-    let payload = serde_json::to_vec_pretty(&policy)
-        .map_err(|error| format!("无法序列化请求策略：{error}"))?;
-    fs::write(&temporary, payload).map_err(|error| format!("无法写入请求策略：{error}"))?;
-    if path.exists() {
-        fs::remove_file(&path).map_err(|error| format!("无法替换请求策略：{error}"))?;
-    }
-    fs::rename(&temporary, &path).map_err(|error| format!("无法完成请求策略写入：{error}"))?;
+    write_atomically(&request_policy_path(&app)?, &policy, "请求策略")?;
     Ok(policy)
 }
 
-/// Lists books stored in the Tauri-owned local library.
+/// 列出 Tauri 自有本地书库中的书籍。
 ///
-/// The command only returns directory names and format flags. It never returns
-/// absolute paths, file contents, or credentials; media access will use a
-/// separate validated asset command during the library migration.
+/// 此命令只返回目录名和格式标记，绝不返回绝对路径、文件内容或凭据；媒体访问由单独
+/// 的已校验资源命令处理。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to locate the library.
+/// # 参数
+/// * `app` - 用于定位书库的 Tauri 应用句柄。
 ///
-/// # Errors
-/// Returns an error if the library cannot be scanned.
+/// # 错误
+/// 无法扫描书库时返回错误。
 #[tauri::command]
 pub(crate) fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBook>, String> {
     let directory = library_directory(&app)?;
@@ -732,15 +687,14 @@ pub(crate) fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBoo
     Ok(books)
 }
 
-/// Resolves a single child directory in the application-owned library.
+/// 解析应用自有书库内的单个子目录。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to locate the private library root.
-/// * `name` - Exact directory name previously returned by `list_local_library`.
+/// # 参数
+/// * `app` - 用于定位私有书库根目录的 Tauri 应用句柄。
+/// * `name` - 之前由 `list_local_library` 返回的精确目录名。
 ///
-/// # Errors
-/// Returns an error for path separators, traversal segments, missing entries, or
-/// a directory that escapes the library root after canonicalization.
+/// # 错误
+/// 名称包含路径分隔符、遍历片段、条目不存在，或规范化后目录逸出书库根目录时返回错误。
 fn local_book_directory(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
     let trimmed = name.trim();
     if trimmed.is_empty()
@@ -764,14 +718,14 @@ fn local_book_directory(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, S
     Ok(canonical)
 }
 
-/// Reads a local M3U8 playlist and exposes only existing first-level MP3 files.
+/// 读取本地 M3U8 播放列表，仅暴露实际存在的一级 MP3 文件。
 ///
-/// # Arguments
-/// * `name` - Validated local book directory name.
-/// * `directory` - Canonical local book directory.
+/// # 参数
+/// * `name` - 已校验的本地书籍目录名。
+/// * `directory` - 规范化后的本地书籍目录。
 ///
-/// # Errors
-/// Returns an error when the playlist exists but cannot be read as UTF-8.
+/// # 错误
+/// 播放列表存在但无法按 UTF-8 读取时返回错误。
 fn read_local_audio_tracks(directory: &PathBuf) -> Result<Vec<LocalAudioTrack>, String> {
     let audio_directory = directory.join("audio");
     let playlist = audio_directory.join("有声目录.m3u8");
@@ -829,23 +783,26 @@ fn read_local_audio_tracks(directory: &PathBuf) -> Result<Vec<LocalAudioTrack>, 
     Ok(tracks)
 }
 
-/// Reads a local book's metadata and downloaded text chapter index.
+/// 读取本地书籍元数据和已下载文字章节索引。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to locate the private library.
-/// * `name` - Exact local directory name.
+/// # 参数
+/// * `app` - 用于定位私有书库的 Tauri 应用句柄。
+/// * `name` - 精确的本地目录名。
 ///
-/// # Errors
-/// Returns an error when the book directory or a malformed chapter store cannot be read.
+/// # 错误
+/// 无法读取书籍目录或章节存储格式错误时返回错误。
 #[tauri::command]
 pub(crate) fn get_local_book(
     app: tauri::AppHandle,
     name: String,
 ) -> Result<LocalBookDetail, String> {
     let directory = local_book_directory(&app, &name)?;
-    let metadata = read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?;
-    let store =
-        read_json_or_default::<StoredChapterStore>(&directory.join(".novel-flow-chapters.json"))?;
+    let metadata =
+        read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?;
+    let store = read_or_default::<StoredChapterStore>(
+        &directory.join(".novel-flow-chapters.json"),
+        "本地数据",
+    )?;
     let _ = (
         &metadata.downloaded_text_chapter_ids,
         &metadata.downloaded_audio_chapter_ids,
@@ -895,10 +852,11 @@ pub(crate) fn get_local_book(
 ///
 /// # 参数
 /// * `metadata` - 本地书籍的完整元数据容器。
-/// * `kind` - 资源类型，支持 `novel`、`audio` 和 `comic`。
+/// * `directory` - 已校验的本地书籍目录，用于查找封面文件。
+/// * `cover_file` - 对应媒体类型的封面文件名。
 ///
 /// # 返回值
-/// 对应资源类型的元数据；未知类型返回 `None`。
+/// 包含可用封面路径的本地作品元数据；元数据或编号缺失时返回 `None`。
 fn local_work_metadata(
     metadata: Option<StoredWorkMetadata>,
     directory: &PathBuf,
@@ -1025,15 +983,15 @@ pub(crate) fn get_local_comic_chapter(
         .ok_or_else(|| "本地漫画章节不存在".to_string())
 }
 
-/// Reads one downloaded text chapter without exposing its filesystem path.
+/// 读取一条已下载文字章节，但不暴露其文件系统路径。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to locate the private library.
-/// * `name` - Exact local book directory name.
-/// * `chapter_id` - Positive persisted chapter identifier.
+/// # 参数
+/// * `app` - 用于定位私有书库的 Tauri 应用句柄。
+/// * `name` - 精确的本地书籍目录名。
+/// * `chapter_id` - 正数持久化章节编号。
 ///
-/// # Errors
-/// Returns an error for invalid IDs, missing books, malformed stores, or absent chapters.
+/// # 错误
+/// 编号无效、书籍不存在、存储格式错误或章节缺失时返回错误。
 #[tauri::command]
 pub(crate) fn get_local_chapter(
     app: tauri::AppHandle,
@@ -1044,8 +1002,10 @@ pub(crate) fn get_local_chapter(
         return Err("章节参数无效".to_string());
     }
     let directory = local_book_directory(&app, &name)?;
-    let store =
-        read_json_or_default::<StoredChapterStore>(&directory.join(".novel-flow-chapters.json"))?;
+    let store = read_or_default::<StoredChapterStore>(
+        &directory.join(".novel-flow-chapters.json"),
+        "本地数据",
+    )?;
     if store.novel_id != 0 && metadata_novel_id(&directory)? != Some(store.novel_id) {
         return Err("本地章节与书籍元数据不匹配".to_string());
     }
@@ -1056,7 +1016,7 @@ pub(crate) fn get_local_chapter(
         .ok_or_else(|| "本地未找到该章节正文".to_string())
 }
 
-/// A renderer-safe description of one generated local export file.
+/// 一个已生成本地导出文件的渲染进程安全描述。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LocalExport {
@@ -1064,7 +1024,7 @@ pub(crate) struct LocalExport {
     pub(crate) file_name: String,
 }
 
-/// Ensures Android can write the public download directory used by the library.
+/// 确保 Android 可写入书库使用的公开下载目录。
 #[tauri::command]
 pub(crate) async fn ensure_external_storage_access(app: tauri::AppHandle) -> Result<bool, String> {
     #[cfg(target_os = "android")]
@@ -1087,13 +1047,13 @@ pub(crate) async fn ensure_external_storage_access(app: tauri::AppHandle) -> Res
     }
 }
 
-/// Returns plain text without local Markdown formatting for TXT export.
+/// 为 TXT 导出移除本地 Markdown 格式，返回纯文本。
 ///
-/// # Arguments
-/// * `value` - Stored chapter Markdown.
+/// # 参数
+/// * `value` - 已存储的章节 Markdown 文本。
 ///
-/// # Returns
-/// Readable text with basic heading and image syntax removed.
+/// # 返回值
+/// 移除基本标题和图片语法后的可读文本。
 fn text_without_markdown(value: &str) -> String {
     let mut output = String::new();
     for line in value.lines() {
@@ -1114,16 +1074,16 @@ fn text_without_markdown(value: &str) -> String {
     output.trim().to_string()
 }
 
-/// Groups stored chapters into a complete Markdown book document.
+/// 将已存储章节组织为完整的 Markdown 书籍文档。
 ///
-/// # Arguments
-/// * `title` - User-visible book title.
-/// * `author` - Book author.
-/// * `description` - Book description.
-/// * `chapters` - Already sorted downloaded chapters.
+/// # 参数
+/// * `title` - 面向用户展示的书名。
+/// * `author` - 作者。
+/// * `description` - 书籍简介。
+/// * `chapters` - 已按顺序排列的下载章节。
 ///
-/// # Returns
-/// UTF-8 Markdown including YAML metadata and volume headings.
+/// # 返回值
+/// 包含 YAML 元数据和分卷标题的 UTF-8 Markdown。
 fn local_markdown(
     title: &str,
     author: &str,
@@ -1154,20 +1114,20 @@ fn local_markdown(
     output
 }
 
-/// Writes a text-only EPUB 3 archive for downloaded chapters.
+/// 为已下载章节写入纯文字 EPUB 3 归档。
 ///
-/// The archive deliberately contains a simple fixed layout so both Windows and
-/// Android readers can consume it without access to the app's local paths.
+/// 归档刻意使用简单固定布局，使 Windows 与 Android 阅读器无需访问应用本地路径即可
+/// 阅读。
 ///
-/// # Arguments
-/// * `target` - Native-generated export file path.
-/// * `title` - Book title.
-/// * `author` - Book author.
-/// * `description` - Book description.
-/// * `chapters` - Already sorted downloaded chapters.
+/// # 参数
+/// * `target` - 原生层生成的导出文件路径。
+/// * `title` - 书名。
+/// * `author` - 作者。
+/// * `description` - 书籍简介。
+/// * `chapters` - 已按顺序排列的下载章节。
 ///
-/// # Errors
-/// Returns an error when the archive cannot be created or written.
+/// # 错误
+/// 无法创建或写入归档时返回错误。
 fn write_epub_export(
     target: &PathBuf,
     title: &str,
@@ -1175,13 +1135,13 @@ fn write_epub_export(
     description: &str,
     chapters: &[StoredChapter],
 ) -> Result<(), String> {
-    /// Escapes XML-reserved characters before inserting user or chapter text.
+    /// 在插入用户或章节文本前转义 XML 保留字符。
     ///
-    /// # Arguments
-    /// * `value` - Untrusted text that will be embedded in an EPUB XML document.
+    /// # 参数
+    /// * `value` - 将嵌入 EPUB XML 文档的不可信文本。
     ///
-    /// # Returns
-    /// The escaped text, safe for the XML text and attribute contexts used here.
+    /// # 返回值
+    /// 可安全用于此处 XML 文本和属性上下文的转义文本。
     fn xml(value: &str) -> String {
         value
             .replace('&', "&amp;")
@@ -1257,17 +1217,18 @@ fn write_epub_export(
         .map_err(|error| format!("无法完成 EPUB：{error}"))
 }
 
-/// Generates an application-owned EPUB, Markdown ZIP, TXT, audio ZIP, or comic ZIP export from one
-/// validated local book at a user-selected destination.
+/// 将一本已校验的本地书籍导出到用户选择的位置。
 ///
-/// # Arguments
-/// * `app` - Application handle used to resolve the selected book.
-/// * `name` - Exact book directory name previously returned by the library.
-/// * `format` - One of `epub`, `markdown`, `txt`, `audio`, or `comic`.
-/// * `output_path` - Destination chosen through the platform save dialog.
+/// 支持 EPUB、Markdown ZIP、TXT、有声 ZIP 和漫画 ZIP，文件始终由应用原生层生成。
 ///
-/// # Errors
-/// Returns an error for unsupported formats, missing local resources, or export failures.
+/// # 参数
+/// * `app` - 用于解析所选书籍的应用句柄。
+/// * `name` - 书库此前返回的精确书籍目录名。
+/// * `format` - `epub`、`markdown`、`txt`、`audio` 或 `comic` 之一。
+/// * `output_path` - 通过平台保存对话框选择的目标位置。
+///
+/// # 错误
+/// 格式不支持、本地资源缺失或导出失败时返回错误。
 #[tauri::command]
 pub(crate) async fn export_local_book(
     app: tauri::AppHandle,
@@ -1285,9 +1246,12 @@ pub(crate) async fn export_local_book(
         return Err("不支持的导出格式".to_string());
     }
     let directory = local_book_directory(&app, &name)?;
-    let metadata = read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?;
-    let store =
-        read_json_or_default::<StoredChapterStore>(&directory.join(".novel-flow-chapters.json"))?;
+    let metadata =
+        read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?;
+    let store = read_or_default::<StoredChapterStore>(
+        &directory.join(".novel-flow-chapters.json"),
+        "本地数据",
+    )?;
     let mut chapters: Vec<_> = store.chapters.into_values().collect();
     chapters.sort_by_key(|chapter| (chapter.volume_index, chapter.chapter_index, chapter.id));
     let audio_directory = directory.join("audio");
@@ -1499,61 +1463,42 @@ pub(crate) async fn export_local_book(
     })
 }
 
-/// Reads only the optional novel identifier used to validate a local chapter store.
+/// 仅读取用于校验本地章节存储的可选小说编号。
 ///
-/// # Arguments
-/// * `directory` - Already validated local book directory.
+/// # 参数
+/// * `directory` - 已校验的本地书籍目录。
 ///
-/// # Errors
-/// Returns an error if an existing metadata file cannot be decoded.
+/// # 错误
+/// 已存在元数据文件无法解析时返回错误。
 fn metadata_novel_id(directory: &PathBuf) -> Result<Option<i64>, String> {
     Ok(
-        read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?
+        read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?
             .novel
             .and_then(|work| work.id),
     )
 }
 
-/// Deletes one local book directory after validating it remains below the app library root.
+/// 校验目录仍位于应用书库根目录后，删除一本本地书籍。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to locate the private library.
-/// * `name` - Exact local book directory name.
+/// # 参数
+/// * `app` - 用于定位私有书库的 Tauri 应用句柄。
+/// * `name` - 精确的本地书籍目录名。
 ///
-/// # Errors
-/// Returns an error when the book cannot be resolved or filesystem removal fails.
+/// # 错误
+/// 无法解析书籍目录或文件系统删除失败时返回错误。
 #[tauri::command]
 pub(crate) fn delete_local_book(app: tauri::AppHandle, name: String) -> Result<(), String> {
     let directory = local_book_directory(&app, &name)?;
     fs::remove_dir_all(directory).map_err(|error| format!("删除本地书籍失败：{error}"))
 }
 
-/// Reads JSON from a private app file and treats a missing file as its default value.
+/// 将作品标题规范为书库子目录名。
 ///
-/// # Arguments
-/// * `path` - Native-resolved file path; callers must not pass renderer-controlled paths.
+/// # 参数
+/// * `value` - 面向用户展示的作品标题。
 ///
-/// # Errors
-/// Returns an error when an existing file is not valid UTF-8 JSON of the requested type.
-pub(crate) fn read_json_or_default<T>(path: &PathBuf) -> Result<T, String>
-where
-    T: for<'de> Deserialize<'de> + Default,
-{
-    if !path.exists() {
-        return Ok(T::default());
-    }
-    let contents =
-        fs::read_to_string(path).map_err(|error| format!("无法读取本地数据：{error}"))?;
-    serde_json::from_str(&contents).map_err(|error| format!("本地数据格式无效：{error}"))
-}
-
-/// Sanitizes a renderer-provided title before using it as a child library directory.
-///
-/// # Arguments
-/// * `value` - User-visible work title.
-///
-/// # Returns
-/// A bounded filesystem-safe title, or a stable fallback when all characters are removed.
+/// # 返回值
+/// 长度受限的文件系统安全标题；所有字符都被移除时返回稳定的默认名称。
 pub(crate) fn safe_library_name(value: &str) -> String {
     let mut result = value
         .chars()

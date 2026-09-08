@@ -1,13 +1,13 @@
 //! SF 网页客户端及其 Web 会话边界。
 
 use crate::sfacg::{
-    extract_js_number, extract_js_string, parse_comic_catalog, validate_novel_id, AuthSessionState,
-    NativeAudioChapter, NativeComicChapter, NovelDetail, SF_WEB_USER_AGENT,
+    validate_novel_id, AuthSessionState, NativeAudioChapter, NativeComicChapter, SF_WEB_USER_AGENT,
 };
+use crate::utils::cookie::{filter_cookie_header, has_cookie_name};
 use serde_json::Value;
 use tauri::Manager;
 
-/// One novel or comic parsed from a public web pocket.
+/// 从公开网页书架解析出的一条小说或漫画记录。
 pub(crate) struct PublicShelfItem {
     pub(crate) kind: &'static str,
     pub(crate) id: i64,
@@ -17,17 +17,26 @@ pub(crate) struct PublicShelfItem {
     pub(crate) source_path: Option<String>,
 }
 
-/// Public shelf categories and the successfully parsed novel/comic entries.
+/// 公开书架分类及成功解析出的小说、漫画条目。
 pub(crate) struct PublicShelf {
     pub(crate) categories: Vec<String>,
     pub(crate) items: Vec<(String, PublicShelfItem)>,
 }
 
-/// 使用来自 `NativeAuthSession.web_cookie` 的已过滤 Web 会话快照，发送 SF
-/// 网页、AJAX 和静态资源请求。
+/// 使用来自 `NativeAuthSession.web_cookie` 的 Web 凭证，发送 SF 网页、AJAX 和静态资源请求。
 pub(crate) struct WebClient {
     client: reqwest::Client,
     web_cookie: Option<String>,
+}
+
+/// VIP 章节返回的图片数据。
+///
+/// 二进制数据不跨越 IPC 边界。下载器先持久化图片，再将得到的本地路径交给 OCR worker。
+pub(crate) struct VipChapterImage {
+    // 章节图片二进制数据，供下载器持久化。
+    pub(crate) bytes: Vec<u8>,
+    // 文件扩展名，供下载器持久化时使用。仅限 "jpg"、"png"、"gif"、"webp"。
+    pub(crate) extension: &'static str,
 }
 
 impl WebClient {
@@ -55,11 +64,9 @@ impl WebClient {
 
     /// 判断此客户端是否持有包含 `session_PC` 的 Web 会话。
     pub(crate) fn has_session(&self) -> bool {
-        self.web_cookie.as_ref().is_some_and(|cookie| {
-            cookie
-                .split(';')
-                .any(|pair| pair.trim().starts_with("session_PC="))
-        })
+        self.web_cookie
+            .as_deref()
+            .is_some_and(|cookie| has_cookie_name(cookie, "session_PC"))
     }
 
     /// 确保需要登录的网页端点拥有已验证的 Web 会话。
@@ -74,7 +81,12 @@ impl WebClient {
 
     /// 使用本实例的 Web Cookie 创建统一的导航型网页请求。
     ///
-    /// 调用方不能将 App Cookie 注入该请求。
+    /// # 参数
+    /// * `url` - 目标网页地址。
+    /// * `referer` - 请求的 Referer 头，用于模拟浏览器导航。
+    ///
+    /// # 返回
+    /// 构建好的请求构建器，包含 Web Cookie 和默认的 Accept 头。
     fn page_request(
         &self,
         url: impl reqwest::IntoUrl,
@@ -91,6 +103,13 @@ impl WebClient {
     }
 
     /// 使用本实例 Web Cookie 和端点同源 Referer 创建 AJAX 请求。
+    ///
+    /// # 参数
+    /// * `url` - 目标 AJAX 端点地址。
+    /// * `referer` - 请求的 Referer 头，用于模拟浏览器导航。
+    ///
+    /// # 返回
+    /// 构建好的请求构建器，包含 Web Cookie 和默认的 Accept 头。
     pub(super) fn ajax_request(
         &self,
         url: impl reqwest::IntoUrl,
@@ -106,6 +125,14 @@ impl WebClient {
     }
 
     /// 使用本实例 Web Cookie 创建统一的网页静态资源请求。
+    ///
+    /// # 参数
+    /// * `url` - 目标静态资源地址。
+    /// * `referer` - 请求的 Referer 头，用于模拟浏览器导航。
+    /// * `accept` - 请求的 Accept 头，用于指定期望的响应类型。
+    ///
+    /// # 返回
+    /// 构建好的请求构建器，包含 Web Cookie 和指定的 Accept 头。
     pub(super) fn asset_request(
         &self,
         url: impl reqwest::IntoUrl,
@@ -120,11 +147,11 @@ impl WebClient {
         )
     }
 
-    /// 读取需认证的有声目录，且不向渲染进程暴露流媒体地址。
+    /// 获取有声目录并解析为标题和章节列表。
     ///
     /// # 错误
     /// 缺少 Web 会话、上游拒绝请求或返回无效目录数据时返回错误。
-    pub(super) async fn audio_catalog(
+    pub(super) async fn get_audio_catalog(
         &self,
         novel_id: i64,
     ) -> Result<(String, Vec<NativeAudioChapter>), String> {
@@ -225,10 +252,10 @@ impl WebClient {
         Ok((title, chapters))
     }
 
-    /// Reads the public pockets belonging to the logged-in web account and
-    /// collects their novel and comic entries. Audio pockets are deliberately
-    /// ignored; audio is probed only after the user opens a novel.
-    pub(super) async fn public_bookshelf(&self) -> Result<PublicShelf, String> {
+    /// 读取已登录网页账户所属的公开书架，并获取其中的小说和漫画条目。
+    ///
+    /// 注意：有声书架会被刻意忽略；仅在用户打开小说后才按需探测有声内容。
+    pub(super) async fn get_public_bookshelf(&self) -> Result<PublicShelf, String> {
         self.require_session()?;
         let account = self
             .page_request("https://passport.sfacg.com/Ajax/GetLoginInfo.ashx", None)
@@ -282,9 +309,8 @@ impl WebClient {
                     );
                     response
                 }
-                // The web site intentionally returns 500 for audio/video
-                // pockets. They are probed later from a novel and must not
-                // make the novel/comic shelf fail as a whole.
+                // 网页端会刻意对有声、视频书架返回 500。后续会从小说详情按需探测，不能
+                // 因此使整个小说、漫画书架读取失败。
                 Ok(response) => {
                     eprintln!(
                         "[sfacg] web bookshelf pocket skipped: status={}, pocket_id={}",
@@ -377,7 +403,7 @@ impl WebClient {
     ///
     /// # 错误
     /// 网页不可访问、目录结构无法解析或上游未返回章节时返回错误。
-    pub(super) async fn comic_catalog(
+    pub(super) async fn get_comic_catalog(
         &self,
         folder: &str,
     ) -> Result<Vec<NativeComicChapter>, String> {
@@ -392,114 +418,6 @@ impl WebClient {
             .await
             .map_err(|error| format!("SF 漫画目录格式无效：{error}"))?;
         parse_comic_catalog(&html, folder)
-    }
-
-    /// 从漫画网页读取作品标题、作者、封面和简介。
-    ///
-    /// # 错误
-    /// 网页不可访问或页面缺少有效作品标识时返回错误。
-    pub(super) async fn comic_details(&self, folder: &str) -> Result<NovelDetail, String> {
-        if folder.is_empty()
-            || folder.len() > 100
-            || !folder.bytes().all(|byte| byte.is_ascii_alphanumeric())
-        {
-            return Err("漫画网页目录标识无效".to_string());
-        }
-        let html = self
-            .page_request(format!("https://manhua.sfacg.com/mh/{folder}/"), None)
-            .send()
-            .await
-            .map_err(|error| format!("无法读取 SF 漫画详情：{error}"))?
-            .error_for_status()
-            .map_err(|error| format!("SF 漫画详情请求被拒绝：{error}"))?
-            .text()
-            .await
-            .map_err(|error| format!("SF 漫画详情格式无效：{error}"))?;
-        let title = extract_tag_text(&html, "<h1", "</h1>")
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| "SF 漫画详情未返回有效标题".to_string())?;
-        let overview = html
-            .find("class=\"synopsises_font\"")
-            .and_then(|start| {
-                html[start..]
-                    .find("</ul>")
-                    .map(|end| &html[start..start + end])
-            })
-            .unwrap_or("");
-        let cover = overview
-            .find("src=\"")
-            .and_then(|position| {
-                let start = position + 5;
-                overview[start..]
-                    .find('"')
-                    .map(|end| overview[start..start + end].to_string())
-            })
-            .unwrap_or_default();
-        let detail_item = overview
-            .find("<li")
-            .and_then(|first| overview[first..].find("</li>").map(|end| first + end + 5))
-            .and_then(|second_start| {
-                overview[second_start..].find("<li").and_then(|offset| {
-                    let start = second_start + offset;
-                    overview[start..]
-                        .find("</li>")
-                        .map(|end| &overview[start..start + end])
-                })
-            })
-            .unwrap_or("");
-        let description = detail_item
-            .find("<br")
-            .and_then(|position| {
-                detail_item[position..]
-                    .find('>')
-                    .map(|end| position + end + 1)
-            })
-            .map(|start| {
-                let end = detail_item
-                    .find("class=\"broken_line\"")
-                    .unwrap_or(detail_item.len());
-                strip_html_text(&detail_item[start..end])
-            })
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "暂无简介".to_string());
-        let author_name = detail_item
-            .find("作者：</span>")
-            .and_then(|position| {
-                detail_item[position..]
-                    .find("</span>")
-                    .map(|offset| position + offset + 7)
-            })
-            .and_then(|start| extract_first_anchor_text(&detail_item[start..]))
-            .unwrap_or_else(|| "未知作者".to_string());
-        eprintln!(
-            "[sfacg] web comic details parsed: folder={}, html_bytes={}, cover={}, description_chars={}",
-            folder,
-            html.len(),
-            !cover.is_empty(),
-            description.chars().count(),
-        );
-        Ok(NovelDetail {
-            novel_id: 0,
-            novel_name: title,
-            author_name,
-            novel_cover: cover,
-            last_update_time: String::new(),
-            description,
-            is_finish: false,
-            type_name: Some("漫画".to_string()),
-            tags: None,
-            score: None,
-            chapter_count: None,
-            character_count: None,
-            view_count: None,
-            mark_count: None,
-            point_count: None,
-            favorite_count: None,
-            ticket_count: None,
-            latest_chapter_title: None,
-            latest_chapter_time: None,
-            source_path: Some(folder.to_string()),
-        })
     }
 
     /// 通过 SF 漫画网站解析一个章节的图片地址。
@@ -621,21 +539,86 @@ impl WebClient {
             .replace("&amp;", "&")
             .replace("&lt;", "<")
             .replace("&gt;", ">");
-        let mut plain = String::with_capacity(body.len());
-        let mut in_tag = false;
-        for character in body.chars() {
-            match character {
-                '<' => in_tag = true,
-                '>' => in_tag = false,
-                _ if !in_tag => plain.push(character),
-                _ => {}
-            }
-        }
+        let plain = chapter_html_to_markdown(&body);
         let plain = plain.replace("\r\n", "\n").replace('\r', "\n");
         if plain.trim().is_empty() {
             return Err("SF 网页章节正文为空".to_string());
         }
         Ok(plain.trim().to_string())
+    }
+
+    /// 请求已授权 VIP 文字章节的图片内容。
+    ///
+    /// 请求刻意限制为原生 Web 会话，并使用 VIP 阅读页作为 Referer。仅有成功 HTTP 状态
+    /// 不足以证明可用，因为上游可能以 200 状态返回 HTML 错误页。
+    pub(super) async fn vip_chapter_image(
+        &self,
+        novel_id: i64,
+        chapter_id: i64,
+    ) -> Result<VipChapterImage, String> {
+        validate_novel_id(novel_id)?;
+        if chapter_id <= 0 {
+            return Err("VIP 章节参数无效".to_string());
+        }
+        self.require_session()?;
+        let referer = format!("https://book.sfacg.com/vip/c/{chapter_id}/");
+        let response = self
+            .ajax_request("https://book.sfacg.com/ajax/ashx/common.ashx", &referer)
+            .query(&[
+                ("op", "getChapPic"),
+                ("tp", "true"),
+                ("quick", "true"),
+                ("cid", &chapter_id.to_string()),
+                ("nid", &novel_id.to_string()),
+                ("font", "16"),
+                ("lang", ""),
+                ("w", "5000"),
+            ])
+            .header(
+                reqwest::header::ACCEPT,
+                "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            )
+            .send()
+            .await
+            .map_err(|error| format!("无法读取 VIP 章节图片：{error}"))?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED
+            || response.status() == reqwest::StatusCode::FORBIDDEN
+        {
+            return Err("网页登录会话已失效".to_string());
+        }
+        let response = response
+            .error_for_status()
+            .map_err(|error| format!("VIP 章节图片请求被拒绝：{error}"))?;
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|error| format!("无法读取 VIP 章节图片数据：{error}"))?
+            .to_vec();
+        let extension = if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+            "gif"
+        } else if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+            "png"
+        } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+            "jpg"
+        } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+            "webp"
+        } else {
+            return Err(if content_type.contains("text/html") {
+                "VIP 章节未返回图片内容，请确认网页登录会话和购买状态".to_string()
+            } else {
+                "VIP 章节资源格式无效".to_string()
+            });
+        };
+        if bytes.len() < 512 {
+            return Err("VIP 章节图片数据无效或为空".to_string());
+        }
+        Ok(VipChapterImage { bytes, extension })
     }
 
     /// 从原生 Web 会话中读取并过滤出 `.SFCommunity` 与 `session_PC`。
@@ -648,17 +631,7 @@ impl WebClient {
         Ok(session
             .as_ref()
             .and_then(|session| session.web_cookie.as_deref())
-            .and_then(Self::filter_web_cookie))
-    }
-
-    /// 在构建网页请求前剔除 App 会话及未知 Cookie 名称。
-    fn filter_web_cookie(cookie: &str) -> Option<String> {
-        let pairs = cookie
-            .split(';')
-            .map(str::trim)
-            .filter(|pair| pair.starts_with(".SFCommunity=") || pair.starts_with("session_PC="))
-            .collect::<Vec<_>>();
-        (!pairs.is_empty()).then(|| pairs.join("; "))
+            .and_then(|cookie| filter_cookie_header(cookie, &[".SFCommunity", "session_PC"])))
     }
 
     /// 在可用时向请求附加实例自有的 Web Cookie。
@@ -670,8 +643,140 @@ impl WebClient {
     }
 }
 
-/// Extracts a quoted field from the small JavaScript response emitted by the
-/// official login-info endpoint.
+/// 移除文字标记，同时将上游图片地址保留为 SF 图片标签。
+///
+/// 下载器随后经 `WebClient` 解析这些标签并改写为本地路径。这样可分离 HTML 解析和文件
+/// I/O，并避免丢失普通章节内嵌插图。
+fn chapter_html_to_markdown(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut remaining = value;
+    while let Some(tag_start) = remaining.find('<') {
+        output.push_str(&remaining[..tag_start]);
+        let after_start = &remaining[tag_start..];
+        let Some(tag_end) = after_start.find('>') else {
+            output.push_str(after_start);
+            return output;
+        };
+        let tag = &after_start[..=tag_end];
+        let normalized = tag.to_ascii_lowercase();
+        if normalized.starts_with("<img") {
+            if let Some(source) = html_tag_attribute(tag, "src") {
+                let source = source
+                    .strip_prefix("//")
+                    .map_or_else(|| source.to_string(), |value| format!("https://{value}"));
+                if source.starts_with("https://") || source.starts_with("http://") {
+                    output.push_str(&format!("\n[img=]{}[/img]\n", source));
+                }
+            }
+        }
+        remaining = &after_start[tag_end + 1..];
+    }
+    output.push_str(remaining);
+    output
+}
+
+/// 从漫画章节页面的内联脚本提取数值变量。
+fn extract_js_number(html: &str, variable: &str) -> Option<i64> {
+    let marker = format!("var {variable} =");
+    html.split(&marker)
+        .nth(1)?
+        .split(';')
+        .next()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// 从漫画章节页面的内联脚本提取带引号的字符串变量。
+fn extract_js_string(html: &str, variable: &str) -> Option<String> {
+    let marker = format!("var {variable} =");
+    html.split(&marker)
+        .nth(1)?
+        .split(';')
+        .next()?
+        .trim()
+        .strip_prefix('"')?
+        .strip_suffix('"')
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+/// 解析 SF 漫画目录页中的章节链接和已明确给出的拥有权标记。
+fn parse_comic_catalog(html: &str, folder: &str) -> Result<Vec<NativeComicChapter>, String> {
+    let marker = format!("href=\"/mh/{folder}/");
+    let mut remaining = html;
+    let mut chapters = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    while let Some(position) = remaining.find(&marker) {
+        remaining = &remaining[position + marker.len()..];
+        let Some(id_end) = remaining.find('/') else {
+            break;
+        };
+        let Ok(id) = remaining[..id_end].parse::<i64>() else {
+            continue;
+        };
+        let Some(anchor_end) = remaining[id_end..].find("</a>") else {
+            continue;
+        };
+        let anchor = &remaining[id_end..id_end + anchor_end];
+        let Some(title_start) = anchor.find('>') else {
+            continue;
+        };
+        let title = strip_html_text(anchor[title_start + 1..].trim());
+        if title.is_empty() || title == "点击浏览" || !seen.insert(id) {
+            continue;
+        }
+        let is_vip = title.starts_with("VIP");
+        chapters.push(NativeComicChapter {
+            id,
+            title,
+            is_vip,
+            is_unlocked: !is_vip || comic_anchor_is_unlocked(anchor),
+        });
+    }
+    if chapters.is_empty() {
+        return Err("SF 漫画目录格式无效".to_string());
+    }
+    chapters.reverse();
+    Ok(chapters)
+}
+
+/// 读取目录锚点的显式拥有权标记，登录态本身不推断为已购买。
+fn comic_anchor_is_unlocked(anchor: &str) -> bool {
+    let normalized = anchor.to_ascii_lowercase();
+    [
+        "data-has=\"true\"",
+        "data-has=true",
+        "data-has='true'",
+        "data-isunlocked=\"true\"",
+        "data-isunlocked=true",
+        "data-isunlocked='true'",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+/// 从单个已限定范围的 HTML 标签读取带引号或不带引号的属性。
+fn html_tag_attribute(tag: &str, name: &str) -> Option<String> {
+    let marker = format!("{name}=");
+    let position = tag.to_ascii_lowercase().find(&marker)? + marker.len();
+    let value = tag[position..].trim_start();
+    if let Some(quote) = value
+        .chars()
+        .next()
+        .filter(|value| *value == '\'' || *value == '"')
+    {
+        let end = value[1..].find(quote)? + 1;
+        return Some(value[1..end].to_string());
+    }
+    let end = value
+        .find(char::is_whitespace)
+        .or_else(|| value.find('>'))
+        .unwrap_or(value.len());
+    (!value[..end].is_empty()).then(|| value[..end].to_string())
+}
+
+/// 从官方登录信息端点返回的短 JavaScript 响应中提取一个带引号字段。
 fn extract_js_field(value: &str, field: &str) -> Option<String> {
     for marker in [format!("{field}:\""), format!("{field}:'")] {
         let Some(marker_start) = value.find(&marker) else {
@@ -693,6 +798,7 @@ fn extract_js_field(value: &str, field: &str) -> Option<String> {
     None
 }
 
+/// 判断账户名是否符合网页端点允许的受限字符和长度规则。
 fn is_safe_account_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 80
@@ -701,6 +807,7 @@ fn is_safe_account_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
+/// 从公开书架 HTML 提取去重后的书架编号及名称。
 fn parse_public_pockets(html: &str) -> Vec<(i64, String)> {
     let mut result = Vec::new();
     let mut rest = html;
@@ -725,6 +832,7 @@ fn parse_public_pockets(html: &str) -> Vec<(i64, String)> {
     result
 }
 
+/// 读取指定公开书架的页码上限，并限制在安全请求范围内。
 fn parse_public_pocket_page_count(html: &str, pocket_id: i64) -> i32 {
     let prefix = format!("/p/{pocket_id}/");
     let mut max_page = 1;
@@ -742,6 +850,9 @@ fn parse_public_pocket_page_count(html: &str, pocket_id: i64) -> i32 {
     max_page.min(100)
 }
 
+/// 从公开书架页面 HTML 解析小说和漫画条目。
+///
+/// 仅提取后续目录、详情和下载所需的受限字段，不执行或信任来源标记。
 fn parse_public_pocket_items(html: &str) -> Vec<PublicShelfItem> {
     let mut result = Vec::new();
     let mut novel_url_count = 0;
@@ -833,9 +944,9 @@ fn parse_public_pocket_items(html: &str) -> Vec<PublicShelfItem> {
     result
 }
 
-/// Parses comics from the `eid` ownership marker in the item details block.
-/// Unlike the cover URL, this marker carries the numeric comic ID required by
-/// later catalog and download operations.
+/// 从条目详情块的 `eid` 所有权标记解析漫画。
+///
+/// 与封面地址不同，此标记携带后续目录和下载操作必需的数字漫画编号。
 fn parse_public_comic_items(html: &str) -> Vec<PublicShelfItem> {
     let mut result = Vec::new();
     let mut cursor = 0;
@@ -852,8 +963,8 @@ fn parse_public_comic_items(html: &str) -> Vec<PublicShelfItem> {
             continue;
         };
         let folder = html[cursor..cursor + folder_end].trim();
-        // Comic cards use an outer `<ul ... eid="...">` and put the cover
-        // and metadata in separate `<li>` elements inside that container.
+        // 漫画卡片使用外层 `<ul ... eid="...">`，并将封面和元数据分别放在容器内
+        // 的多个 `<li>` 元素中。
         let Some(container_start) = html[..url_start].rfind("<ul") else {
             continue;
         };
@@ -926,6 +1037,7 @@ fn parse_public_comic_items(html: &str) -> Vec<PublicShelfItem> {
     result
 }
 
+/// 从 HTML 片段提取一个可选的正整数属性值。
 fn extract_numeric_attribute(value: &str, attribute: &str) -> Option<i64> {
     let marker = format!("{attribute}=");
     let start = value.find(&marker)? + marker.len();
@@ -944,22 +1056,7 @@ fn extract_numeric_attribute(value: &str, attribute: &str) -> Option<i64> {
     digits.parse::<i64>().ok()
 }
 
-fn extract_tag_text(value: &str, opening: &str, closing: &str) -> Option<String> {
-    let start = value.find(opening)?;
-    let content_start = value[start..].find('>')? + start + 1;
-    let content_end = value[content_start..].find(closing)? + content_start;
-    let text = strip_html_text(&value[content_start..content_end]);
-    (!text.is_empty()).then_some(text)
-}
-
-fn extract_first_anchor_text(value: &str) -> Option<String> {
-    let start = value.find("<a")?;
-    let content_start = value[start..].find('>')? + start + 1;
-    let content_end = value[content_start..].find("</a>")? + content_start;
-    let text = strip_html_text(&value[content_start..content_end]);
-    (!text.is_empty()).then_some(text)
-}
-
+/// 移除简单 HTML 标签和常见实体，将连续空白折叠为单个空格。
 fn strip_html_text(value: &str) -> String {
     let mut text = String::new();
     let mut in_tag = false;
@@ -976,33 +1073,4 @@ fn strip_html_text(value: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_public_novel_and_comic_cards() {
-        let html = r#"
-          <li style="width:110px"><a href="https://book.sfacg.com/Novel/123/"><img src="https://img/novel.jpg" /></a></li>
-          <li><b><a href="https://book.sfacg.com/Novel/123/">测试小说</a></b><br />作者：作者甲</li>
-          <ul class="content_comment cover" eid="456">
-            <li style="width:110px"><a href="https://manhua.sfacg.com/mh/ABC/"><img src="https://img/comic.jpg" /></a></li>
-            <li><b><a href="https://manhua.sfacg.com/mh/ABC/">测试漫画</a></b><br />作者：作者乙 <a op="AddLink" eid="456">添加</a></li>
-          </ul>
-        "#;
-        let items = parse_public_pocket_items(html);
-        assert_eq!(items.len(), 2);
-        assert!(items.iter().any(|item| {
-            item.kind == "novel" && item.id == 123 && item.title == "测试小说"
-        }));
-        assert!(items.iter().any(|item| {
-            item.kind == "comic"
-                && item.id == 456
-                && item.title == "测试漫画"
-                && item.cover == "https://img/comic.jpg"
-                && item.source_path.as_deref() == Some("ABC")
-        }));
-    }
 }

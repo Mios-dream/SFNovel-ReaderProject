@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
+    "ocr:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ocr-worker.ps1",
+    "tauri:build": "npm run ocr:build && tauri build",
     "tauri:android": "tauri android dev"
   },
   "dependencies": {

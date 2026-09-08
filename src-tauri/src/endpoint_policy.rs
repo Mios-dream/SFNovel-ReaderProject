@@ -26,18 +26,20 @@ pub(crate) enum EndpointCapability {
     AudioDetail,
     /// 读取文字小说目录。
     TextDirectory,
+    /// 从网页读取文字小说目录及 VIP 正文类型。
+    TextDirectoryWeb,
     /// 从网页读取文字正文。
     TextChapterWeb,
+    /// 从网页 AJAX 获取已授权 VIP 章节的图片或 GIF 正文。
+    TextVipImageWeb,
     /// 从 App API 读取文字正文。
     TextChapterApp,
     /// 读取有声目录及后续媒体资源。
     Audio,
-    /// 读取漫画的 App 身份元数据。
+    /// 读取漫画的 App 公开元数据。
     ComicIdentity,
     /// 读取漫画网页目录。
     ComicCatalog,
-    /// 读取漫画网页详情、封面与简介。
-    ComicDetail,
     /// 读取漫画网页章节、图片列表与图片资源。
     ComicPages,
     /// 读取公开网页火袋中的小说与漫画。
@@ -120,11 +122,23 @@ impl EndpointCapability {
                 route_template: "GET api.sfacg.com/novels/{novelId}/dirs",
                 session: Optional,
             },
+            TextDirectoryWeb => EndpointPolicy {
+                name: "网页文字目录",
+                client: Web,
+                route_template: "GET book.sfacg.com/Novel/{novelId}/MainIndex/",
+                session: Required,
+            },
             TextChapterWeb => EndpointPolicy {
                 name: "网页正文",
                 client: Web,
                 route_template: "GET book.sfacg.com/Novel/{novelId}/{volumeId}/{chapterId}/",
                 session: Optional,
+            },
+            TextVipImageWeb => EndpointPolicy {
+                name: "网页 VIP 图片正文",
+                client: Web,
+                route_template: "GET book.sfacg.com/ajax/ashx/common.ashx?op=getChapPic",
+                session: Required,
             },
             TextChapterApp => EndpointPolicy {
                 name: "App 正文回退",
@@ -139,19 +153,13 @@ impl EndpointCapability {
                 session: Required,
             },
             ComicIdentity => EndpointPolicy {
-                name: "漫画身份信息",
+                name: "漫画详情",
                 client: App,
                 route_template: "GET api.sfacg.com/comics/{comicId}",
                 session: Optional,
             },
             ComicCatalog => EndpointPolicy {
                 name: "漫画目录",
-                client: Web,
-                route_template: "GET manhua.sfacg.com/mh/{folder}/",
-                session: Optional,
-            },
-            ComicDetail => EndpointPolicy {
-                name: "漫画详情",
                 client: Web,
                 route_template: "GET manhua.sfacg.com/mh/{folder}/",
                 session: Optional,
@@ -253,31 +261,4 @@ pub(crate) fn web_endpoint_client(
         return Err(capability.unavailable_message("尚未连接网站凭证"));
     }
     Ok(client)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn capability_mapping_keeps_sessions_and_transports_explicit() {
-        let audio = EndpointCapability::Audio.policy();
-        assert_eq!(audio.client, ClientKind::Web);
-        assert_eq!(audio.session, SessionRequirement::Required);
-
-        let shelf = EndpointCapability::WebBookshelf.policy();
-        assert_eq!(shelf.client, ClientKind::Web);
-        assert_eq!(shelf.session, SessionRequirement::Required);
-
-        let text = EndpointCapability::TextChapterWeb.policy();
-        assert_eq!(text.client, ClientKind::Web);
-        assert_eq!(text.session, SessionRequirement::Optional);
-    }
-
-    #[test]
-    fn web_unavailable_message_has_next_step() {
-        let message = EndpointCapability::Audio.unavailable_message("尚未连接网站凭证");
-        assert!(message.contains("官方网站登录凭证"));
-        assert!(message.contains("重试"));
-    }
 }

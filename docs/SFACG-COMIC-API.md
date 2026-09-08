@@ -1,6 +1,6 @@
 # SFACG 漫画接口验证
 
-验证日期：2026-09-04。SF 未提供与小说 `GET /novels/{id}/dirs` 对等的漫画目录 App API；漫画下载使用已验证的 App 详情接口和漫画站公开目录/图片接口组合实现。
+验证日期：2026-09-04。漫画详情使用匿名 App API；SF 未提供与小说 `GET /novels/{id}/dirs` 对等的漫画目录 App API，因此目录和图片仍使用漫画站公开接口。
 
 ## 验证样本
 
@@ -15,7 +15,7 @@
 ## 已接入接口
 
 1. `GET https://api.sfacg.com/search/novels/result/new?q=...`：搜索响应同时含 `novels`、`albums`、`comics`。
-2. `GET https://api.sfacg.com/comics/{comicId}`：返回 `comicName`、`folderName` 等漫画身份信息。样本 `2937` 返回 `folderName: XJYQS`。
+2. `GET https://api.sfacg.com/comics/{comicId}`：返回漫画详情及 `folderName` 网页目录映射。样本 `2937` 返回 `folderName: XJYQS`。
 3. `GET https://manhua.sfacg.com/mh/{folderName}/`：返回漫画章节链接，例如 `/mh/XJYQS/81461/`。
 4. `GET https://manhua.sfacg.com/ajax/Common.ashx?op=getPics&cid={comicId}&chapId={chapterId}&serial={fn}&path={nv}`：从章节页内的 `c`、`chapId`、`fn`、`nv` 取得参数后，返回该章节的 HTTPS 图片列表。样本“序章”章节 `81461` 返回 37 张图片。
 

@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 src-tauri/target
+src-tauri/ocr-worker/ocr_worker.exe
+src-tauri/ocr-worker/build
+src-tauri/ocr-worker/*.spec
+src-tauri/ocr-worker/.venv
 src-tauri/gen/android/keystore.properties
 src-tauri/gen/android/*.jks
 src-tauri/gen/android/*.keystore
@@ -25,3 +29,6 @@ src-tauri/gen/android/*.keystore
 *.njsproj
 *.sln
 *.sw?
+*.pyc
+__pycache__
+uv.lock

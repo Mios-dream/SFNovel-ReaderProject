@@ -103,12 +103,9 @@ export function useNovelDesk() {
     }
     try {
       const details = novel.bookshelfType === "comic"
-        ? novel.sourcePath
-          ? await invoke<Partial<Novel>>("get_comic_details", {
-              comicId: novel.novelId,
-              sourcePath: novel.sourcePath,
-            })
-          : undefined
+        ? await invoke<Partial<Novel>>("get_comic_details", {
+            comicId: novel.novelId,
+          })
         : novel.bookshelfType === "audio"
           ? novel.mediaId
             ? await invoke<Partial<Novel>>("get_audio_details", {

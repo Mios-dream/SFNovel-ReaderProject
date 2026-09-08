@@ -82,7 +82,6 @@
                 :key="chapter.chapId"
                 :class="{
                   downloaded: chapter.downloaded,
-                  locked: chapter.isVip && !chapter.isUnlocked,
                 }"
                 ><input
                   :checked="selectedIds.includes(chapter.chapId)"
@@ -103,14 +102,9 @@
                 ><span
                   v-else-if="chapter.isVip"
                   class="chapter-state vip"
-                  :class="{ unlocked: chapter.isUnlocked }"
-                  ><LockKeyholeOpen
-                    v-if="chapter.isUnlocked"
-                    :size="15"
-                  /><LockKeyhole v-else :size="15" />{{
-                    chapter.isUnlocked
-                      ? "已解锁"
-                      : `VIP ${chapter.needFireMoney} 火券`
+                  ><Image v-if="chapter.contentKind === 'imageVip'" :size="15" />
+                  <LockKeyhole v-else :size="15" />{{
+                    textContentLabel(chapter.contentKind)
                   }}</span
                 ></label
               >
@@ -227,6 +221,8 @@ type SelectableChapter = (TextChapter | Chapter) & {
   downloaded?: boolean;
   isVip?: boolean;
   isUnlocked?: boolean;
+  contentKind?: TextChapter["contentKind"];
+  accessState?: TextChapter["accessState"];
 };
 
 // 文本、有声和漫画章节统一转换为可选择结构，模板无需区分目录来源。
@@ -236,7 +232,17 @@ type SelectableChapter = (TextChapter | Chapter) & {
  * @returns 未下载且已解锁（或免费）时返回 true。
  */
 function canDownload(chapter: SelectableChapter) {
-  return !chapter.downloaded && (!chapter.isVip || chapter.isUnlocked);
+  if (chapter.downloaded) return false;
+  // `contentKind` identifies a website text entry. Its `unknown` access state
+  // is intentional: a catalogue cannot determine whether the account owns it.
+  if (chapter.contentKind) return chapter.accessState !== "unavailable";
+  return !chapter.isVip || chapter.isUnlocked;
+}
+
+function textContentLabel(kind: TextChapter["contentKind"]) {
+  if (kind === "imageVip") return "图片 OCR";
+  if (kind === "encryptedVip") return "加密 OCR";
+  return "VIP 状态待验证";
 }
 
 const allChapters = computed<SelectableChapter[]>(() =>

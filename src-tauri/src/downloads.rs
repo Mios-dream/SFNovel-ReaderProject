@@ -6,13 +6,14 @@
 use crate::app_client::AppClient;
 use crate::endpoint_policy::{app_endpoint_client, web_endpoint_client, EndpointCapability};
 use crate::library::{
-    decode_api_content, ensure_external_storage_access, get_request_policy, library_directory,
-    persist_native_jobs, read_json_or_default, safe_library_name, StoredBookMetadata,
-    StoredChapter, StoredChapterStore, StoredWorkMetadata,
+    ensure_external_storage_access, get_request_policy, library_directory, persist_native_jobs,
+    safe_library_name, StoredBookMetadata, StoredChapter, StoredChapterStore, StoredWorkMetadata,
 };
+use crate::ocr::{recognize_image, relative_book_path};
 #[cfg(target_os = "android")]
 use crate::sfacg::sync_android_auth_session;
-use crate::sfacg::{validate_novel_id, NativeJob, NativeJobSpec, NativeJobState};
+use crate::sfacg::{validate_novel_id, NativeJob, NativeJobSpec, NativeJobState, TextContentKind};
+use crate::utils::json::{read_or_default, write_atomically};
 use crate::web_client::WebClient;
 use serde_json::Value;
 use std::fs;
@@ -20,12 +21,12 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
 
-/// Updates one native task while keeping all renderer-facing state in Rust memory.
+/// 更新一个原生任务，并将面向渲染进程的状态保留在 Rust 内存中。
 ///
-/// # Arguments
-/// * `state` - Shared native task registry.
-/// * `job_id` - Identifier of the task to update.
-/// * `update` - Mutation applied while the registry lock is held.
+/// # 参数
+/// * `state` - 共享原生任务注册表。
+/// * `job_id` - 待更新任务的标识符。
+/// * `update` - 持有注册表锁时应用的状态修改。
 fn update_native_job<F>(state: &NativeJobState, job_id: &str, update: F)
 where
     F: FnOnce(&mut NativeJob),
@@ -37,15 +38,15 @@ where
     }
 }
 
-/// Emits one renderer-safe download task update to subscribed application windows.
+/// 向已订阅应用窗口发送一条渲染进程安全的下载任务更新。
 ///
-/// # Arguments
-/// * `app` - Application handle used to publish the internal event.
-/// * `state` - Shared native task registry.
-/// * `job_id` - Identifier of the task whose latest state should be emitted.
+/// # 参数
+/// * `app` - 用于发布内部事件的应用句柄。
+/// * `state` - 共享原生任务注册表。
+/// * `job_id` - 要发送最新状态的任务标识符。
 ///
-/// # Side Effects
-/// Emits `download-progress` without exposing cookies, local paths, or task specs.
+/// # 副作用
+/// 发送 `download-progress`，但不暴露 Cookie、本地路径或任务规格。
 fn emit_native_job_update(app: &tauri::AppHandle, state: &NativeJobState, job_id: &str) {
     let job = state
         .jobs
@@ -57,11 +58,29 @@ fn emit_native_job_update(app: &tauri::AppHandle, state: &NativeJobState, job_id
     }
 }
 
-/// Downloads chapter images and rewrites SF image tags to local Markdown paths.
+/// 取得一部小说的文字下载存储锁。
 ///
-/// Only newly fetched chapters use this normalization. Existing chapter stores
-/// are deliberately left untouched; re-downloading a chapter recreates its
-///正文 and image files together.
+/// 同一本小说可能被用户重复加入队列，或在一个未退出的旧任务仍运行时继续下载。章节
+/// 索引是整份 JSON 快照，因而必须覆盖从读取到提交的整个下载过程，不能只锁单次文件
+/// 写入；否则两个任务都会基于旧快照写回，后完成的任务会抹去前一个任务的新章节。
+///
+/// # 错误
+/// 任务状态锁不可用时返回错误。
+fn text_storage_lock(
+    state: &NativeJobState,
+    novel_id: i64,
+) -> Result<Arc<tokio::sync::Mutex<()>>, String> {
+    let mut locks = state
+        .text_storage_locks
+        .lock()
+        .map_err(|_| "下载任务状态不可用".to_string())?;
+    Ok(locks
+        .entry(novel_id)
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone())
+}
+
+/// 下载章节插图，并将 HTML 图片标签改写为本地 Markdown 路径。
 async fn materialize_chapter_images(
     client: &WebClient,
     directory: &std::path::Path,
@@ -150,46 +169,60 @@ async fn materialize_chapter_images(
     Ok(output)
 }
 
-/// 按正文能力策略读取章节内容。
-///
-/// 先请求官方网站正文，失败后按设置决定是否尝试 App API。网页与 App 的请求细节
-/// 仍分别封装在各自客户端中；返回的失败原因只用于任务状态提示，不含认证材料。
-///
-/// # 返回值
-/// 返回正文和可选的网页失败原因；存在失败原因表示本次成功使用了 App 回退。
+/// 从网站读取普通章节正文。
 async fn resolve_text_content(
-    app: &tauri::AppHandle,
     web_client: &WebClient,
     novel_id: i64,
     volume_id: i64,
     chapter_id: i64,
-    app_fallback_enabled: bool,
-) -> Result<(String, Option<String>), String> {
-    match web_client
+) -> Result<String, String> {
+    web_client
         .chapter_content(novel_id, volume_id, chapter_id)
         .await
-    {
-        Ok(content) => Ok((content, None)),
-        Err(web_error) if app_fallback_enabled => {
-            let api_client = app_endpoint_client(app, EndpointCapability::TextChapterApp)?;
-            let api = api_client
-                .chapter_content_with_metadata_from_api(chapter_id)
-                .await?;
-            Ok((decode_api_content(app, &api.content)?, Some(web_error)))
-        }
-        Err(web_error) => Err(EndpointCapability::TextChapterWeb.unavailable_message(&web_error)),
-    }
+        .map_err(|error| EndpointCapability::TextChapterWeb.unavailable_message(&error))
 }
 
-/// Runs a text download task using the native SF web parser and atomic local stores.
+/// 下载 VIP 章节正文图片，保留原图并调用本地 OCR。
+async fn resolve_vip_image_content(
+    app: &tauri::AppHandle,
+    web_client: &WebClient,
+    directory: &std::path::Path,
+    novel_id: i64,
+    chapter_id: i64,
+) -> Result<(String, String), String> {
+    // 来源请求必须登记为独立的仅网页能力。第二个客户端仅用于强制校验会话边界；传入
+    // 的客户端拥有实际请求及其 Cookie 快照。
+    let _ = web_endpoint_client(app, EndpointCapability::TextVipImageWeb)?;
+    let image = web_client.vip_chapter_image(novel_id, chapter_id).await?;
+    let ocr_directory = directory.join("ocr");
+    fs::create_dir_all(&ocr_directory).map_err(|error| format!("无法创建 OCR 目录：{error}"))?;
+    let source = ocr_directory.join(format!("chapter-{chapter_id}.{}", image.extension));
+    let source_partial = source.with_extension(format!("{}.part", image.extension));
+    fs::write(&source_partial, image.bytes)
+        .map_err(|error| format!("无法保存 VIP 章节原图：{error}"))?;
+    if source.exists() {
+        fs::remove_file(&source).map_err(|error| format!("无法替换 VIP 章节原图：{error}"))?;
+    }
+    fs::rename(&source_partial, &source)
+        .map_err(|error| format!("无法完成 VIP 章节原图写入：{error}"))?;
+
+    let segments = ocr_directory
+        .join("segments")
+        .join(format!("chapter-{chapter_id}"));
+    let recognized = recognize_image(app, source.clone(), segments).await?;
+    let source_relative = relative_book_path(&source, directory)?;
+    Ok((recognized, source_relative))
+}
+
+/// 运行一个文字小说下载任务，并将远程章节持久化为本地可读的章节存储。
 ///
-/// # Arguments
-/// * `app` - Tauri handle used for private storage and shared task state.
-/// * `job_id` - Native task identifier.
-/// * `novel_id` - SF novel identifier.
-/// * `title` - User-visible work title.
-/// * `chapter_ids` - Optional selected chapter IDs; `None` means all available chapters.
-/// * `cancelled` - Cooperative cancellation flag controlled by pause/delete commands.
+/// # 参数
+/// * `app` - 用于私有存储和共享任务状态的 Tauri 应用句柄。
+/// * `job_id` - 原生任务标识符。
+/// * `novel_id` - SF 小说编号。
+/// * `title` - 面向用户展示的作品标题。
+/// * `chapter_ids` - 可选的选中章节编号；`None` 表示全部可用章节。
+/// * `cancelled` - 由暂停、删除命令控制的协作式取消标记。
 async fn run_text_download(
     app: tauri::AppHandle,
     job_id: String,
@@ -199,130 +232,171 @@ async fn run_text_download(
     cancelled: Arc<std::sync::atomic::AtomicBool>,
 ) {
     let state = app.state::<NativeJobState>();
+    let storage_lock = text_storage_lock(&state, novel_id);
     let result: Result<String, String> = async {
+        // 同一本书的任务共用章节索引。锁覆盖读取、OCR 和写入，避免并发任务的完整
+        // 快照互相覆盖；不同作品仍可并行下载。
+        let storage_lock = storage_lock?;
+        let _storage_guard = storage_lock.lock().await;
+        // AppClient 在此仅负责目录和可选元数据；WebClient 才是所有章节正文、VIP 图片与
+        // 正文内插图资源的唯一请求入口。分别按能力构造可防止 App/Web Cookie 混用。
         let app_client = app_endpoint_client(&app, EndpointCapability::TextDirectory)?;
         let web_client = web_endpoint_client(&app, EndpointCapability::TextChapterWeb)?;
+        // 读取下载限速策略，避免过快请求被 SFACG 服务器拒绝。若未配置则使用默认值。
         let policy = get_request_policy(app.clone()).unwrap_or_default();
         let directory = library_directory(&app)?.join(safe_library_name(&title));
         fs::create_dir_all(&directory).map_err(|error| format!("无法创建本地书籍目录：{error}"))?;
+
+        // 元数据更新负责初始化默认值、刷新公开详情并尝试保存封面。远程详情或封面失败不
+        // 阻断正文下载，避免非正文资源的短暂异常使已选章节无法保存。
         let mut metadata =
-            read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?;
-        let novel_metadata = metadata.novel.get_or_insert_with(Default::default);
-        novel_metadata.id = Some(novel_id);
-        novel_metadata.title = Some(title.clone());
-        novel_metadata
-            .author
-            .get_or_insert_with(|| "未知作者".to_string());
-        novel_metadata
-            .description
-            .get_or_insert_with(|| "暂无简介".to_string());
-        let _ = enrich_local_book(
+            read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?;
+        let _ = update_local_novel_metadata(
             &app_client,
             &web_client,
             &directory,
-            novel_metadata,
+            &mut metadata,
             novel_id,
+            &title,
         )
         .await;
-        let mut store = read_json_or_default::<StoredChapterStore>(
+
+        // 章节索引是逐章检查点：下载中断后可从已写入的章节继续，而不必重新请求全部正文。
+        let mut store = read_or_default::<StoredChapterStore>(
             &directory.join(".novel-flow-chapters.json"),
+            "本地数据",
         )?;
         store.novel_id = novel_id;
-        let directory_data = app_client
-            .get_public_data(&format!("/novels/{novel_id}/dirs"), &[])
-            .await?;
+        // 目录来自 App API，仅提供章节 ID、分卷、标题与内容类型；它不提供或解析正文。
+        let directory_data = app_client.get_chapter_catalog(novel_id).await?;
         let requested =
             chapter_ids.map(|ids| ids.into_iter().collect::<std::collections::HashSet<_>>());
         let mut chapters = Vec::new();
-        for (volume_index, volume) in directory_data
-            .get("volumeList")
-            .and_then(Value::as_array)
-            .ok_or_else(|| "SF 未返回章节目录".to_string())?
-            .iter()
-            .enumerate()
-        {
-            let volume_id = volume.get("volumeId").and_then(Value::as_i64).unwrap_or(0);
-            let volume_title = volume
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or("未命名分卷");
-            let Some(volume_chapters) = volume.get("chapterList").and_then(Value::as_array) else {
-                continue;
-            };
-            for (chapter_index, chapter) in volume_chapters.iter().enumerate() {
-                let Some(chapter_id) = chapter.get("chapId").and_then(Value::as_i64) else {
-                    continue;
-                };
+        // 目录按分卷、章节顺序排列，`volume_index` 和 `chapter_index` 用于在本地索引中保留原始顺序。
+        for (volume_index, volume) in directory_data.iter().enumerate() {
+            for (chapter_index, chapter) in volume.chapters.iter().enumerate() {
+                let chapter_id = chapter.chap_id;
                 if requested
                     .as_ref()
                     .is_some_and(|ids| !ids.contains(&chapter_id))
                 {
                     continue;
                 }
-                if chapter
-                    .get("isVip")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                    && !chapter.get("has").and_then(Value::as_bool).unwrap_or(false)
-                    && !app_client.has_session()
-                {
-                    continue;
-                }
                 chapters.push((
                     chapter_id,
-                    volume_id,
-                    volume_title.to_string(),
+                    volume.volume_id,
+                    volume.title.clone(),
                     volume_index as i64,
                     chapter_index,
-                    chapter,
+                    chapter.title.clone(),
+                    chapter.content_kind.clone(),
                 ));
             }
         }
         if chapters.is_empty() {
             return Err("没有可下载的章节".to_string());
         }
+        // 先建立索引检查点。即使本次全部是 VIP 且资源/OCR 失败，也会留下带小说编号的
+        // 空索引，避免失败被误判为下载流程完全没有运行。
+        write_atomically(
+            &directory.join(".novel-flow-chapters.json"),
+            &store,
+            "章节索引",
+        )?;
         let total = chapters.len();
-        for (index, (chapter_id, volume_id, volume, volume_index, chapter_index, chapter)) in
-            chapters.into_iter().enumerate()
+        let mut failed_vip_chapters = Vec::new();
+        // 按章节顺序下载，VIP 章节可能会被跳过但仍计入总数。
+        for (
+            index,
+            (
+                chapter_id,
+                volume_id,
+                volume,
+                volume_index,
+                chapter_index,
+                chapter_title,
+                content_kind,
+            ),
+        ) in chapters.into_iter().enumerate()
         {
             if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("下载已暂停".to_string());
             }
-            let chapter_title = chapter
-                .get("ntitle")
-                .and_then(Value::as_str)
-                .unwrap_or("未命名章节")
-                .to_string();
             update_native_job(&state, &job_id, |job| {
                 job.status = "downloading".to_string();
                 job.progress = ((index * 96) / total) as u8;
                 job.message = format!("正在读取：{chapter_title}");
             });
             emit_native_job_update(&app, &state, &job_id);
-            if !store.chapters.contains_key(&chapter_id.to_string()) {
-                let (raw_content, web_fallback_reason) = resolve_text_content(
-                    &app,
-                    &web_client,
-                    novel_id,
-                    volume_id,
-                    chapter_id,
-                    policy.app_fallback_enabled,
-                )
-                .await?;
-                if let Some(web_error) = web_fallback_reason {
-                    update_native_job(&state, &job_id, |job| {
-                        job.message = format!("网页正文不可用，切换 App API：{web_error}");
+
+            // 普通章节只要已存在即可复用。VIP 内容必须确认是成功 OCR 得到的非空文本，才
+            // 能跳过再次请求图片和识别，防止旧格式或失败残留被标记为已完成。
+            let existing_vip_is_complete =
+                store
+                    .chapters
+                    .get(&chapter_id.to_string())
+                    .is_some_and(|chapter| {
+                        matches!(
+                            content_kind,
+                            TextContentKind::ImageVip | TextContentKind::EncryptedVip
+                        ) && chapter.content_source.as_deref() == Some("webVipOcr")
+                            && !chapter.content.trim().is_empty()
                     });
-                    emit_native_job_update(&app, &state, &job_id);
-                }
-                let content = materialize_chapter_images(
-                    &web_client,
-                    &directory,
-                    novel_id,
-                    chapter_id,
-                    &raw_content,
-                )
-                .await?;
+            let should_write = !store.chapters.contains_key(&chapter_id.to_string())
+                || (matches!(
+                    content_kind,
+                    TextContentKind::ImageVip | TextContentKind::EncryptedVip
+                ) && !existing_vip_is_complete);
+            if should_write {
+                let (content, content_source, ocr_source_path) = match content_kind {
+                    TextContentKind::ImageVip | TextContentKind::EncryptedVip => {
+                        // 网页 VIP 分支：不解析 #ChapterBody。这里从 Web VIP 图片端点读取
+                        // 二进制图片，`resolve_vip_image_content` 将原图保存到 ocr/ 后调用
+                        // 本地 OCR，并返回与普通网页解析相同的纯文本章节内容。
+                        update_native_job(&state, &job_id, |job| {
+                            job.message = format!("正在保存并识别图片正文：{chapter_title}");
+                        });
+                        emit_native_job_update(&app, &state, &job_id);
+                        let vip_result = resolve_vip_image_content(
+                            &app,
+                            &web_client,
+                            &directory,
+                            novel_id,
+                            chapter_id,
+                        )
+                        .await;
+                        let (content, source_path) = match vip_result {
+                            Ok(value) => value,
+                            Err(error) => {
+                                failed_vip_chapters.push((chapter_title.clone(), error.clone()));
+                                update_native_job(&state, &job_id, |job| {
+                                    job.message = format!(
+                                        "VIP 章节处理失败，已跳过：{chapter_title}（{error}）"
+                                    );
+                                });
+                                emit_native_job_update(&app, &state, &job_id);
+                                continue;
+                            }
+                        };
+                        (content, Some("webVipOcr".to_string()), Some(source_path))
+                    }
+                    TextContentKind::Text | TextContentKind::Unknown => {
+                        // 普通网页解析分支：从章节页面 #ChapterBody 提取正文并转换为文本
+                        // / Markdown。若正文含 [img=] 标记，只下载并本地化插图，不做 OCR。
+                        let raw_content =
+                            resolve_text_content(&web_client, novel_id, volume_id, chapter_id)
+                                .await?;
+                        let content = materialize_chapter_images(
+                            &web_client,
+                            &directory,
+                            novel_id,
+                            chapter_id,
+                            &raw_content,
+                        )
+                        .await?;
+                        (content, Some("web".to_string()), None)
+                    }
+                };
                 store.chapters.insert(
                     chapter_id.to_string(),
                     StoredChapter {
@@ -332,24 +406,23 @@ async fn run_text_download(
                         content,
                         volume_index,
                         chapter_index: chapter_index as i64,
+                        content_source,
+                        ocr_source_path,
                     },
                 );
-                let payload = serde_json::to_vec_pretty(&store)
-                    .map_err(|error| format!("无法序列化章节：{error}"))?;
-                fs::write(directory.join(".novel-flow-chapters.json.tmp"), payload)
-                    .map_err(|error| format!("无法写入章节：{error}"))?;
-                if directory.join(".novel-flow-chapters.json").exists() {
-                    fs::remove_file(directory.join(".novel-flow-chapters.json"))
-                        .map_err(|error| format!("无法替换章节：{error}"))?;
-                }
-                fs::rename(
-                    directory.join(".novel-flow-chapters.json.tmp"),
-                    directory.join(".novel-flow-chapters.json"),
-                )
-                .map_err(|error| format!("无法完成章节写入：{error}"))?;
+                // 每一章成功后立刻提交检查点。存储锁已防止同一本书的任务覆盖彼此的
+                // 快照，原子写入则避免中断时留下截断 JSON。
+                write_atomically(
+                    &directory.join(".novel-flow-chapters.json"),
+                    &store,
+                    "章节索引",
+                )?;
             }
+            // 限速发生在每个章节处理完成后；取消标记在下一个章节开始前读取。
             tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
         }
+
+        // 仅在遍历完成后更新书籍级完成记录，使 UI 可依据实际持久化的章节索引显示状态。
         metadata.downloaded_text_chapter_ids = Some(
             store
                 .chapters
@@ -357,23 +430,30 @@ async fn run_text_download(
                 .filter_map(|id| id.parse().ok())
                 .collect(),
         );
-        let payload = serde_json::to_vec_pretty(&metadata)
-            .map_err(|error| format!("无法序列化书籍元数据：{error}"))?;
-        fs::write(directory.join(".novel-flow.json.tmp"), payload)
-            .map_err(|error| format!("无法写入书籍元数据：{error}"))?;
-        if directory.join(".novel-flow.json").exists() {
-            fs::remove_file(directory.join(".novel-flow.json"))
-                .map_err(|error| format!("无法替换书籍元数据：{error}"))?;
+        write_atomically(&directory.join(".novel-flow.json"), &metadata, "书籍元数据")?;
+
+        if failed_vip_chapters.is_empty() {
+            Ok(directory.to_string_lossy().into_owned())
+        } else {
+            let failed_summary = failed_vip_chapters
+                .iter()
+                .take(3)
+                .map(|(chapter_title, error)| format!("{chapter_title}（{error}）"))
+                .collect::<Vec<_>>()
+                .join("；");
+            let remaining = failed_vip_chapters.len().saturating_sub(3);
+            let suffix = (remaining > 0).then(|| format!("；其余 {remaining} 章"));
+            Err(format!(
+                "{} 个 VIP 章节未保存：{failed_summary}{}。已成功章节已保存，可继续下载失败章节",
+                failed_vip_chapters.len(),
+                suffix.unwrap_or_default()
+            ))
         }
-        fs::rename(
-            directory.join(".novel-flow.json.tmp"),
-            directory.join(".novel-flow.json"),
-        )
-        .map_err(|error| format!("无法完成书籍元数据写入：{error}"))?;
-        Ok(directory.to_string_lossy().into_owned())
     }
     .await;
     match result {
+        // 只向渲染层暴露任务结果，不返回 Cookie、上游原始 HTML、VIP 图片二进制或 OCR
+        // worker 的内部诊断数据。
         Ok(_) => update_native_job(&state, &job_id, |job| {
             job.status = "done".to_string();
             job.progress = 100;
@@ -394,22 +474,48 @@ async fn run_text_download(
     let _ = persist_native_jobs(&app, &state);
 }
 
-/// Produces a filesystem-safe name for an audio file while preserving readable
-/// Unicode chapter titles.
+/// 返回不含 Windows 保留字符、长度受限的文件名片段。
 ///
-/// # Arguments
-/// * `value` - Upstream chapter title.
+/// # 参数
+/// * `value` - 上游章节标题。
 ///
-/// # Returns
-/// A bounded filename segment without Windows-reserved characters.
+/// # 返回值
+/// 不含 Windows 保留字符、长度受限的文件名片段。
 fn safe_audio_name(value: &str) -> String {
     safe_library_name(value).chars().take(100).collect()
 }
 
-/// Fetches public book metadata and persists its cover beside downloaded media.
-/// Metadata or cover failures deliberately do not fail a chapter download: the
-/// content remains usable and the next download can fill the missing artwork.
-async fn enrich_local_book(
+/// 初始化并更新一本本地文字小说的元数据。
+///
+/// 调用方只需传入整份书籍元数据，无须了解 `novel` 的可选存储形式。本方法先保证本地
+/// 已知的作品编号、标题及作者/简介默认值，再尝试从公开 App 详情刷新扩展字段和封面。
+/// 即使远程刷新失败，已经初始化的元数据仍会由调用方随章节索引正常保存。
+async fn update_local_novel_metadata(
+    client: &AppClient,
+    web_client: &WebClient,
+    directory: &std::path::PathBuf,
+    book_metadata: &mut StoredBookMetadata,
+    novel_id: i64,
+    title: &str,
+) -> Result<(), String> {
+    let metadata = book_metadata.novel.get_or_insert_with(Default::default);
+    metadata.id = Some(novel_id);
+    metadata.title = Some(title.to_string());
+    metadata
+        .author
+        .get_or_insert_with(|| "未知作者".to_string());
+    metadata
+        .description
+        .get_or_insert_with(|| "暂无简介".to_string());
+
+    enrich_local_novel_metadata(client, web_client, directory, metadata, novel_id).await
+}
+
+/// 从公开详情刷新小说扩展字段，并将封面保存在下载媒体旁。
+///
+/// 此方法只处理上游响应解析和封面文件写入；默认元数据初始化由
+/// [`update_local_novel_metadata`] 负责，避免下载编排层与上游解析层混杂。
+async fn enrich_local_novel_metadata(
     client: &AppClient,
     web_client: &WebClient,
     directory: &std::path::PathBuf,
@@ -551,9 +657,7 @@ async fn enrich_local_book(
     Ok(())
 }
 
-/// Fetches the audio catalog payload itself rather than reusing novel details.
-/// The audio service is the source of truth for an album's name, author,
-/// description, and artwork when it exposes those fields.
+/// 新增或更新本地有声书元数据，并将其封面保存在下载的媒体旁边。
 async fn enrich_local_audio_book(
     client: &AppClient,
     web_client: &WebClient,
@@ -698,9 +802,7 @@ async fn enrich_local_audio_book(
     save_audio_cover(web_client, directory, &cover_url).await
 }
 
-/// Resolves the un-cropped large cover used by the mobile work header. The
-/// audio player endpoint may expose a circular/trimmed `NovelCover`, so it is
-/// deliberately excluded from this lookup.
+/// 获取小说的“大封面”URL，如果存在的话。
 async fn fetch_novel_big_cover(
     client: &AppClient,
     novel_id: i64,
@@ -761,7 +863,7 @@ async fn save_audio_cover(
     Ok(())
 }
 
-/// Fetches comic metadata from the SF comic endpoint and persists artwork.
+/// 从SF漫画接口获取漫画元数据并持久化作品封面。
 async fn enrich_local_comic_book(
     client: &AppClient,
     web_client: &WebClient,
@@ -895,15 +997,15 @@ async fn enrich_local_comic_book(
     Ok(())
 }
 
-/// Runs one authenticated audio download task and rebuilds the local M3U8 list.
+/// 运行已认证的有声下载任务，并重建本地 M3U8 列表。
 ///
-/// # Arguments
-/// * `app` - Tauri handle used for native state and controlled local storage.
-/// * `job_id` - Native task identifier.
-/// * `novel_id` - Positive SF work identifier.
-/// * `title` - Display title captured when the task was created.
-/// * `chapter_ids` - Selected audio chapter identifiers.
-/// * `cancelled` - Cooperative cancellation flag controlled by task commands.
+/// # 参数
+/// * `app` - 用于本地状态和受控本地存储的 Tauri 应用句柄。
+/// * `job_id` - 本地任务标识符。
+/// * `novel_id` - SF作品标识符。
+/// * `title` - 用于展示的作品标题。
+/// * `chapter_ids` - 所选音频章节标识符。
+/// * `cancelled` - 由任务命令控制的协作取消标志。
 async fn run_audio_download(
     app: tauri::AppHandle,
     job_id: String,
@@ -920,7 +1022,7 @@ async fn run_audio_download(
         let app_client = app_endpoint_client(&app, EndpointCapability::NovelDetail)?;
         let web_client = web_endpoint_client(&app, EndpointCapability::Audio)?;
         let (_catalog_title, catalog) = web_client
-            .audio_catalog(novel_id)
+            .get_audio_catalog(novel_id)
             .await
             .map_err(|error| EndpointCapability::Audio.unavailable_message(&error))?;
         let selected = chapter_ids
@@ -938,7 +1040,7 @@ async fn run_audio_download(
         fs::create_dir_all(&audio_directory)
             .map_err(|error| format!("无法创建有声目录：{error}"))?;
         let mut metadata =
-            read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?;
+            read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?;
         let audio_metadata = metadata.audio.get_or_insert_with(Default::default);
         audio_metadata.id = Some(album_id.unwrap_or(novel_id));
         audio_metadata.catalog_id = Some(novel_id);
@@ -1075,7 +1177,7 @@ async fn run_audio_download(
     let _ = persist_native_jobs(&app, &state);
 }
 
-/// Returns the extension represented by a validated SF comic image URL.
+/// 根据已校验的 SF 漫画图片地址确定文件扩展名。
 fn comic_image_extension(url: &str) -> &'static str {
     let path = url.split('?').next().unwrap_or(url).to_ascii_lowercase();
     if path.ends_with(".png") {
@@ -1089,9 +1191,18 @@ fn comic_image_extension(url: &str) -> &'static str {
     }
 }
 
-/// Downloads selected comic chapters into app-owned page directories. VIP
-/// chapters require the native SF session and every web/image request reuses
-/// that session without returning it to the renderer.
+/// 将选中的漫画章节下载到应用自有页面目录。
+///
+/// VIP 章节需要 SF 网页会话；每个目录和图片请求均复用同一经过校验的客户端快照。
+///
+/// # 参数
+/// * `app` - 用于访问原生状态、会话和本地存储的 Tauri 应用句柄。
+/// * `job_id` - 原生下载任务标识符。
+/// * `comic_id` - SF 漫画编号。
+/// * `source_path` - 可选的公开漫画目录标识。
+/// * `title` - 用于本地目录的用户可见作品标题。
+/// * `chapter_ids` - 待下载的漫画章节编号。
+/// * `cancelled` - 由暂停、删除命令控制的协作式取消标记。
 async fn run_comic_download(
     app: tauri::AppHandle,
     job_id: String,
@@ -1119,7 +1230,7 @@ async fn run_comic_download(
             folder
         };
         let catalog = web_client
-            .comic_catalog(&folder)
+            .get_comic_catalog(&folder)
             .await
             .map_err(|error| EndpointCapability::ComicCatalog.unavailable_message(&error))?;
         let requested = chapter_ids
@@ -1139,7 +1250,7 @@ async fn run_comic_download(
         fs::create_dir_all(&comic_directory)
             .map_err(|error| format!("无法创建漫画目录：{error}"))?;
         let mut metadata =
-            read_json_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"))?;
+            read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?;
         let comic_metadata = metadata.comic.get_or_insert_with(Default::default);
         comic_metadata.id = Some(comic_id);
         comic_metadata.title = Some(title.clone());
@@ -1269,16 +1380,16 @@ async fn run_comic_download(
     let _ = persist_native_jobs(&app, &state);
 }
 
-/// Creates and schedules a native text download task.
+/// 创建并调度一个 SF 文字下载任务。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used for private state and storage.
-/// * `novel_id` - Positive SF novel identifier.
-/// * `title` - User-visible title used for the local book directory.
-/// * `chapter_ids` - Selected positive chapter identifiers, or `None` for all chapters.
+/// # 参数
+/// * `app` - Tauri 应用句柄，用于访问本地状态和存储。
+/// * `novel_id` - SF 小说编号。
+/// * `title` - 用户可见的标题，用于本地书籍目录。
+/// * `chapter_ids` - 所选章节编号列表。
 ///
-/// # Errors
-/// Returns an error for invalid input or an unavailable native task registry.
+/// # 错误
+/// 输入无效或本地任务注册表不可用时返回错误。
 #[tauri::command]
 pub(crate) async fn create_text_download(
     app: tauri::AppHandle,
@@ -1352,16 +1463,16 @@ pub(crate) async fn create_text_download(
     Ok(job)
 }
 
-/// Creates and schedules an authenticated native audio download task.
+/// 创建并调度一个 SF 有声下载任务。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used for private state and storage.
-/// * `novel_id` - Positive SF work identifier.
-/// * `title` - User-visible title retained for the local book metadata.
-/// * `chapter_ids` - Selected positive audio chapter identifiers.
+/// # 参数
+/// * `app` - Tauri 应用句柄，用于访问本地状态和存储。
+/// * `novel_id` - SF 小说编号。
+/// * `title` - 用户可见的标题，用于本地书籍目录。
+/// * `chapter_ids` - 所选章节编号列表，不能为空。
 ///
-/// # Errors
-/// Returns an error for invalid input, missing login state, or unavailable task state.
+/// # 错误
+/// 输入无效或本地任务注册表不可用时返回错误。
 #[tauri::command]
 pub(crate) async fn create_audio_download(
     app: tauri::AppHandle,
@@ -1440,8 +1551,19 @@ pub(crate) async fn create_audio_download(
     Ok(job)
 }
 
-/// Creates and schedules a comic download task. VIP chapters require an
-/// existing native SF session; the worker repeats that entitlement check.
+/// 创建并调度一个 SF 漫画下载任务。
+///
+/// 在登记任务前读取已认证漫画目录，以拒绝尚未解锁的 VIP 章节；实际下载在后台任务中执行。
+///
+/// # 参数
+/// * `app` - 用于访问原生状态、会话和本地存储的 Tauri 应用句柄。
+/// * `comic_id` - 正数 SF 漫画编号。
+/// * `source_path` - 可选的公开漫画目录标识。
+/// * `title` - 用于本地书籍目录的用户可见标题。
+/// * `chapter_ids` - 非空的选中漫画章节编号列表。
+///
+/// # 错误
+/// 输入无效、外部存储不可写、会话或目录不可用、所选 VIP 章节未解锁，或任务注册表不可用时返回错误。
 #[tauri::command]
 pub(crate) async fn create_comic_download(
     app: tauri::AppHandle,
@@ -1475,7 +1597,7 @@ pub(crate) async fn create_comic_download(
         folder
     };
     let catalog = web_client
-        .comic_catalog(&folder)
+        .get_comic_catalog(&folder)
         .await
         .map_err(|error| EndpointCapability::ComicCatalog.unavailable_message(&error))?;
     let requested = chapter_ids
@@ -1545,26 +1667,26 @@ pub(crate) async fn create_comic_download(
     Ok(job)
 }
 
-/// Lists native download tasks in reverse creation order.
+/// 获取下载任务列表。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to access the native task registry.
+/// # 参数
+/// * `app` - 用于访问原生任务注册表的 Tauri 应用句柄。
 ///
-/// # Errors
-/// Returns an error if the task registry lock is unavailable.
+/// # 错误
+/// 任务注册表锁不可用时返回错误。
 #[tauri::command]
 pub(crate) fn list_download_jobs(app: tauri::AppHandle) -> Result<Vec<NativeJob>, String> {
     Ok(list_download_jobs_inner(&app.state::<NativeJobState>()))
 }
 
-/// Pauses a running native download task through cooperative cancellation.
+/// 暂停正在运行的下载任务。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to access native task state.
-/// * `job_id` - Existing task identifier.
+/// # 参数
+/// * `app` - 用于访问原生任务状态的 Tauri 应用句柄。
+/// * `job_id` - 已存在任务的标识符。
 ///
-/// # Errors
-/// Returns an error if no matching task exists or task state is unavailable.
+/// # 错误
+/// 不存在匹配任务或任务状态不可用时返回错误。
 #[tauri::command]
 pub(crate) fn pause_download_job(
     app: tauri::AppHandle,
@@ -1596,14 +1718,14 @@ pub(crate) fn pause_download_job(
     Ok(result)
 }
 
-/// Resumes a paused native text download task from its private task specification.
+/// 从持久化状态恢复已暂停的下载任务。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to access native task state.
-/// * `job_id` - Existing paused task identifier.
+/// # 参数
+/// * `app` - 用于访问原生任务状态的 Tauri 应用句柄。
+/// * `job_id` - 已存在暂停任务的标识符。
 ///
-/// # Errors
-/// Returns an error when the task is absent, not paused, or no longer resumable.
+/// # 错误
+/// 任务不存在、未暂停、规格已过期或不再可恢复时返回错误。
 #[tauri::command]
 pub(crate) fn resume_download_job(
     app: tauri::AppHandle,
@@ -1683,13 +1805,13 @@ pub(crate) fn resume_download_job(
         .ok_or_else(|| "下载任务不存在".to_string())
 }
 
-/// Reads and sorts jobs from an already acquired native state handle.
+/// 获取所有下载任务的列表，并按最新到最旧排序。
 ///
-/// # Arguments
-/// * `state` - Shared native task registry.
+/// # 参数
+/// * `state` - 共享原生任务注册表。
 ///
-/// # Returns
-/// Jobs sorted from newest to oldest.
+/// # 返回值
+/// 按最新到最旧排序的下载任务列表。
 fn list_download_jobs_inner(state: &NativeJobState) -> Vec<NativeJob> {
     let mut jobs = state
         .jobs
@@ -1700,14 +1822,14 @@ fn list_download_jobs_inner(state: &NativeJobState) -> Vec<NativeJob> {
     jobs
 }
 
-/// Deletes a native download task and requests cooperative cancellation if needed.
+/// 删除下载任务，并取消仍在下载的任务。
 ///
-/// # Arguments
-/// * `app` - Tauri application handle used to access native task state.
-/// * `job_id` - Existing task identifier.
+/// # 参数
+/// * `app` - 用于访问原生任务状态的 Tauri 应用句柄。
+/// * `job_id` - 任务标识符。
 ///
-/// # Errors
-/// Returns an error if the task does not exist or registry access fails.
+/// # 错误
+/// 任务不存在或注册表访问失败时返回错误。
 #[tauri::command]
 pub(crate) fn delete_download_job(app: tauri::AppHandle, job_id: String) -> Result<(), String> {
     let state = app.state::<NativeJobState>();
