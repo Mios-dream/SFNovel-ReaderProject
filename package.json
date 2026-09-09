@@ -7,11 +7,12 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
+    "ocr:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ocr-worker.ps1",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "ocr:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ocr-worker.ps1",
-    "tauri:build": "npm run ocr:build && tauri build",
-    "tauri:android": "tauri android dev"
+    "tauri:windows:build": "npm run ocr:build && tauri build",
+    "tauri:android": "tauri android dev",
+    "tauri:android:build": "tauri android build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

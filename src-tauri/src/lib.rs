@@ -23,20 +23,19 @@ mod utils;
 mod web_client;
 
 use library::restore_native_jobs;
-use sfacg::{
-    initialize_device_identity, restore_desktop_auth_session, restore_desktop_web_session,
-    AuthSessionState, NativeJobState,
-};
+use sfacg::{initialize_device_identity, AuthSessionState, NativeJobState};
+#[cfg(target_os = "windows")]
+use sfacg::{restore_desktop_auth_session, restore_desktop_web_session};
 use tauri::Manager;
 
 #[cfg(target_os = "android")]
-use sfacg::android_sfacg_auth_plugin;
+use sfacg::{android_sfacg_auth_plugin, android_sfacg_ocr_plugin};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// 配置并在当前平台运行 Tauri 应用。
 ///
 /// # 副作用
-/// 注册原生状态、IPC 命令和打开器插件；在 Android 注册认证插件；并将已持久化
+/// 注册原生状态、IPC 命令和打开器插件；在 Android 注册认证与 OCR 插件；并将已持久化
 /// 的未完成下载恢复为暂停状态。函数会阻塞至应用退出。
 pub fn run() {
     #[allow(unused_mut)]
@@ -73,6 +72,7 @@ pub fn run() {
     #[cfg(target_os = "android")]
     {
         builder = builder.plugin(android_sfacg_auth_plugin());
+        builder = builder.plugin(android_sfacg_ocr_plugin());
     }
     builder
         .invoke_handler(tauri::generate_handler![

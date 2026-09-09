@@ -80,6 +80,17 @@ fn text_storage_lock(
         .clone())
 }
 
+/// 从已持久化的章节索引构造稳定的完成章节列表。
+fn downloaded_text_chapter_ids(store: &StoredChapterStore) -> Vec<i64> {
+    let mut chapter_ids: Vec<_> = store
+        .chapters
+        .keys()
+        .filter_map(|id| id.parse().ok())
+        .collect();
+    chapter_ids.sort_unstable();
+    chapter_ids
+}
+
 /// 下载章节插图，并将 HTML 图片标签改写为本地 Markdown 路径。
 async fn materialize_chapter_images(
     client: &WebClient,
@@ -303,6 +314,10 @@ async fn run_text_download(
             &store,
             "章节索引",
         )?;
+        // 元数据也必须先建立检查点。普通章节在后续网络或图片资源请求中失败时，已保存的
+        // 章节索引仍能被本地书库关联到正确的作品，而不是只留下无法识别的 JSON 文件。
+        metadata.downloaded_text_chapter_ids = Some(downloaded_text_chapter_ids(&store));
+        write_atomically(&directory.join(".novel-flow.json"), &metadata, "书籍元数据")?;
         let total = chapters.len();
         let mut failed_vip_chapters = Vec::new();
         // 按章节顺序下载，VIP 章节可能会被跳过但仍计入总数。
@@ -417,19 +432,17 @@ async fn run_text_download(
                     &store,
                     "章节索引",
                 )?;
+                // 章节与完成标记作为同一检查点更新。即使下一章请求失败、任务暂停或进程
+                // 退出，恢复后的书库和下载队列也会看见已经可靠保存的内容。
+                metadata.downloaded_text_chapter_ids = Some(downloaded_text_chapter_ids(&store));
+                write_atomically(&directory.join(".novel-flow.json"), &metadata, "书籍元数据")?;
             }
             // 限速发生在每个章节处理完成后；取消标记在下一个章节开始前读取。
             tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
         }
 
         // 仅在遍历完成后更新书籍级完成记录，使 UI 可依据实际持久化的章节索引显示状态。
-        metadata.downloaded_text_chapter_ids = Some(
-            store
-                .chapters
-                .keys()
-                .filter_map(|id| id.parse().ok())
-                .collect(),
-        );
+        metadata.downloaded_text_chapter_ids = Some(downloaded_text_chapter_ids(&store));
         write_atomically(&directory.join(".novel-flow.json"), &metadata, "书籍元数据")?;
 
         if failed_vip_chapters.is_empty() {

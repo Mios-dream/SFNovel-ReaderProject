@@ -1029,8 +1029,6 @@ fn web_old_vip_level_from_payload(payload: &Value) -> Result<i64, String> {
         .ok_or_else(|| "SF 旧 VIP 资料未返回等级".to_string())
 }
 
-
-
 /// 判断账户名是否符合网页端点允许的受限字符和长度规则。
 fn is_safe_account_name(value: &str) -> bool {
     !value.is_empty()

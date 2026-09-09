@@ -4,17 +4,30 @@
 //! 交给独立 Python 进程，避免向 worker、日志或渲染进程传递 Web Cookie。
 
 use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "android"))]
 use std::process::Command;
+#[cfg(not(target_os = "android"))]
 use tauri::{path::BaseDirectory, Manager};
 
-// OCR worker 识别拼音时，裁剪掉图片顶部的比例。过高会无法裁剪拼音，过低会增加误识别。
-const PINYIN_TOP_CROP_RATIO: &str = "0.30";
+#[cfg(target_os = "android")]
+use crate::sfacg::recognize_android_image;
+
+#[cfg(not(target_os = "android"))]
+const RECOGNITION_MODEL_RESOURCE: &str = "resources/ocr-models/PP-OCRv6_rec_small.onnx";
+
+#[cfg(not(target_os = "android"))]
+struct DesktopOcrResources {
+    worker: PathBuf,
+    model: PathBuf,
+    bundled: bool,
+}
 
 /// 定位随应用资源安装的 OCR worker，且不接受渲染进程传入的路径。
 ///
 /// # Returns
-/// 一个元组，包含 worker 路径和是否已打包。
-fn worker_path(app: &tauri::AppHandle) -> Result<(PathBuf, bool), String> {
+/// 已验证的 worker、共享识别模型路径和 worker 的打包状态。
+#[cfg(not(target_os = "android"))]
+fn desktop_ocr_resources(app: &tauri::AppHandle) -> Result<DesktopOcrResources, String> {
     // `tauri dev` compiles with debug assertions. It must exercise the editable Python source
     // and current uv environment rather than a stale PyInstaller executable left in the
     // resource directory by a previous release build.
@@ -23,8 +36,13 @@ fn worker_path(app: &tauri::AppHandle) -> Result<(PathBuf, bool), String> {
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("ocr-worker")
             .join("ocr_worker.py");
-        if script.is_file() {
-            return Ok((script, false));
+        let model = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(RECOGNITION_MODEL_RESOURCE);
+        if script.is_file() && model.is_file() {
+            return Ok(DesktopOcrResources {
+                worker: script,
+                model,
+                bundled: false,
+            });
         }
     }
 
@@ -33,36 +51,52 @@ fn worker_path(app: &tauri::AppHandle) -> Result<(PathBuf, bool), String> {
     } else {
         "ocr-worker/ocr_worker"
     };
-    let executable = app
+    let worker = app
         .path()
         .resolve(executable, BaseDirectory::Resource)
         .map_err(|error| format!("无法定位 OCR worker：{error}"))?;
-    if executable.is_file() {
-        return Ok((executable, true));
-    }
-    let script = app
+    let model = app
         .path()
-        .resolve("ocr-worker/ocr_worker.py", BaseDirectory::Resource)
-        .map_err(|error| format!("无法定位 OCR worker 脚本：{error}"))?;
-    Ok((script, false))
+        .resolve(RECOGNITION_MODEL_RESOURCE, BaseDirectory::Resource)
+        .map_err(|error| format!("无法定位 OCR 识别模型：{error}"))?;
+    if worker.is_file() && model.is_file() {
+        return Ok(DesktopOcrResources {
+            worker,
+            model,
+            bundled: true,
+        });
+    }
+    Err("OCR worker 或共享识别模型未随应用安装。请重新安装桌面应用".to_string())
 }
 
 /// 对已持久化的来源图片执行图片识别，返回识别结果。
 ///
 /// # 错误
-/// 当 Python 或 RapidOCR 不可用时返回可操作的安装提示。此操作失败时不删除或覆盖
+/// 当 Python、ONNX Runtime 或 worker 不可用时返回可操作的安装提示。此操作失败时不删除或覆盖
 /// 已保存的来源图片。
 pub(crate) async fn recognize_image(
     app: &tauri::AppHandle,
     source: PathBuf,
     segments_dir: PathBuf,
 ) -> Result<String, String> {
-    let (worker, bundled) = worker_path(app)?;
-    if !worker.is_file() {
-        return Err("OCR worker 未随应用安装。请重新安装桌面应用".to_string());
+    #[cfg(target_os = "android")]
+    {
+        return recognize_android_image(app, source, segments_dir).await;
     }
-    let result = run_worker(worker, bundled, source, segments_dir).await?;
-    finish_worker_result(result)
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let resources = desktop_ocr_resources(app)?;
+        let result = run_worker(
+            resources.worker,
+            resources.model,
+            resources.bundled,
+            source,
+            segments_dir,
+        )
+        .await?;
+        finish_worker_result(result)
+    }
 }
 
 /// 在阻塞线程中启动已验证的 OCR worker。
@@ -73,8 +107,10 @@ pub(crate) async fn recognize_image(
 ///
 /// # 错误
 /// worker 不存在、开发项目目录无效、进程不能启动或等待任务异常时返回错误。
+#[cfg(not(target_os = "android"))]
 async fn run_worker(
     worker: PathBuf,
+    model: PathBuf,
     bundled: bool,
     source: PathBuf,
     segments_dir: PathBuf,
@@ -98,10 +134,10 @@ async fn run_worker(
         command
             .arg("--input")
             .arg(source)
+            .arg("--model-path")
+            .arg(model)
             .arg("--segments-dir")
             .arg(segments_dir)
-            .arg("--pinyin-top-crop-ratio")
-            .arg(PINYIN_TOP_CROP_RATIO)
             .arg("--workers")
             .arg("1")
             .output()
@@ -123,6 +159,7 @@ async fn run_worker(
 ///
 /// # 错误
 /// worker 失败、未返回 UTF-8 文本或输出仅含空白时返回可重试错误。
+#[cfg(not(target_os = "android"))]
 fn finish_worker_result(result: std::process::Output) -> Result<String, String> {
     if !result.status.success() {
         let detail = worker_error_detail(&result.stderr);
@@ -147,6 +184,7 @@ fn finish_worker_result(result: std::process::Output) -> Result<String, String> 
 ///
 /// worker 可能在异常输出后追加空行；不能直接使用最后一行，否则会把真实错误截断为
 /// 空字符串。诊断同时限制长度，避免 Python traceback 或第三方库输出撑满下载任务提示。
+#[cfg(not(target_os = "android"))]
 fn worker_error_detail(stderr: &[u8]) -> String {
     String::from_utf8_lossy(stderr)
         .lines()

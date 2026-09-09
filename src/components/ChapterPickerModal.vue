@@ -99,11 +99,8 @@
                   v-if="chapter.downloaded"
                   class="chapter-state downloaded"
                   ><CheckCircle2 :size="15" />已下载</span
-                ><span
-                  v-else-if="chapter.isVip"
-                  class="chapter-state vip"
-                  ><Image v-if="chapter.contentKind === 'imageVip'" :size="15" />
-                  <LockKeyhole v-else :size="15" />{{
+                ><span v-else-if="chapter.isVip" class="chapter-state vip">
+                  <LockKeyhole :size="15" />{{
                     textContentLabel(chapter.contentKind)
                   }}</span
                 ></label
@@ -240,9 +237,9 @@ function canDownload(chapter: SelectableChapter) {
 }
 
 function textContentLabel(kind: TextChapter["contentKind"]) {
-  if (kind === "imageVip") return "图片 OCR";
-  if (kind === "encryptedVip") return "加密 OCR";
-  return "VIP 状态待验证";
+  // if (kind === "imageVip") return "图片 OCR";
+  // if (kind === "encryptedVip") return "加密 OCR";
+  return "VIP";
 }
 
 const allChapters = computed<SelectableChapter[]>(() =>

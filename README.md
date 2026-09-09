@@ -104,6 +104,10 @@
 
 Android 开发还需要 Android Studio、Android SDK、JDK 和对应的 Tauri Android 环境配置。详见 [Tauri Android 前置要求](https://v2.tauri.app/start/prerequisites/#android)。
 
+### OCR 识别模型
+
+图片 VIP 正文识别需要 PP-OCRv6 小型识别模型。从 [ModelScope: PaddlePaddle/PP-OCRv6_small_rec_onnx](https://www.modelscope.cn/models/PaddlePaddle/PP-OCRv6_small_rec_onnx) 下载模型，将 ONNX 文件命名为 `PP-OCRv6_rec_small.onnx`，并放入 `src-tauri/resources/ocr-models/`。该目录被 Git 忽略，桌面与 Android 构建均会从此路径读取模型。
+
 ### 💻 从源码运行
 
 1. **安装 JavaScript 依赖**
@@ -118,7 +122,7 @@ Android 开发还需要 Android Studio、Android SDK、JDK 和对应的 Tauri An
    npm run tauri:dev
    ```
 
-   Tauri 会启动 Vite 开发服务器并打开原生应用窗口。开发服务器仅用于热更新，不是对外 API 服务；无需在浏览器访问端口。
+   Tauri 会启动 Vite 开发服务器并打开原生应用窗口。开发服务器仅用于热更新，不是对外 API 服务；无需在浏览器访问端口。运行前请按上方说明放置 OCR 模型。
 
 3. **构建桌面安装包**
 
@@ -127,12 +131,15 @@ Android 开发还需要 Android Studio、Android SDK、JDK 和对应的 Tauri An
    ```
 
    构建产物位于 `src-tauri/target/release/bundle/` 下，具体格式取决于当前平台。
+   该命令会构建并仅向桌面安装包加入 Python OCR worker；Android 不会携带该 Windows 可执行文件。
 
 4. **启动 Android 开发构建（可选）**
 
    ```bash
    npm run tauri:android
    ```
+
+   Android 发布构建使用 `npm run tauri:android:build`。OCR 识别模型已作为 Android assets 内置，运行时仅使用 ONNX Runtime Mobile。
 
 ## ⚙️ 应用数据与配置
 

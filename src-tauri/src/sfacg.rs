@@ -659,10 +659,23 @@ struct AndroidDeviceTokenResponse {
     pub(crate) token: Option<String>,
 }
 
+/// Android ONNX OCR 插件返回的正文容器。
+#[cfg(target_os = "android")]
+#[derive(Deserialize)]
+struct AndroidOcrResponse {
+    text: String,
+}
+
 /// 保存只供 Rust 命令调用的 Android 原生认证插件句柄。
 #[cfg(target_os = "android")]
-struct AndroidSfacgAuth<R: tauri::Runtime> {
-    mobile_plugin_handle: PluginHandle<R>,
+pub(crate) struct AndroidSfacgAuth<R: tauri::Runtime> {
+    pub(crate) mobile_plugin_handle: PluginHandle<R>,
+}
+
+/// 保存只供 Rust OCR 命令调用的 Android 原生识别插件句柄。
+#[cfg(target_os = "android")]
+pub(crate) struct AndroidSfacgOcr<R: tauri::Runtime> {
+    pub(crate) mobile_plugin_handle: PluginHandle<R>,
 }
 
 /// 构建拥有官方登录 WebView 与 Cookie 桥接能力的 Android 专用插件。
@@ -676,6 +689,21 @@ pub(crate) fn android_sfacg_auth_plugin<R: tauri::Runtime>() -> TauriPlugin<R> {
             let handle =
                 api.register_android_plugin("com.sansan.sf_novel_flow", "SfacgAuthPlugin")?;
             app.manage(AndroidSfacgAuth {
+                mobile_plugin_handle: handle,
+            });
+            Ok(())
+        })
+        .build()
+}
+
+/// 构建 Android 专用 OCR 插件；识别实现与认证插件保持独立。
+#[cfg(target_os = "android")]
+pub(crate) fn android_sfacg_ocr_plugin<R: tauri::Runtime>() -> TauriPlugin<R> {
+    tauri::plugin::Builder::new("sfacg-ocr")
+        .setup(|app, api| {
+            let handle =
+                api.register_android_plugin("com.sansan.sf_novel_flow", "SfacgOcrPlugin")?;
+            app.manage(AndroidSfacgOcr {
                 mobile_plugin_handle: handle,
             });
             Ok(())
@@ -742,6 +770,31 @@ pub(crate) async fn initialize_device_identity(app: &tauri::AppHandle) -> Result
         .ok_or_else(|| "Android 设备身份无效".to_string())?;
     let _ = SF_DEVICE_TOKEN.set(token.to_uppercase());
     Ok(())
+}
+
+/// 在 Android 原生插件中识别已保存的章节图片，并返回与桌面 worker 相同的纯文本。
+#[cfg(target_os = "android")]
+pub(crate) async fn recognize_android_image(
+    app: &tauri::AppHandle,
+    source: std::path::PathBuf,
+    segments_dir: std::path::PathBuf,
+) -> Result<String, String> {
+    let result = app
+        .state::<AndroidSfacgOcr<tauri::Wry>>()
+        .mobile_plugin_handle
+        .run_mobile_plugin_async::<AndroidOcrResponse>(
+            "recognizeChapter",
+            serde_json::json!({
+                "sourcePath": source.to_string_lossy(),
+                "segmentsDir": segments_dir.to_string_lossy(),
+            }),
+        )
+        .await
+        .map_err(|error| format!("Android OCR 失败：{error}"))?;
+    if result.text.trim().is_empty() {
+        return Err("Android OCR 未识别到可用文字；原始图片已保留，可稍后重试".to_string());
+    }
+    Ok(result.text)
 }
 
 /// 通过 Android 原生插件持久化 App 会话 Cookie。

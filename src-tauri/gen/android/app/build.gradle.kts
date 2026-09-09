@@ -72,6 +72,32 @@ android {
     }
 }
 
+val ocrAssetsDirectory = file("../../../resources")
+val recognitionModel = file("$ocrAssetsDirectory/ocr-models/PP-OCRv6_rec_small.onnx")
+val generatedOcrAssetsDirectory = layout.buildDirectory.dir("generated/ocr-assets").get().asFile
+
+android.sourceSets.getByName("main").assets.srcDir(generatedOcrAssetsDirectory)
+
+tasks.register("verifyOcrRecognitionModel") {
+    doLast {
+        check(recognitionModel.isFile) {
+            "OCR recognition model is missing. Download PP-OCRv6_rec_small.onnx as documented in README.md."
+        }
+    }
+}
+
+tasks.register<Sync>("prepareOcrAssets") {
+    dependsOn("verifyOcrRecognitionModel")
+    from(recognitionModel) {
+        into("ocr-models")
+    }
+    into(generatedOcrAssetsDirectory)
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("prepareOcrAssets")
+}
+
 rust {
     rootDirRel = "../../../"
 }
@@ -82,6 +108,8 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+    implementation("pl.droidsonroids.gif:android-gif-drawable:1.2.29")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")

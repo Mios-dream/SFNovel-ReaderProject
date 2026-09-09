@@ -17,6 +17,7 @@ src-tauri/ocr-worker/ocr_worker.exe
 src-tauri/ocr-worker/build
 src-tauri/ocr-worker/*.spec
 src-tauri/ocr-worker/.venv
+src-tauri/resources
 src-tauri/gen/android/keystore.properties
 src-tauri/gen/android/*.jks
 src-tauri/gen/android/*.keystore

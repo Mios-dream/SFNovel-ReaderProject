@@ -4,6 +4,8 @@
 //! 更新这些格式，但不会自行定义或迁移持久化模型。
 
 use crate::endpoint_policy::{app_endpoint_client, web_endpoint_client, EndpointCapability};
+#[cfg(target_os = "android")]
+use crate::sfacg::AndroidSfacgAuth;
 use crate::sfacg::{NativeJobState, PersistedNativeJobs, DEFAULT_CONTENT_DICTIONARY};
 use crate::utils::json::{read_or_default, write_atomically};
 use serde::{Deserialize, Serialize};
