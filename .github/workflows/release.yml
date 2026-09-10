@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+env:
+  OCR_MODEL_URL: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx
+  OCR_MODEL_SHA256: 6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884
+
 jobs:
   desktop:
     name: Build Windows
@@ -28,6 +32,32 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Download OCR recognition model
+        shell: pwsh
+        run: |
+          $modelPath = "src-tauri/resources/ocr-models/PP-OCRv6_rec_small.onnx"
+          New-Item -ItemType Directory -Force (Split-Path -Parent $modelPath) | Out-Null
+          Invoke-WebRequest -Uri $env:OCR_MODEL_URL -OutFile $modelPath
+          $actualHash = (Get-FileHash -Algorithm SHA256 $modelPath).Hash.ToLowerInvariant()
+          if ($actualHash -ne $env:OCR_MODEL_SHA256) {
+            throw "OCR recognition model checksum mismatch: $actualHash"
+          }
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build and verify OCR worker
+        shell: pwsh
+        run: |
+          npm run ocr:build
+          $workerPath = "src-tauri/ocr-worker/ocr_worker.exe"
+          if (-not (Test-Path -LiteralPath $workerPath -PathType Leaf)) {
+            throw "OCR worker was not created: $workerPath"
+          }
+          if ((Get-Item -LiteralPath $workerPath).Length -eq 0) {
+            throw "OCR worker is empty: $workerPath"
+          }
 
       - name: Read release template
         id: template
@@ -82,6 +112,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Download OCR recognition model
+        shell: bash
+        run: |
+          model_path=src-tauri/resources/ocr-models/PP-OCRv6_rec_small.onnx
+          mkdir -p "$(dirname "$model_path")"
+          curl --fail --location --retry 3 --retry-all-errors --output "$model_path" "$OCR_MODEL_URL"
+          echo "$OCR_MODEL_SHA256  $model_path" | sha256sum --check --status
 
       - name: Read release template
         id: template
