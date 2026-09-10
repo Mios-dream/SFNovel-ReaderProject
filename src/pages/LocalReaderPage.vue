@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
-import { PageFlip } from "page-flip";
 import {
   computed,
   inject,
@@ -21,6 +20,11 @@ import {
 } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 import { deskInjectionKey } from "../deskContext";
+import {
+  usePagedReader,
+  type ReaderChapterPart,
+  type ReaderStyle,
+} from "../reader";
 
 function requireDesk() {
   const desk = inject(deskInjectionKey);
@@ -29,16 +33,12 @@ function requireDesk() {
 }
 
 type DisplayMode = "vertical" | "paged";
-type ChapterPart =
-  | { type: "text"; value: string }
-  | { type: "image"; alt: string; src: string };
 
 const desk = requireDesk();
 const router = useRouter();
 const readerElement = ref<HTMLElement>();
 const stageElement = ref<HTMLElement>();
-const pageFlipHost = ref<HTMLElement>();
-const pageMeasure = ref<HTMLElement>();
+const readerCanvas = ref<HTMLCanvasElement>();
 const chapter = computed(() => desk.localChapter.value);
 const book = computed(() => desk.localBook.value);
 const bookName = computed(() => book.value?.name || "本地阅读");
@@ -57,16 +57,6 @@ const controlsVisible = ref(true);
 const directoryOpen = ref(false);
 const displayMode = ref<DisplayMode>("vertical");
 const chapterLoading = ref(false);
-const flipPageIndex = ref(0);
-const flipPageCount = ref(0);
-let pageFlip: PageFlip | undefined;
-let resizeObserver: ResizeObserver | undefined;
-let rebuildTimer: number | undefined;
-let initialFlipPage = 0;
-let openingNextChapter = false;
-let pageFlipInitializing = false;
-let flipPointerStart: { x: number; y: number } | undefined;
-let ignoreNextReaderClick = false;
 
 function chapterImageSource(relativePath: string) {
   const fileName = relativePath.slice("imgs/".length).replace(/\\/g, "/");
@@ -75,10 +65,14 @@ function chapterImageSource(relativePath: string) {
   return isTauri() ? convertFileSrc(imagePath) : imagePath;
 }
 
-const chapterParts = computed<ChapterPart[]>(() => {
-  const content = chapter.value?.content.replace(/^##\s+.+\r?\n+/, "") || "";
+/**
+ * 把章节 markdown 内容拆分为文本段与插图，两种显示模式共用。
+ * 同时用于当前章节与预渲染的相邻章节。
+ */
+function parseChapterParts(rawContent: string): ReaderChapterPart[] {
+  const content = rawContent.replace(/^##\s+.+\r?\n+/, "");
   const pattern = /!\[([^\]]*)\]\((imgs[\\/][^)]+)\)/g;
-  const parts: ChapterPart[] = [];
+  const parts: ReaderChapterPart[] = [];
   let lastIndex = 0;
   for (const match of content.matchAll(pattern)) {
     const index = match.index || 0;
@@ -94,9 +88,87 @@ const chapterParts = computed<ChapterPart[]>(() => {
   if (lastIndex < content.length)
     parts.push({ type: "text", value: content.slice(lastIndex) });
   return parts;
+}
+
+const chapterParts = computed<ReaderChapterPart[]>(() =>
+  parseChapterParts(chapter.value?.content || ""),
+);
+
+/**
+ * 读取安全区尺寸。canvas 无法直接使用 CSS 的 env()，
+ * 故通过一个临时探针元素间接测量；仅在重新分页时调用，开销可忽略。
+ */
+function readSafeArea(side: "top" | "bottom"): number {
+  const probe = document.createElement("div");
+  probe.style.cssText = `position:fixed;visibility:hidden;pointer-events:none;padding-${side}:env(safe-area-inset-${side},0px);`;
+  document.body.appendChild(probe);
+  const value =
+    Number.parseFloat(
+      getComputedStyle(probe).getPropertyValue(`padding-${side}`),
+    ) || 0;
+  probe.remove();
+  return value;
+}
+
+/** 计算画布分页样式，与纵向滚动模式的 CSS 观感保持一致。 */
+function readerStyle(): ReaderStyle {
+  const root = getComputedStyle(document.documentElement);
+  const mobile = window.innerWidth <= 760;
+  return {
+    fontFamily: '"Microsoft YaHei", sans-serif',
+    fontSize: mobile ? 15 : 16,
+    lineHeight: 2,
+    color: root.getPropertyValue("--ink").trim() || "#553b37",
+    background: root.getPropertyValue("--background-color").trim() || "#fcede6",
+    padding: mobile
+      ? {
+          top: 66 + readSafeArea("top"),
+          right: 12,
+          bottom: 24 + readSafeArea("bottom"),
+          left: 12,
+        }
+      : { top: 76, right: 48, bottom: 90, left: 48 },
+  };
+}
+
+const { pageIndex, pageCount, relayout, goNext, goPrev } = usePagedReader({
+  canvas: readerCanvas,
+  parts: () => chapterParts.value,
+  title: () => chapter.value?.title || "",
+  style: readerStyle,
+  prepareNeighbor,
+  onReachEnd: () => void openChapter(nextChapter.value?.id, { adopt: "next" }),
+  onReachStart: () =>
+    void openChapter(previousChapter.value?.id, {
+      atEnd: true,
+      adopt: "previous",
+    }),
+  onTap: (zone) => {
+    if (zone === "prev") previous();
+    else if (zone === "next") next();
+    else controlsVisible.value = !controlsVisible.value;
+  },
 });
 
-async function openChapter(chapterId?: number, startAtEnd = false) {
+/** 预取相邻章节正文（不改变当前阅读状态），供翻页模式预渲染边界页。 */
+async function prepareNeighbor(direction: "previous" | "next") {
+  const target =
+    direction === "previous" ? previousChapter.value : nextChapter.value;
+  if (!target) return undefined;
+  const content = await desk.peekLocalChapter(target.id);
+  if (!content) return undefined;
+  return { parts: parseChapterParts(content.content), title: content.title };
+}
+
+/**
+ * 打开章节。
+ * @param options.atEnd 定位到末页（从下一章回退时）。
+ * @param options.adopt 沿用边界滑动时已显示的相邻章节位图，避免闪动。
+ */
+async function openChapter(
+  chapterId?: number,
+  options: { atEnd?: boolean; adopt?: "previous" | "next" } = {},
+) {
   if (!chapterId || chapterLoading.value) return;
   chapterLoading.value = true;
   try {
@@ -104,8 +176,7 @@ async function openChapter(chapterId?: number, startAtEnd = false) {
     directoryOpen.value = false;
     await nextTick();
     readerElement.value?.scrollTo({ top: 0, left: 0 });
-    initialFlipPage = startAtEnd ? Number.MAX_SAFE_INTEGER : 0;
-    if (displayMode.value === "paged") await initializePageFlip();
+    if (displayMode.value === "paged") await relayout(options);
   } finally {
     chapterLoading.value = false;
   }
@@ -117,262 +188,39 @@ function goBack() {
 }
 
 function previous() {
-  if (displayMode.value === "paged" && pageFlip && flipPageIndex.value > 0) {
-    // Use the same corner for both directions so the curl geometry is identical.
-    pageFlip.flipPrev("top");
+  if (displayMode.value === "paged") {
+    goPrev();
     return;
   }
-  void openChapter(previousChapter.value?.id, displayMode.value === "paged");
+  void openChapter(previousChapter.value?.id);
 }
 
 function next() {
-  if (
-    displayMode.value === "paged" &&
-    pageFlip &&
-    flipPageIndex.value < flipPageCount.value - 1
-  ) {
-    pageFlip.flipNext("top");
+  if (displayMode.value === "paged") {
+    goNext();
     return;
   }
   void openChapter(nextChapter.value?.id);
 }
 
-function handleReaderScroll() {
-  const element = readerElement.value;
-  if (
-    displayMode.value === "vertical" &&
-    element &&
-    element.scrollTop + element.clientHeight >= element.scrollHeight - 32
-  ) {
-    void openChapter(nextChapter.value?.id);
-  }
-}
-
-function createFlipPage(measure: HTMLElement) {
-  const page = document.createElement("section");
-  const body = document.createElement("div");
-  page.className = "reader-flip-page";
-  body.className = "reader-flip-page-body";
-  page.appendChild(body);
-  measure.replaceChildren(page);
-  return { page, body };
-}
-
-function imageReady(image: HTMLImageElement) {
-  if (image.complete) return image.decode().catch(() => undefined);
-  return new Promise<void>((resolve) => {
-    image.addEventListener("load", () => resolve(), { once: true });
-    image.addEventListener("error", () => resolve(), { once: true });
-  });
-}
-
-async function createFlipPages(width: number, height: number) {
-  const measure = pageMeasure.value;
-  if (!measure) return [];
-  measure.style.width = `${width}px`;
-  measure.style.height = `${height}px`;
-  const pages: HTMLElement[] = [];
-  let current: { page: HTMLElement; body: HTMLElement } | undefined;
-
-  function startPage() {
-    current = createFlipPage(measure!);
-    pages.push(current.page);
-    return current;
-  }
-
-  const titlePage = startPage();
-  const title = document.createElement("h1");
-  title.className = "reader-flip-heading";
-  title.textContent = chapter.value?.title || "本章";
-  titlePage.body.appendChild(title);
-  current = titlePage;
-
-  for (const part of chapterParts.value) {
-    if (part.type === "image") {
-      const page: { page: HTMLElement; body: HTMLElement } =
-        current || startPage();
-      const image = document.createElement("img");
-      image.className = "reader-flip-image";
-      image.src = part.src;
-      image.alt = part.alt;
-      page.body.appendChild(image);
-      await imageReady(image);
-      // Keep an illustration with adjacent text whenever the page has room.
-      // If it would overflow a page that already contains text, move it to a
-      // fresh page and leave that page available for the following text.
-      if (
-        page.body.scrollHeight > page.body.clientHeight + 1 &&
-        page.body.childElementCount > 1
-      ) {
-        image.remove();
-        const nextPage = startPage();
-        nextPage.body.appendChild(image);
-        await imageReady(image);
-        current = nextPage;
-      } else {
-        current = page;
-      }
-      continue;
-    }
-
-    const characters = Array.from(part.value);
-    let offset = 0;
-    while (offset < characters.length) {
-      const page = current || startPage();
-      const paragraph = document.createElement("p");
-      paragraph.className = "reader-flip-text";
-      page.body.appendChild(paragraph);
-
-      let low = 1;
-      let high = characters.length - offset;
-      let best = 0;
-      while (low <= high) {
-        const middle = Math.floor((low + high) / 2);
-        paragraph.textContent = characters
-          .slice(offset, offset + middle)
-          .join("");
-        if (page.body.scrollHeight <= page.body.clientHeight + 1) {
-          best = middle;
-          low = middle + 1;
-        } else {
-          high = middle - 1;
-        }
-      }
-
-      if (!best) {
-        paragraph.remove();
-        if (page.body.childElementCount) {
-          current = undefined;
-          continue;
-        }
-        paragraph.textContent = characters[offset];
-        page.body.appendChild(paragraph);
-        best = 1;
-      } else {
-        paragraph.textContent = characters
-          .slice(offset, offset + best)
-          .join("");
-      }
-      offset += best;
-      if (offset < characters.length) current = undefined;
-    }
-  }
-
-  if (!pages.length) startPage();
-  return pages;
-}
-
-function clearPageFlip() {
-  window.clearTimeout(rebuildTimer);
-  if (!pageFlip) return;
-  pageFlip.getUI().destroy();
-  pageFlip = undefined;
-}
-
-async function initializePageFlip() {
-  if (displayMode.value !== "paged" || pageFlipInitializing) return;
-  pageFlipInitializing = true;
-  try {
-    await nextTick();
-    await document.fonts?.ready;
-    if (displayMode.value !== "paged") return;
-    const host = pageFlipHost.value;
-    if (!host) return;
-    const { width, height } = host.getBoundingClientRect();
-    if (width < 120 || height < 160) return;
-
-    clearPageFlip();
-    const pages = await createFlipPages(Math.floor(width), Math.floor(height));
-    if (displayMode.value !== "paged" || !pageFlipHost.value) return;
-
-    const readerPageCount = pages.length;
-    if (nextChapter.value) {
-      const transition = document.createElement("section");
-      transition.className = "reader-flip-page reader-flip-transition";
-      transition.textContent = "下一章";
-      pages.push(transition);
-    }
-    const startPage = Math.min(initialFlipPage, readerPageCount - 1);
-    pageFlip = new PageFlip(host, {
-      width: Math.floor(width),
-      height: Math.floor(height),
-      size: "fixed",
-      startPage,
-      drawShadow: true,
-      flippingTime: 560,
-      usePortrait: true,
-      autoSize: false,
-      maxShadowOpacity: 0.34,
-      mobileScrollSupport: false,
-      swipeDistance: 28,
-      clickEventForward: false,
-      useMouseEvents: true,
-      showPageCorners: true,
-    });
-    pageFlip.on("flip", (event) => {
-      const index = Number(event.data);
-      flipPageIndex.value = index;
-      flipPageCount.value = pageFlip?.getPageCount() || 0;
-      if (
-        index === readerPageCount &&
-        nextChapter.value &&
-        !openingNextChapter
-      ) {
-        openingNextChapter = true;
-        window.setTimeout(() => {
-          openingNextChapter = false;
-          void openChapter(nextChapter.value?.id);
-        }, 120);
-      }
-    });
-    pageFlip.loadFromHTML(pages);
-    flipPageIndex.value = startPage;
-    flipPageCount.value = pageFlip.getPageCount();
-    initialFlipPage = 0;
-  } finally {
-    pageFlipInitializing = false;
-  }
-}
-
 function setDisplayMode(mode: DisplayMode) {
   if (displayMode.value === mode) return;
-  if (mode === "vertical") clearPageFlip();
   displayMode.value = mode;
   controlsVisible.value = mode === "vertical";
   void nextTick(() => {
     readerElement.value?.scrollTo({ top: 0, left: 0 });
-    if (mode === "paged") void initializePageFlip();
+    if (mode === "paged") void relayout();
   });
 }
 
 function handleReaderClick(event: MouseEvent) {
-  if (ignoreNextReaderClick) {
-    ignoreNextReaderClick = false;
-    return;
-  }
+  // 翻页模式下的点击（翻页与菜单显隐）由翻页引擎统一处理。
+  if (displayMode.value === "paged") return;
   const rect = readerElement.value?.getBoundingClientRect();
   if (!rect) return;
   const localY = event.clientY - rect.top;
   if (localY < rect.height * 0.25 || localY > rect.height * 0.75) return;
   controlsVisible.value = !controlsVisible.value;
-}
-
-function handleFlipPointerDown(event: PointerEvent) {
-  if (displayMode.value !== "paged") return;
-  flipPointerStart = { x: event.clientX, y: event.clientY };
-}
-
-function handleFlipPointerUp(event: PointerEvent) {
-  const start = flipPointerStart;
-  flipPointerStart = undefined;
-  if (!start || displayMode.value !== "paged") return;
-  const deltaX = event.clientX - start.x;
-  const deltaY = Math.abs(event.clientY - start.y);
-  if (Math.abs(deltaX) < 36 || Math.abs(deltaX) < deltaY * 1.2) return;
-  ignoreNextReaderClick = true;
-  window.setTimeout(() => {
-    ignoreNextReaderClick = false;
-  }, 350);
 }
 
 function showDirectory() {
@@ -381,20 +229,10 @@ function showDirectory() {
 
 onMounted(() => {
   if (!book.value || !chapter.value) void router.replace("/library");
-  else {
-    desk.navigate("reader");
-    resizeObserver = new ResizeObserver(() => {
-      if (displayMode.value !== "paged") return;
-      window.clearTimeout(rebuildTimer);
-      rebuildTimer = window.setTimeout(() => void initializePageFlip(), 180);
-    });
-    if (stageElement.value) resizeObserver.observe(stageElement.value);
-  }
+  else desk.navigate("reader");
 });
 
 onBeforeUnmount(() => {
-  clearPageFlip();
-  resizeObserver?.disconnect();
   directoryOpen.value = false;
 });
 </script>
@@ -405,7 +243,6 @@ onBeforeUnmount(() => {
     ref="readerElement"
     class="reader"
     :class="{ 'paged-reader': displayMode === 'paged' }"
-    @scroll="handleReaderScroll"
     @click="handleReaderClick"
   >
     <header
@@ -452,13 +289,8 @@ onBeforeUnmount(() => {
           <p v-else class="chapter-text">{{ part.value }}</p>
         </template>
       </div>
-      <div
-        v-else
-        class="page-flip-frame"
-        @pointerdown="handleFlipPointerDown"
-        @pointerup="handleFlipPointerUp"
-        @pointercancel="flipPointerStart = undefined"
-      >
+      <div v-else class="page-flip-frame">
+        <canvas ref="readerCanvas" class="page-flip-canvas" />
         <header class="page-flip-chrome page-flip-topbar" @click.stop>
           <button
             class="page-flip-back"
@@ -470,21 +302,15 @@ onBeforeUnmount(() => {
           </button>
           <strong>{{ chapter.title }}</strong>
         </header>
-        <div ref="pageFlipHost" class="page-flip-host" />
         <div
           class="page-flip-chrome page-flip-bottom-meta"
           aria-label="书名和页数"
         >
           <span>{{ bookName }}</span>
-          <span
-            >{{ flipPageIndex + 1 }} /
-            {{ Math.max(flipPageCount - (nextChapter ? 1 : 0), 1) }}</span
-          >
+          <span>{{ pageIndex + 1 }} / {{ Math.max(pageCount, 1) }}</span>
         </div>
       </div>
     </main>
-
-    <div ref="pageMeasure" class="page-measure" aria-hidden="true" />
 
     <footer
       v-show="controlsVisible"
@@ -498,7 +324,7 @@ onBeforeUnmount(() => {
         :disabled="
           displayMode === 'vertical'
             ? !previousChapter
-            : !previousChapter && flipPageIndex === 0
+            : pageIndex === 0 && !previousChapter
         "
         @click="previous"
       >
@@ -534,7 +360,7 @@ onBeforeUnmount(() => {
         :disabled="
           displayMode === 'vertical'
             ? !nextChapter
-            : !nextChapter && flipPageIndex >= flipPageCount - 1
+            : pageIndex >= pageCount - 1 && !nextChapter
         "
         @click="next"
       >
@@ -717,13 +543,20 @@ onBeforeUnmount(() => {
   height: 100%;
   align-items: center;
   justify-content: center;
-  touch-action: pan-y;
+  touch-action: none;
+}
+.page-flip-canvas {
+  display: block;
+  width: 100%;
+  max-width: 820px;
+  height: 100%;
 }
 .page-flip-chrome {
   position: absolute;
   z-index: 20;
   color: var(--theme-color-dark);
-  pointer-events: auto;
+  /* 仅按钮本身开启命中，容器不遮挡画布手势。 */
+  pointer-events: none;
 }
 .page-flip-topbar {
   top: max(12px, env(safe-area-inset-top));
@@ -755,6 +588,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   color: var(--theme-color-dark);
   background: transparent;
+  pointer-events: auto;
 }
 .page-flip-back:hover {
   background: var(--theme-color-light);
@@ -774,70 +608,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.page-flip-host {
-  width: min(100%, 820px);
-  height: 100%;
-}
-.page-measure {
-  position: fixed;
-  top: 0;
-  left: -10000px;
-  visibility: hidden;
-  overflow: hidden;
-  pointer-events: none;
-}
-:global(.reader-flip-page) {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: var(--background-color);
-  color: var(--ink);
-}
-:global(.reader-flip-page-body) {
-  display: flex;
-  position: relative;
-  width: 100%;
-  height: 100%;
-  flex-direction: column;
-  justify-content: flex-start;
-  padding: 76px clamp(24px, 7vw, 72px) 90px;
-  overflow: hidden;
-  font-family: "Microsoft YaHei", sans-serif;
-  font-size: 16px;
-  line-height: 2;
-}
-:global(.reader-flip-text) {
-  flex: 0 0 auto;
-  margin: 0;
-  white-space: pre-wrap;
-}
-:global(.reader-flip-heading) {
-  flex: 0 0 auto;
-  margin: 0 0 24px;
-  color: var(--ink);
-  font-size: clamp(22px, 4vw, 32px);
-  font-weight: 700;
-  line-height: 1.35;
-  text-align: left;
-}
-:global(.reader-flip-image) {
-  display: block;
-  flex: 0 1 auto;
-  width: auto;
-  max-width: 100%;
-  max-height: 50%;
-  margin: 12px auto;
-  object-fit: contain;
-}
-:global(.reader-flip-transition) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--theme-color-dark);
-  font-size: 16px;
-  font-weight: 600;
 }
 .chapter-title {
   margin: 0 0 26px;
@@ -945,11 +715,6 @@ onBeforeUnmount(() => {
     min-height: 100dvh;
     padding-left: 0;
     padding-right: 0;
-  }
-  :global(.reader-flip-page-body) {
-    padding: calc(66px + env(safe-area-inset-top)) 12px
-      env(safe-area-inset-bottom);
-    font-size: 15px;
   }
   .page-flip-topbar {
     top: max(8px, env(safe-area-inset-top));

@@ -145,6 +145,23 @@ export function useDeskLibrary({
     }
   }
 
+  /**
+   * 读取指定章节内容但不改变当前阅读状态，供翻页模式预渲染相邻章节边界页。
+   * @returns 章节内容；读取失败时返回 undefined。
+   */
+  async function peekLocalChapter(chapterId: number) {
+    const book = localBook.value;
+    if (!book) return undefined;
+    try {
+      return await invoke<LocalChapterContent>("get_local_chapter", {
+        name: book.name,
+        chapterId,
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
   function openLocalAudioPlayer(trackIndex = 0) {
     if (!localBook.value?.audioTracks.length) {
       notify("本地没有可播放的有声章节");
@@ -233,6 +250,7 @@ export function useDeskLibrary({
     deleteBook,
     confirmDeleteBook,
     openLocalChapter,
+    peekLocalChapter,
     openLocalComicChapter,
     openLocalAudioPlayer,
     readOnline,
