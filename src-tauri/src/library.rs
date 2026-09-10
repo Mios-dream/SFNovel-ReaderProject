@@ -170,7 +170,8 @@ pub(crate) struct StoredChapter {
     pub(crate) content: String,
     pub(crate) volume_index: i64,
     pub(crate) chapter_index: i64,
-    /// 正文来源：`web` 表示 HTML/App 文本，`webVipOcr` 表示本地识别的图片正文。
+    /// 正文来源：`app` 表示已恢复的 App API 正文，`web` 表示网页 HTML 正文，
+    /// `webVipOcr` 表示本地识别的网页图片正文。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) content_source: Option<String>,
     /// 使用 OCR 时保留的已授权图片或 GIF 来源相对路径。
@@ -192,8 +193,8 @@ pub(crate) struct StoredChapterStore {
 pub(crate) struct RequestPolicy {
     pub(crate) request_interval_ms: u64,
     pub(crate) max_concurrent_downloads: u8,
-    #[serde(default = "default_app_fallback_enabled")]
-    pub(crate) app_fallback_enabled: bool,
+    #[serde(default = "default_app_api_preferred_enabled")]
+    pub(crate) app_api_preferred_enabled: bool,
     #[serde(default = "default_android_device_report_enabled")]
     pub(crate) android_device_report_enabled: bool,
 }
@@ -209,10 +210,10 @@ pub(crate) struct LocalComicChapter {
     pub(crate) pages: Vec<String>,
 }
 
-/// 返回请求策略中“允许 App API 回退”的 serde 默认值。
+/// 返回请求策略中“优先使用 App API 正文”的 serde 默认值。
 ///
-/// 旧版持久化策略缺少该字段时也会保留启用回退的默认行为。
-fn default_app_fallback_enabled() -> bool {
+/// 持久化策略缺少该字段时保持 App API 优先的默认行为。
+fn default_app_api_preferred_enabled() -> bool {
     true
 }
 
@@ -232,7 +233,7 @@ impl Default for RequestPolicy {
         Self {
             request_interval_ms: 500,
             max_concurrent_downloads: 1,
-            app_fallback_enabled: true,
+            app_api_preferred_enabled: true,
             android_device_report_enabled: true,
         }
     }

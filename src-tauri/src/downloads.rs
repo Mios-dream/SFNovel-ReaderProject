@@ -6,8 +6,9 @@
 use crate::app_client::AppClient;
 use crate::endpoint_policy::{app_endpoint_client, web_endpoint_client, EndpointCapability};
 use crate::library::{
-    ensure_external_storage_access, get_request_policy, library_directory, persist_native_jobs,
-    safe_library_name, StoredBookMetadata, StoredChapter, StoredChapterStore, StoredWorkMetadata,
+    decode_api_content, ensure_external_storage_access, get_request_policy, library_directory,
+    persist_native_jobs, safe_library_name, StoredBookMetadata, StoredChapter, StoredChapterStore,
+    StoredWorkMetadata,
 };
 use crate::ocr::{recognize_image, relative_book_path};
 #[cfg(target_os = "android")]
@@ -180,17 +181,48 @@ async fn materialize_chapter_images(
     Ok(output)
 }
 
-/// 从网站读取普通章节正文。
+/// 使用 App API 读取并恢复一章正文。
+async fn resolve_app_text_content(
+    app: &tauri::AppHandle,
+    app_client: &AppClient,
+    chapter_id: i64,
+) -> Result<String, String> {
+    let api = app_client
+        .get_chapter_content_and_metadata(chapter_id)
+        .await?;
+    decode_api_content(app, &api.content)
+}
+
+/// 按正文下载策略读取普通章节，App API 失败时回退网页正文。
 async fn resolve_text_content(
+    app: &tauri::AppHandle,
+    app_client: Option<&AppClient>,
     web_client: &WebClient,
     novel_id: i64,
     volume_id: i64,
     chapter_id: i64,
-) -> Result<String, String> {
-    web_client
+) -> Result<(String, &'static str), String> {
+    let app_error = if let Some(app_client) = app_client {
+        match resolve_app_text_content(app, app_client, chapter_id).await {
+            Ok(content) => return Ok((content, "app")),
+            Err(error) => Some(error),
+        }
+    } else {
+        None
+    };
+    let web_content = web_client
         .chapter_content(novel_id, volume_id, chapter_id)
-        .await
-        .map_err(|error| EndpointCapability::TextChapterWeb.unavailable_message(&error))
+        .await;
+    match (web_content, app_error) {
+        (Ok(content), _) => Ok((content, "web")),
+        (Err(web_error), Some(app_error)) => Err(format!(
+            "App 正文不可用：{app_error}；{}",
+            EndpointCapability::TextChapterWeb.unavailable_message(&web_error)
+        )),
+        (Err(web_error), None) => {
+            Err(EndpointCapability::TextChapterWeb.unavailable_message(&web_error))
+        }
+    }
 }
 
 /// 下载 VIP 章节正文图片，保留原图并调用本地 OCR。
@@ -249,12 +281,20 @@ async fn run_text_download(
         // 快照互相覆盖；不同作品仍可并行下载。
         let storage_lock = storage_lock?;
         let _storage_guard = storage_lock.lock().await;
-        // AppClient 在此仅负责目录和可选元数据；WebClient 才是所有章节正文、VIP 图片与
-        // 正文内插图资源的唯一请求入口。分别按能力构造可防止 App/Web Cookie 混用。
+        // 目录来自公开 App API；普通正文可按设置使用独立的已验证 App 会话。VIP 图片、
+        // 网页回退正文与正文内插图始终使用 WebClient，避免 App/Web Cookie 混用。
         let app_client = app_endpoint_client(&app, EndpointCapability::TextDirectory)?;
         let web_client = web_endpoint_client(&app, EndpointCapability::TextChapterWeb)?;
         // 读取下载限速策略，避免过快请求被 SFACG 服务器拒绝。若未配置则使用默认值。
         let policy = get_request_policy(app.clone()).unwrap_or_default();
+        let app_text_client = if policy.app_api_preferred_enabled && app_client.has_session() {
+            Some(app_endpoint_client(
+                &app,
+                EndpointCapability::TextChapterApp,
+            )?)
+        } else {
+            None
+        };
         let directory = library_directory(&app)?.join(safe_library_name(&title));
         fs::create_dir_all(&directory).map_err(|error| format!("无法创建本地书籍目录：{error}"))?;
 
@@ -344,8 +384,9 @@ async fn run_text_download(
             });
             emit_native_job_update(&app, &state, &job_id);
 
-            // 普通章节只要已存在即可复用。VIP 内容必须确认是成功 OCR 得到的非空文本，才
-            // 能跳过再次请求图片和识别，防止旧格式或失败残留被标记为已完成。
+            // 普通章节只要已存在即可复用。VIP 内容必须确认来自已成功恢复的 App 正文或
+            // 非空的网页 OCR，才可跳过；这会重试旧格式或失败残留，但不会重复 OCR 已由
+            // App API 成功下载的章节。
             let existing_vip_is_complete =
                 store
                     .chapters
@@ -354,8 +395,10 @@ async fn run_text_download(
                         matches!(
                             content_kind,
                             TextContentKind::ImageVip | TextContentKind::EncryptedVip
-                        ) && chapter.content_source.as_deref() == Some("webVipOcr")
-                            && !chapter.content.trim().is_empty()
+                        ) && matches!(
+                            chapter.content_source.as_deref(),
+                            Some("app") | Some("webVipOcr")
+                        ) && !chapter.content.trim().is_empty()
                     });
             let should_write = !store.chapters.contains_key(&chapter_id.to_string())
                 || (matches!(
@@ -365,42 +408,71 @@ async fn run_text_download(
             if should_write {
                 let (content, content_source, ocr_source_path) = match content_kind {
                     TextContentKind::ImageVip | TextContentKind::EncryptedVip => {
-                        // 网页 VIP 分支：不解析 #ChapterBody。这里从 Web VIP 图片端点读取
-                        // 二进制图片，`resolve_vip_image_content` 将原图保存到 ocr/ 后调用
-                        // 本地 OCR，并返回与普通网页解析相同的纯文本章节内容。
-                        update_native_job(&state, &job_id, |job| {
-                            job.message = format!("正在保存并识别图片正文：{chapter_title}");
-                        });
-                        emit_native_job_update(&app, &state, &job_id);
-                        let vip_result = resolve_vip_image_content(
-                            &app,
-                            &web_client,
-                            &directory,
-                            novel_id,
-                            chapter_id,
-                        )
-                        .await;
-                        let (content, source_path) = match vip_result {
-                            Ok(value) => value,
-                            Err(error) => {
-                                failed_vip_chapters.push((chapter_title.clone(), error.clone()));
+                        // 已连接 App 凭证且策略开启时，先尝试 API 正文以避免网页图片 OCR。
+                        // 这不会把 App Cookie 传给网页回退请求；App 拒绝、未购买或解码失败
+                        // 时才读取网页 VIP 图片并执行本地 OCR。
+                        let app_result = match app_text_client.as_ref() {
+                            Some(client) => Some(resolve_app_text_content(&app, client, chapter_id).await),
+                            None => None,
+                        };
+                        match app_result {
+                            Some(Ok(content)) => (content, Some("app".to_string()), None),
+                            app_result => {
+                                let app_error = app_result.and_then(Result::err);
                                 update_native_job(&state, &job_id, |job| {
-                                    job.message = format!(
-                                        "VIP 章节处理失败，已跳过：{chapter_title}（{error}）"
-                                    );
+                                    job.message = if app_error.is_some() {
+                                        format!(
+                                            "App 正文不可用，正在保存并识别图片正文：{chapter_title}"
+                                        )
+                                    } else {
+                                        format!("正在保存并识别图片正文：{chapter_title}")
+                                    };
                                 });
                                 emit_native_job_update(&app, &state, &job_id);
-                                continue;
+                                let vip_result = resolve_vip_image_content(
+                                    &app,
+                                    &web_client,
+                                    &directory,
+                                    novel_id,
+                                    chapter_id,
+                                )
+                                .await;
+                                let (content, source_path) = match vip_result {
+                                    Ok(value) => value,
+                                    Err(vip_error) => {
+                                        let error = match app_error {
+                                            Some(app_error) => format!(
+                                                "App 正文不可用：{app_error}；网页 VIP 图片正文不可用：{vip_error}"
+                                            ),
+                                            None => vip_error,
+                                        };
+                                        failed_vip_chapters.push((chapter_title.clone(), error.clone()));
+                                        update_native_job(&state, &job_id, |job| {
+                                            job.message = format!(
+                                                "VIP 章节处理失败，已跳过：{chapter_title}（{error}）"
+                                            );
+                                        });
+                                        emit_native_job_update(&app, &state, &job_id);
+                                        continue;
+                                    }
+                                };
+                                (content, Some("webVipOcr".to_string()), Some(source_path))
                             }
-                        };
-                        (content, Some("webVipOcr".to_string()), Some(source_path))
+                        }
                     }
                     TextContentKind::Text | TextContentKind::Unknown => {
-                        // 普通网页解析分支：从章节页面 #ChapterBody 提取正文并转换为文本
-                        // / Markdown。若正文含 [img=] 标记，只下载并本地化插图，不做 OCR。
-                        let raw_content =
-                            resolve_text_content(&web_client, novel_id, volume_id, chapter_id)
-                                .await?;
+                        // 有 App 凭证且策略开启时先使用 App API；失败或未连接时回退网页。
+                        // API 正文会使用本地字典恢复混淆字符。两种来源的 [img=] 标记均由
+                        // WebClient 下载并本地化，不将 App Cookie 用于网页资源请求。
+                        let (raw_content, source) = resolve_text_content(
+                            &app,
+                            app_text_client.as_ref(),
+                            &web_client,
+                            novel_id,
+                            volume_id,
+                            chapter_id,
+                        )
+                        .await?;
                         let content = materialize_chapter_images(
                             &web_client,
                             &directory,
@@ -409,7 +481,7 @@ async fn run_text_download(
                             &raw_content,
                         )
                         .await?;
-                        (content, Some("web".to_string()), None)
+                        (content, Some(source.to_string()), None)
                     }
                 };
                 store.chapters.insert(
@@ -1251,12 +1323,10 @@ async fn run_comic_download(
             .collect::<std::collections::HashSet<_>>();
         let chapters = catalog
             .into_iter()
-            .filter(|chapter| requested.contains(&chapter.id) && chapter.is_unlocked)
+            .filter(|chapter| requested.contains(&chapter.id) && chapter.is_unlocked.is_selectable())
             .collect::<Vec<_>>();
         if chapters.is_empty() {
-            return Err(
-                "所选漫画章节没有可下载内容；VIP 章节必须由目录明确标记为已解锁".to_string(),
-            );
+            return Err("所选漫画章节不在当前目录中".to_string());
         }
         let directory = library_directory(&app)?.join(safe_library_name(&title));
         let comic_directory = directory.join("comic");
@@ -1281,7 +1351,8 @@ async fn run_comic_download(
             .collect::<std::collections::HashSet<_>>();
         let policy = get_request_policy(app.clone()).unwrap_or_default();
         let total = chapters.len();
-        for (chapter_index, chapter) in chapters.into_iter().enumerate() {
+        let mut skipped_chapters = Vec::new();
+        'chapters: for (chapter_index, chapter) in chapters.into_iter().enumerate() {
             if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("下载已暂停".to_string());
             }
@@ -1294,10 +1365,28 @@ async fn run_comic_download(
             let chapter_directory = comic_directory.join(format!("{:06}", chapter.id));
             let marker = chapter_directory.join(".complete");
             if !marker.is_file() {
-                let images = pages_client
+                let images = match pages_client
                     .comic_chapter_images(&folder, chapter.id)
                     .await
-                    .map_err(|error| EndpointCapability::ComicPages.unavailable_message(&error))?;
+                {
+                    Ok(images) => images,
+                    Err(error) => {
+                        let error = EndpointCapability::ComicPages.unavailable_message(&error);
+                        if !chapter.is_vip {
+                            return Err(error);
+                        }
+                        eprintln!(
+                            "[sfacg] comic chapter skipped: chapter_id={}, title={}, error={error}",
+                            chapter.id, chapter.title
+                        );
+                        skipped_chapters.push((chapter.title.clone(), error));
+                        update_native_job(&state, &job_id, |job| {
+                            job.message = format!("漫画章节不可下载，已跳过：{}", chapter.title);
+                        });
+                        emit_native_job_update(&app, &state, &job_id);
+                        continue 'chapters;
+                    }
+                };
                 fs::create_dir_all(&chapter_directory)
                     .map_err(|error| format!("无法创建漫画章节目录：{error}"))?;
                 for (page_index, image) in images.iter().enumerate() {
@@ -1319,29 +1408,51 @@ async fn run_comic_download(
                     if target.is_file() {
                         continue;
                     }
-                    let payload = pages_client
-                        .asset_request(
-                            image,
-                            "https://manhua.sfacg.com/",
-                            "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-                        )
-                        .send()
-                        .await
-                        .map_err(|error| {
-                            EndpointCapability::ComicPages
-                                .unavailable_message(&format!("无法下载漫画图片：{error}"))
-                        })?
-                        .error_for_status()
-                        .map_err(|error| {
-                            EndpointCapability::ComicPages
-                                .unavailable_message(&format!("漫画图片下载被拒绝：{error}"))
-                        })?
-                        .bytes()
-                        .await
-                        .map_err(|error| {
-                            EndpointCapability::ComicPages
-                                .unavailable_message(&format!("无法读取漫画图片：{error}"))
-                        })?;
+                    let payload = match async {
+                        let response = pages_client
+                            .asset_request(
+                                image,
+                                "https://manhua.sfacg.com/",
+                                "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                            )
+                            .send()
+                            .await
+                            .map_err(|error| {
+                                EndpointCapability::ComicPages
+                                    .unavailable_message(&format!("无法下载漫画图片：{error}"))
+                            })?;
+                        response
+                            .error_for_status()
+                            .map_err(|error| {
+                                EndpointCapability::ComicPages
+                                    .unavailable_message(&format!("漫画图片下载被拒绝：{error}"))
+                            })?
+                            .bytes()
+                            .await
+                            .map_err(|error| {
+                                EndpointCapability::ComicPages
+                                    .unavailable_message(&format!("无法读取漫画图片：{error}"))
+                            })
+                    }
+                    .await
+                    {
+                        Ok(payload) => payload,
+                        Err(error) => {
+                            if !chapter.is_vip {
+                                return Err(error);
+                            }
+                            eprintln!(
+                                "[sfacg] comic chapter skipped: chapter_id={}, title={}, error={error}",
+                                chapter.id, chapter.title
+                            );
+                            skipped_chapters.push((chapter.title.clone(), error));
+                            update_native_job(&state, &job_id, |job| {
+                                job.message = format!("VIP 漫画章节不可下载，已跳过：{}", chapter.title);
+                            });
+                            emit_native_job_update(&app, &state, &job_id);
+                            continue 'chapters;
+                        }
+                    };
                     let partial = target.with_extension(format!("{extension}.part"));
                     fs::write(&partial, payload)
                         .map_err(|error| format!("无法写入漫画图片：{error}"))?;
@@ -1368,7 +1479,23 @@ async fn run_comic_download(
             directory.join(".novel-flow.json"),
         )
         .map_err(|error| format!("无法完成漫画元数据写入：{error}"))?;
-        Ok("comic".to_string())
+        if skipped_chapters.is_empty() {
+            Ok("comic".to_string())
+        } else {
+            let summary = skipped_chapters
+                .iter()
+                .take(3)
+                .map(|(chapter_title, error)| format!("{chapter_title}（{error}）"))
+                .collect::<Vec<_>>()
+                .join("；");
+            let remaining = skipped_chapters.len().saturating_sub(3);
+            let suffix = (remaining > 0).then(|| format!("；其余 {remaining} 章"));
+            Err(format!(
+                "{} 个 VIP 漫画章节未保存：{summary}{}。已成功章节已保存，可继续下载失败章节",
+                skipped_chapters.len(),
+                suffix.unwrap_or_default()
+            ))
+        }
     }
     .await;
     match result {
@@ -1566,7 +1693,8 @@ pub(crate) async fn create_audio_download(
 
 /// 创建并调度一个 SF 漫画下载任务。
 ///
-/// 在登记任务前读取已认证漫画目录，以拒绝尚未解锁的 VIP 章节；实际下载在后台任务中执行。
+/// 目录中的 VIP 标记不代表账户权限。任务会在后台请求实际图片资源，无法访问的章节将
+/// 被跳过，其余章节继续下载。
 ///
 /// # 参数
 /// * `app` - 用于访问原生状态、会话和本地存储的 Tauri 应用句柄。
@@ -1576,7 +1704,7 @@ pub(crate) async fn create_audio_download(
 /// * `chapter_ids` - 非空的选中漫画章节编号列表。
 ///
 /// # 错误
-/// 输入无效、外部存储不可写、会话或目录不可用、所选 VIP 章节未解锁，或任务注册表不可用时返回错误。
+/// 输入无效、外部存储不可写、会话同步或任务注册表不可用时返回错误。
 #[tauri::command]
 pub(crate) async fn create_comic_download(
     app: tauri::AppHandle,
@@ -1597,32 +1725,6 @@ pub(crate) async fn create_comic_download(
     }
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
-    let web_client = web_endpoint_client(&app, EndpointCapability::ComicCatalog)?;
-    let folder = if let Some(folder) = source_path.clone().filter(|value| {
-        !value.is_empty()
-            && value.len() <= 100
-            && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
-    }) {
-        folder
-    } else {
-        let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
-        let (_, folder) = app_client.comic_identity(comic_id).await?;
-        folder
-    };
-    let catalog = web_client
-        .get_comic_catalog(&folder)
-        .await
-        .map_err(|error| EndpointCapability::ComicCatalog.unavailable_message(&error))?;
-    let requested = chapter_ids
-        .iter()
-        .copied()
-        .collect::<std::collections::HashSet<_>>();
-    if catalog
-        .iter()
-        .any(|chapter| requested.contains(&chapter.id) && !chapter.is_unlocked)
-    {
-        return Err("所选 VIP 漫画章节尚未解锁，请确认账号已购买对应章节".to_string());
-    }
     let id = format!(
         "{}-{comic_id}",
         SystemTime::now()

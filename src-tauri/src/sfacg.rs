@@ -9,7 +9,7 @@ use crate::library::{
     get_request_policy, library_directory, safe_library_name, StoredBookMetadata,
 };
 use crate::utils::json::read_or_default;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 #[cfg(target_os = "android")]
 use serde_json::Value;
 use std::fs;
@@ -26,19 +26,14 @@ use tauri::plugin::{PluginHandle, TauriPlugin};
 pub(crate) const DEFAULT_CONTENT_DICTIONARY: &str =
     include_str!("../../sfacg-content-dictionary.json");
 /// 官方网页登录页面地址。
-const OFFICIAL_LOGIN_URL: &str = "https://passport.sfacg.com/";
+const OFFICIAL_LOGIN_URL: &str = "https://m.sfacg.com/login";
+// 备用登录地址
+// const OFFICIAL_LOGIN_URL: &str = "https://passport.sfacg.com/";
+
 /// 官方登录窗口的稳定 Tauri 标签。
 const OFFICIAL_LOGIN_WINDOW_LABEL: &str = "sfacg-official-login";
-/// Windows 上模拟官方网页访问时使用的浏览器标识。
-#[cfg(target_os = "windows")]
+/// 所有平台访问 SF 网页时统一使用的桌面浏览器标识。
 pub(crate) const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
-/// Android 上模拟官方网页访问时使用的浏览器标识。
-#[cfg(target_os = "android")]
-pub(crate) const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
-/// 其他桌面平台访问 SF 网页时使用的浏览器标识。
-#[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
-pub(crate) const SF_WEB_USER_AGENT: &str =
-    "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 /// 进程级设备身份令牌，仅在初始化后可供签名客户端读取。
 pub(crate) static SF_DEVICE_TOKEN: OnceLock<String> = OnceLock::new();
 
@@ -297,13 +292,45 @@ pub(crate) struct NativeAuthSession {
 
 /// 仅原生层使用的漫画章节记录。
 ///
-/// 公开漫画站仅通过网页端点提供章节目录，因此除渲染进程安全的可用性元数据外，这些值
-/// 不会离开原生下载边界。
+/// 漫画章节的账户拥有权状态。
+///
+/// 网页目录和匿名 App API 的 VIP 标记只能产生 `Unknown`。只有带有效 App 会话的 API
+/// 返回明确拥有权时，才允许产生 `Unlocked` 或 `Locked`；`Unknown` 必须由真实资源请求
+/// 决定，不得在目录阶段阻止用户选择。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ComicUnlockState {
+    Unlocked,
+    Locked,
+    Unknown,
+}
+
+impl ComicUnlockState {
+    /// 判断已认证 App API 是否明确禁止下载该章节。
+    pub(crate) fn is_selectable(self) -> bool {
+        self != Self::Locked
+    }
+}
+
+impl Serialize for ComicUnlockState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Unlocked => serializer.serialize_bool(true),
+            Self::Locked => serializer.serialize_bool(false),
+            Self::Unknown => serializer.serialize_str("unknown"),
+        }
+    }
+}
+
+/// 公开漫画站仅通过网页端点提供章节目录。网页 VIP 标记仅表示章节类型，拥有权状态始终
+/// 为 [`ComicUnlockState::Unknown`]。
 pub(crate) struct NativeComicChapter {
     pub(crate) id: i64,
     pub(crate) title: String,
     pub(crate) is_vip: bool,
-    pub(crate) is_unlocked: bool,
+    pub(crate) is_unlocked: ComicUnlockState,
 }
 
 /// 章节选择器使用的渲染进程安全漫画目录。
@@ -320,7 +347,7 @@ pub(crate) struct ComicChapterSummary {
     pub(crate) id: i64,
     pub(crate) title: String,
     pub(crate) is_vip: bool,
-    pub(crate) is_unlocked: bool,
+    pub(crate) is_unlocked: ComicUnlockState,
     pub(crate) downloaded: bool,
 }
 

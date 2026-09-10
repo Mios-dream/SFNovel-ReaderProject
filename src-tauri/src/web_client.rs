@@ -1,8 +1,8 @@
 //! SF 网页客户端及其 Web 会话边界。
 
 use crate::sfacg::{
-    validate_novel_id, AuthSessionState, NativeAudioChapter, NativeComicChapter, UserProfile,
-    SF_WEB_USER_AGENT,
+    validate_novel_id, AuthSessionState, ComicUnlockState, NativeAudioChapter, NativeComicChapter,
+    UserProfile, SF_WEB_USER_AGENT,
 };
 use crate::utils::cookie::{filter_cookie_header, has_cookie_name};
 use serde_json::Value;
@@ -792,7 +792,10 @@ fn extract_js_string(html: &str, variable: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-/// 解析 SF 漫画目录页中的章节链接和已明确给出的拥有权标记。
+/// 解析 SF 漫画目录页中的章节链接。
+///
+/// 漫画网页目录只能识别章节是否为 VIP，不能识别当前 App 账户是否拥有章节。网页上的
+/// 任何属性都不参与拥有权判断；VIP 章节必须保留为未知状态，直到实际请求资源。
 fn parse_comic_catalog(html: &str, folder: &str) -> Result<Vec<NativeComicChapter>, String> {
     let marker = format!("href=\"/mh/{folder}/");
     let mut remaining = html;
@@ -822,7 +825,11 @@ fn parse_comic_catalog(html: &str, folder: &str) -> Result<Vec<NativeComicChapte
             id,
             title,
             is_vip,
-            is_unlocked: !is_vip || comic_anchor_is_unlocked(anchor),
+            is_unlocked: if is_vip {
+                ComicUnlockState::Unknown
+            } else {
+                ComicUnlockState::Unlocked
+            },
         });
     }
     if chapters.is_empty() {
@@ -830,21 +837,6 @@ fn parse_comic_catalog(html: &str, folder: &str) -> Result<Vec<NativeComicChapte
     }
     chapters.reverse();
     Ok(chapters)
-}
-
-/// 读取目录锚点的显式拥有权标记，登录态本身不推断为已购买。
-fn comic_anchor_is_unlocked(anchor: &str) -> bool {
-    let normalized = anchor.to_ascii_lowercase();
-    [
-        "data-has=\"true\"",
-        "data-has=true",
-        "data-has='true'",
-        "data-isunlocked=\"true\"",
-        "data-isunlocked=true",
-        "data-isunlocked='true'",
-    ]
-    .iter()
-    .any(|marker| normalized.contains(marker))
 }
 
 /// 从单个已限定范围的 HTML 标签读取带引号或不带引号的属性。

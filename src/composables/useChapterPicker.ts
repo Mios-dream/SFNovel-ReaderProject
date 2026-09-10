@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref, type Ref } from "vue";
 import type { AuthStatus, Chapter, ChapterMode, ChapterVolume, Job, Novel } from "../types";
-import type { Notify } from "./deskShared";
+import { nativeErrorMessage, type Notify } from "./deskShared";
 
 type UseChapterPickerOptions = {
   auth: Ref<AuthStatus>;
@@ -82,7 +82,7 @@ export function useChapterPicker({
       selectDownloadableChapters();
     } catch (error) {
       chapterModalOpen.value = false;
-      notify(error instanceof Error ? error.message : "读取章节目录失败");
+      notify(nativeErrorMessage(error, "读取章节目录失败"));
     } finally {
       chapterLoading.value = false;
     }
@@ -107,13 +107,10 @@ export function useChapterPicker({
         ? audioChapters.value.find((item) => item.id === id)
         : comicChapters.value.find((item) => item.id === id);
     if (!chapter || chapter.downloaded) return false;
-    // Text catalogue sales markers do not prove account entitlement. The native
-    // downloader validates access only when it requests the selected resource.
-    return (
-      mode === "text" ||
-      !chapter.isVip ||
-      ("isUnlocked" in chapter && chapter.isUnlocked)
-    );
+    // Text and comic directory sales markers do not prove account entitlement.
+    // The native downloader validates access only when it requests the resource.
+    return mode === "text" || (mode === "comic" && "isUnlocked" in chapter && chapter.isUnlocked !== false) || !chapter.isVip ||
+      ("isUnlocked" in chapter && chapter.isUnlocked === true);
   }
 
   function selectDownloadableChapters() {
@@ -163,7 +160,7 @@ export function useChapterPicker({
       notify(`已将《${novel.novelName}》加入下载队列`);
       void refreshJobs();
     } catch (error) {
-      notify(error instanceof Error ? error.message : "创建下载任务失败");
+      notify(nativeErrorMessage(error, "创建下载任务失败"));
     }
   }
 

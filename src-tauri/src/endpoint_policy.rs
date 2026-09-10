@@ -143,7 +143,7 @@ impl EndpointCapability {
                 session: Required,
             },
             TextChapterApp => EndpointPolicy {
-                name: "App 正文回退",
+                name: "App 正文",
                 client: App,
                 route_template: "GET api.sfacg.com/Chaps/{chapterId}",
                 session: Required,

@@ -92,6 +92,6 @@ class SfacgLoginActivity : AppCompatActivity() {
 
     private companion object {
         /** The SF-hosted entrypoint where users complete their own authentication. */
-        const val OFFICIAL_LOGIN_URL = "https://passport.sfacg.com/"
+        const val OFFICIAL_LOGIN_URL = "https://m.sfacg.com/login"
     }
 }

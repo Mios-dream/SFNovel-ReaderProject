@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-vue-next";
 import { deskInjectionKey } from "../deskContext";
+import { nativeErrorMessage } from "../composables/deskShared";
 import type { Chapter, ChapterMode, ChapterVolume } from "../types";
 
 function requireDesk() {
@@ -179,8 +180,7 @@ async function browseDirectory() {
       }
       loadedDirectoryKey.value = key;
     } catch (error) {
-      directoryError.value =
-        error instanceof Error ? error.message : "读取章节目录失败";
+      directoryError.value = nativeErrorMessage(error, "读取章节目录失败");
     } finally {
       directoryLoading.value = false;
     }

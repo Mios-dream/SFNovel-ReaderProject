@@ -134,7 +134,7 @@
               :key="chapter.id"
               :class="{
                 downloaded: chapter.downloaded,
-                locked: chapter.isVip && !chapter.isUnlocked,
+                locked: chapter.isVip && chapter.isUnlocked === false,
               }"
               ><input
                 :checked="selectedIds.includes(chapter.id)"
@@ -153,12 +153,12 @@
               ><span
                 v-else-if="chapter.isVip"
                 class="chapter-state vip"
-                :class="{ unlocked: chapter.isUnlocked }"
+                :class="{ unlocked: chapter.isUnlocked === true }"
                 ><LockKeyholeOpen
-                  v-if="chapter.isUnlocked"
+                  v-if="chapter.isUnlocked === true"
                   :size="15"
                 /><LockKeyhole v-else :size="15" />{{
-                  chapter.isUnlocked ? "已解锁" : "VIP 章节"
+                  chapter.isUnlocked === true ? "已解锁" : "VIP 章节"
                 }}</span
               ></label
             ></template
@@ -217,7 +217,7 @@ type TextChapter = ChapterVolume["chapters"][number];
 type SelectableChapter = (TextChapter | Chapter) & {
   downloaded?: boolean;
   isVip?: boolean;
-  isUnlocked?: boolean;
+  isUnlocked?: boolean | "unknown";
   contentKind?: TextChapter["contentKind"];
   accessState?: TextChapter["accessState"];
 };
@@ -226,14 +226,15 @@ type SelectableChapter = (TextChapter | Chapter) & {
 /**
  * 判断章节是否允许加入下载任务。
  * @param chapter 待判断的文本、有声或漫画章节。
- * @returns 未下载且已解锁（或免费）时返回 true。
+ * @returns 未下载，且目录未明确标记为锁定时返回 true。
  */
 function canDownload(chapter: SelectableChapter) {
   if (chapter.downloaded) return false;
+  if (props.mode === "comic") return chapter.isUnlocked !== false;
   // `contentKind` identifies a website text entry. Its `unknown` access state
   // is intentional: a catalogue cannot determine whether the account owns it.
   if (chapter.contentKind) return chapter.accessState !== "unavailable";
-  return !chapter.isVip || chapter.isUnlocked;
+  return !chapter.isVip || chapter.isUnlocked === true;
 }
 
 function textContentLabel(_kind: TextChapter["contentKind"]) {

@@ -27,7 +27,7 @@ const emit = defineEmits<{
 const defaultPolicy: RequestPolicy = {
   requestIntervalMs: 500,
   maxConcurrentDownloads: 1,
-  appFallbackEnabled: true,
+  appApiPreferredEnabled: true,
   androidDeviceReportEnabled: true,
 };
 // 使用本地草稿编辑，只有提交表单时才将设置发送给后端。
@@ -116,14 +116,17 @@ function resetDraft() {
 
             <div class="setting-row">
               <div class="setting-info">
-                <strong>网页失败时使用 App API</strong>
-                <small>网页正文不可用时允许回退 App API，默认开启</small>
+                <strong>优先使用 App API 下载正文</strong>
+                <small
+                  >存在 App 凭证时优先使用 App API。网页图片正文需要
+                  OCR，较耗性能且可能存在识别错误</small
+                >
               </div>
               <label class="setting-control toggle-control">
-                <input v-model="draft.appFallbackEnabled" type="checkbox" />
+                <input v-model="draft.appApiPreferredEnabled" type="checkbox" />
                 <span class="toggle" aria-hidden="true"></span>
                 <span>{{
-                  draft.appFallbackEnabled ? "已启用" : "已关闭"
+                  draft.appApiPreferredEnabled ? "已启用" : "已关闭"
                 }}</span>
               </label>
             </div>

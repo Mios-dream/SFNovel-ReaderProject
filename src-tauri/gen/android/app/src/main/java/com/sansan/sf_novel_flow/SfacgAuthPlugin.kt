@@ -179,7 +179,7 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private companion object {
-        val SFACG_COOKIE_URLS = arrayOf("https://book.sfacg.com/", "https://api.sfacg.com/", "https://passport.sfacg.com/")
+        val SFACG_COOKIE_URLS = arrayOf("https://book.sfacg.com/", "https://api.sfacg.com/", "https://m.sfacg.com/login")
         const val SESSION_MAX_AGE = 30 * 24 * 60 * 60
         const val STORAGE_PERMISSION_REQUEST_CODE = 4101
         const val DEVICE_PREFS = "sfacg-device"

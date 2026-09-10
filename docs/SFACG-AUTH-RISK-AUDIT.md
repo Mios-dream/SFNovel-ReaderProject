@@ -133,7 +133,7 @@
 
 - 网络层拆分为 `AppClient` 与 `WebClient`。`AppClient` 集中构造带 Basic Auth、`SFSecurity` 和 Android App User-Agent 的签名请求；`WebClient` 集中构造网页、网页 AJAX 和资源请求，使用平台对应的浏览器 User-Agent 与稳定的语言头。两类请求不再共用 `reqwest::Client` 或默认请求头。
 - `AppClient` 与 `WebClient` 分别位于 `src-tauri/src/app_client.rs` 和 `src-tauri/src/web_client.rs`。客户端在创建时各自从原生状态读取会话快照：前者只接受 `.SFCommunity` 与 `session_APP`，后者只接受 `.SFCommunity` 与 `session_PC`。调用方不能向任一客户端传入 Cookie，因此不会将 Web Cookie 发送给 App API，或将 App Cookie 发送给网页请求。
-- `WebClient` 在发出请求前仅保留 `.SFCommunity` 与 `session_PC`，拒绝 `session_APP` 和未知 `session_*`。文本正文现在网页优先，网页正文不可用时才按照 `appFallbackEnabled` 设置回退 App API；有声目录/媒体、漫画目录/章节/图片及网页封面统一经过 `WebClient`。
+- `WebClient` 在发出请求前仅保留 `.SFCommunity` 与 `session_PC`，拒绝 `session_APP` 和未知 `session_*`。存在 App 凭证且 `appApiPreferredEnabled` 开启时，所有可下载章节优先使用 App API；App 请求失败或没有 App 凭证时才读取网页正文，VIP 章节在此时由网页路径获取图片并经本地 OCR 识别。有声目录/媒体、漫画目录/章节/图片及网页封面统一经过 `WebClient`。
 - App 会话和 Web 会话改为独立的原生字段。App 请求只能读取 `.SFCommunity` 与 `session_APP`，Web 请求只能读取 `.SFCommunity` 与 `session_PC`；未知的 `session_*` 不再收集或转发。
 - 官方网页登录不再调用 App `/user` 验证，也不会把 Web Cookie 持久化为 App 会话。密码登录只创建 App 会话，并且 Android 不再把它写入 WebView Cookie Jar。
 - `AuthStatus` 分别返回 `appAuthenticated` 与 `webAuthenticated`。账户弹窗使用 `GetLoginInfo.ashx` 验证 Web 会话并读取昵称、头像；随后从 `m.sfacg.com/my/` 读取火券、代券和月票。VIP 体系由 `pages.sfacg.com/api/User?expand=newVip` 的 `data.expand.newVip.isNewVip` 决定：`true` 时读取并展示新 VIP 的等级和名称，`false` 时读取 `pages.sfacg.com/api/common/vipInfo` 并展示旧 VIP 等级，不能通过等级数值或两个接口是否都返回数据判断。App 会话仅可选地补充金币及其账户资料，不能作为账户弹窗的前提。书架、有声、漫画和网页正文回退使用 Web 会话；App 正文仍使用 App 会话。

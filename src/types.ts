@@ -57,7 +57,8 @@ export type Chapter = {
   volume: string;
   needFireMoney?: number;
   isVip?: boolean;
-  isUnlocked?: boolean;
+  /** `unknown` means the catalog only identifies a VIP chapter, not entitlement. */
+  isUnlocked?: boolean | "unknown";
   downloaded?: boolean;
 };
 
@@ -162,6 +163,6 @@ export type UserProfile = {
 export type RequestPolicy = {
   requestIntervalMs: number;
   maxConcurrentDownloads: number;
-  appFallbackEnabled: boolean;
+  appApiPreferredEnabled: boolean;
   androidDeviceReportEnabled: boolean;
 };

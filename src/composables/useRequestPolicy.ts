@@ -8,7 +8,7 @@ export function useRequestPolicy(notify: Notify) {
   const requestPolicy = ref<RequestPolicy>({
     requestIntervalMs: 500,
     maxConcurrentDownloads: 1,
-    appFallbackEnabled: true,
+    appApiPreferredEnabled: true,
     androidDeviceReportEnabled: true,
   });
   const requestPolicySaving = ref(false);

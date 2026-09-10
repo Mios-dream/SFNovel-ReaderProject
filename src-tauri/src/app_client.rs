@@ -356,7 +356,7 @@ impl AppClient {
 
     /// 获取文字小说的 App 章节目录。
     ///
-    /// 目录请求只用于章节元数据；正文下载仍由网页客户端负责。
+    /// 目录请求用于章节元数据；正文下载由下载策略决定是否优先使用 App API。
     pub(super) async fn get_chapter_catalog(
         &self,
         novel_id: i64,
