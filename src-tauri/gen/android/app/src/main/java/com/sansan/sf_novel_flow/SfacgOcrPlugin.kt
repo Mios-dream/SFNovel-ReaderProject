@@ -4,12 +4,19 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Movie
+import android.util.Log
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import ai.onnxruntime.TensorInfo
 import java.io.File
 import java.io.FileOutputStream
+import java.io.BufferedInputStream
+import java.io.InputStream
+import java.io.OutputStreamWriter
+import java.io.PrintWriter
 import java.nio.FloatBuffer
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -37,88 +44,95 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         Thread {
+            val progress = OcrProgress()
+            var segments: File? = null
             try {
+                progress.stage = "检查输入文件"
                 val source = File(args.sourcePath)
-                require(source.isFile) { "OCR 输入图片不存在" }
-                require(source.length() <= MAX_OCR_SOURCE_BYTES) { "OCR 图片过大，已拒绝处理" }
-                val segments = File(args.segmentsDir).also { it.mkdirs() }
+                require(source.isFile) { "OCR 输入图片不存在：${source.absolutePath}" }
+                progress.stage = "准备诊断目录"
+                val segmentDirectory = prepareSegmentsDirectory(args.segmentsDir)
+                segments = segmentDirectory
+                progress.stage = "加载 OCR 模型"
                 val text = OnnxChapterRecognizer(activity).use { recognizer ->
-                    recognizeFrames(source, segments, recognizer)
+                    recognizeFrames(source, segmentDirectory, recognizer, progress)
                 }
                 if (text.isBlank()) throw IllegalStateException("未识别到可用文字")
                 invoke.resolve(JSObject().put("text", text))
-            } catch (error: Exception) {
-                invoke.reject(error.message ?: "Android OCR 失败")
+            } catch (error: Throwable) {
+                val report = writeFailureReport(segments, progress.stage, error)
+                Log.e(LOG_TAG, "OCR failed at ${progress.stage}", error)
+                invoke.reject(formatFailure(progress.stage, error, report))
             }
         }.start()
     }
 
-    private fun recognizeFrames(source: File, segments: File, recognizer: OnnxChapterRecognizer): String {
+    private fun prepareSegmentsDirectory(path: String): File = File(path).also { directory ->
+        require(directory.isDirectory || directory.mkdirs()) { "无法创建 OCR 诊断目录：${directory.absolutePath}" }
+        require(directory.isDirectory) { "OCR 诊断目录不是文件夹：${directory.absolutePath}" }
+    }
+
+    private fun recognizeFrames(source: File, segments: File, recognizer: OnnxChapterRecognizer, progress: OcrProgress): String {
         val frameTexts = ArrayList<String>()
         if (source.extension.lowercase(Locale.ROOT) != "gif") {
-            BitmapFactory.decodeFile(source.absolutePath)?.let { bitmap ->
-                frameTexts += recognizeBitmap(bitmap, segments, 1, recognizer)
-                bitmap.recycle()
-            }
+            progress.stage = "解码输入图片"
+            val bitmap = decodeMutableBitmap(source)
+            try { frameTexts += recognizeBitmap(bitmap, segments, 1, recognizer, progress) }
+            finally { bitmap.recycle() }
         } else {
             val movie = Movie.decodeFile(source.absolutePath)
             if (movie != null && movie.duration() <= 0) {
-                BitmapFactory.decodeFile(source.absolutePath)?.let { bitmap ->
-                    frameTexts += recognizeBitmap(bitmap, segments, 1, recognizer)
-                    bitmap.recycle()
-                }
+                progress.stage = "解码 GIF 图片"
+                val bitmap = decodeMutableBitmap(source)
+                try { frameTexts += recognizeBitmap(bitmap, segments, 1, recognizer, progress) }
+                finally { bitmap.recycle() }
             } else {
                 val gif = GifDrawable(source)
                 try {
                     require(gif.numberOfFrames > 0) { "GIF 中不包含可识别帧" }
                     for (index in 0 until gif.numberOfFrames) {
+                        progress.stage = "解码 GIF 第 ${index + 1}/${gif.numberOfFrames} 帧"
                         gif.seekToFrame(index)
                         val frame = Bitmap.createBitmap(gif.intrinsicWidth, gif.intrinsicHeight, Bitmap.Config.ARGB_8888)
                         val canvas = android.graphics.Canvas(frame)
                         canvas.drawColor(android.graphics.Color.WHITE)
                         gif.setBounds(0, 0, frame.width, frame.height)
                         gif.draw(canvas)
-                        try { frameTexts += recognizeBitmap(frame, segments, index + 1, recognizer) }
+                        try { frameTexts += recognizeBitmap(frame, segments, index + 1, recognizer, progress) }
                         finally { frame.recycle() }
                     }
                 } finally { gif.recycle() }
             }
         }
         return frameTexts.filter { it.isNotBlank() }.joinToString("\n\n").also {
+            progress.stage = "保存 OCR 结果"
             saveText(it, File(segments, "ocr-result.txt"))
         }
     }
 
-    private fun recognizeBitmap(bitmap: Bitmap, segments: File, frame: Int, recognizer: OnnxChapterRecognizer): String {
-        val flattened = flattenOnWhite(bitmap)
-        try {
-            val sourceColors = readColors(flattened)
-            val denoisedColors = lightlyBlur(sourceColors, flattened.width, flattened.height)
-            saveRgb(denoisedColors, flattened.width, flattened.height, File(segments, frameFileName(frame, "denoised.png")))
-            val watermark = expandMask(watermarkMask(denoisedColors), flattened.width, flattened.height)
-            saveMask(watermark, flattened.width, flattened.height, File(segments, frameFileName(frame, "watermark-mask.png")))
-            val cleanedColors = removeWatermark(sourceColors, watermark)
-            saveRgb(cleanedColors, flattened.width, flattened.height, File(segments, frameFileName(frame, "watermark-removed.png")))
-            val gray = grayPixels(cleanedColors)
-            if (!hasRecognizableContent(gray)) return ""
-            val bounds = fixedHeightBounds(flattened.height)
-            val covered = coverPinyin(gray, flattened.width, bounds)
-            saveGray(GrayImage(flattened.width, flattened.height, covered), File(segments, frameFileName(frame, "pinyin-covered.png")))
-            val texts = ArrayList<String>()
-            var contentLine = 0
-            for ((start, end) in bounds) {
-                val linePixels = covered.copyOfRange(start * flattened.width, end * flattened.width)
-                if (!hasRecognizableContent(linePixels)) continue
-                contentLine++
-                val line = GrayImage(flattened.width, end - start, linePixels)
-                val prefix = "frame-${frame.toString().padStart(4, '0')}-line-${contentLine.toString().padStart(4, '0')}"
-                saveGray(line, File(segments, "$prefix.png"))
-                val value = recognizer.recognize(line)
-                saveText(value, File(segments, "$prefix-ocr.txt"))
-                if (value.isNotEmpty()) texts += value
-            }
-            return texts.joinToString("\n")
-        } finally { flattened.recycle() }
+    private fun decodeMutableBitmap(source: File): Bitmap {
+        val options = BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+            inMutable = true
+        }
+        val decoded = BitmapFactory.decodeFile(source.absolutePath, options)
+            ?: throw IllegalArgumentException("无法解码 OCR 输入图片：${source.absolutePath}")
+        if (decoded.isMutable && decoded.config == Bitmap.Config.ARGB_8888) return decoded
+        return try {
+            decoded.copy(Bitmap.Config.ARGB_8888, true)
+                ?: throw IllegalStateException("无法创建可写 OCR 图片：${source.absolutePath}")
+        } finally {
+            decoded.recycle()
+        }
+    }
+
+    private fun recognizeBitmap(bitmap: Bitmap, segments: File, frame: Int, recognizer: OnnxChapterRecognizer, progress: OcrProgress): String {
+        // Keep only this cleaned page bitmap. Watermark buffers are bounded to a small row chunk.
+        progress.stage = "第 $frame 帧去水印"
+        cleanWatermarkInPlace(bitmap)
+        progress.stage = "保存第 $frame 帧去水印图"
+        saveBitmapCopy(bitmap, File(segments, frameFileName(frame, "watermark-removed.png")))
+        return recognizeCleanedBitmap(bitmap, segments, frame, recognizer, progress)
     }
 
     private data class GrayImage(val width: Int, val height: Int, val pixels: IntArray) {
@@ -128,17 +142,43 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    private fun readColors(bitmap: Bitmap): IntArray = IntArray(bitmap.width * bitmap.height).also {
-        bitmap.getPixels(it, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+    private fun cleanWatermarkInPlace(bitmap: Bitmap) {
+        val width = bitmap.width
+        var previousRawBottomRow: IntArray? = null
+        for (top in 0 until bitmap.height step WATERMARK_PROCESS_ROWS) {
+            val bottom = minOf(top + WATERMARK_PROCESS_ROWS, bitmap.height)
+            // Include a one-pixel halo so blur and mask expansion match neighbouring chunks.
+            val sampleTop = maxOf(0, top - WATERMARK_MASK_EXPANSION)
+            val sampleBottom = minOf(bitmap.height, bottom + WATERMARK_MASK_EXPANSION)
+            val sampleHeight = sampleBottom - sampleTop
+            val colors = IntArray(width * sampleHeight)
+            bitmap.getPixels(colors, 0, width, 0, sampleTop, width, sampleHeight)
+            flattenOnWhiteInPlace(colors)
+            // The halo above this chunk must be the source row, not the row cleaned by the prior chunk.
+            previousRawBottomRow?.copyInto(colors, 0, 0, width)
+            previousRawBottomRow = colors.copyOfRange(
+                (bottom - sampleTop - 1) * width,
+                (bottom - sampleTop) * width,
+            )
+            val denoised = lightlyBlur(colors, width, sampleHeight)
+            val mask = expandMask(watermarkMask(denoised), width, sampleHeight)
+            removeWatermarkInPlace(colors, mask, width, top - sampleTop, bottom - sampleTop)
+            val coreOffset = (top - sampleTop) * width
+            bitmap.setPixels(colors, coreOffset, width, 0, top, width, bottom - top)
+        }
     }
-    private fun grayPixels(colors: IntArray): IntArray = IntArray(colors.size) { index ->
-        val color = colors[index]
-        (android.graphics.Color.red(color) * 299 + android.graphics.Color.green(color) * 587 + android.graphics.Color.blue(color) * 114) / 1000
-    }
-    private fun flattenOnWhite(bitmap: Bitmap): Bitmap = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888).also { output ->
-        val canvas = android.graphics.Canvas(output)
-        canvas.drawColor(android.graphics.Color.WHITE)
-        canvas.drawBitmap(bitmap, 0f, 0f, null)
+
+    private fun flattenOnWhiteInPlace(colors: IntArray) {
+        for (index in colors.indices) {
+            val color = colors[index]
+            val alpha = android.graphics.Color.alpha(color)
+            if (alpha == 255) continue
+            val inverseAlpha = 255 - alpha
+            val red = (android.graphics.Color.red(color) * alpha + 255 * inverseAlpha + 127) / 255
+            val green = (android.graphics.Color.green(color) * alpha + 255 * inverseAlpha + 127) / 255
+            val blue = (android.graphics.Color.blue(color) * alpha + 255 * inverseAlpha + 127) / 255
+            colors[index] = android.graphics.Color.rgb(red, green, blue)
+        }
     }
     private fun lightlyBlur(colors: IntArray, width: Int, height: Int): IntArray {
         val output = IntArray(colors.size)
@@ -166,15 +206,54 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
         val y = index / width; val x = index % width
         (-1..1).any { oy -> (-1..1).any { ox -> mask[(y + oy).coerceIn(0, height - 1) * width + (x + ox).coerceIn(0, width - 1)] } }
     }
-    private fun removeWatermark(colors: IntArray, mask: BooleanArray): IntArray = colors.copyOf().also { output ->
-        for (index in output.indices) {
+    private fun removeWatermarkInPlace(colors: IntArray, mask: BooleanArray, width: Int, startRow: Int, endRow: Int) {
+        for (y in startRow until endRow) for (x in 0 until width) {
+            val index = y * width + x
             if (!mask[index]) continue
-            val color = output[index]
+            val color = colors[index]
             val red = android.graphics.Color.red(color); val green = android.graphics.Color.green(color); val blue = android.graphics.Color.blue(color)
-            output[index] = if ((red + green + blue) / 3 >= WATERMARK_LIGHT_BRIGHTNESS) android.graphics.Color.WHITE else {
+            colors[index] = if ((red + green + blue) / 3 >= WATERMARK_LIGHT_BRIGHTNESS) android.graphics.Color.WHITE else {
                 val gray = (red * 299 + green * 587 + blue * 114 + 500) / 1000
                 android.graphics.Color.rgb(gray, gray, gray)
             }
+        }
+    }
+
+    private fun recognizeCleanedBitmap(bitmap: Bitmap, segments: File, frame: Int, recognizer: OnnxChapterRecognizer, progress: OcrProgress): String {
+        val texts = ArrayList<String>()
+        var contentLine = 0
+        for ((start, end) in fixedHeightBounds(bitmap.height)) {
+            val lineNumber = contentLine + 1
+            var lineHasContent = false
+            var partNumber = 0
+            for (left in 0 until bitmap.width step OCR_PART_WIDTH) {
+                val partWidth = minOf(OCR_PART_WIDTH, bitmap.width - left)
+                val pixels = IntArray(partWidth * (end - start))
+                bitmap.getPixels(pixels, 0, partWidth, left, start, partWidth, end - start)
+                toGrayInPlace(pixels)
+                val line = GrayImage(partWidth, end - start, pixels)
+                coverPinyinInPlace(line.pixels, line.width, line.height)
+                if (!hasRecognizableContent(line.pixels)) continue
+                lineHasContent = true
+                partNumber++
+                val prefix = "frame-${frame.toString().padStart(4, '0')}-line-${lineNumber.toString().padStart(4, '0')}-part-${partNumber.toString().padStart(4, '0')}"
+                progress.stage = "保存第 $frame 帧第 $lineNumber 行第 $partNumber 段"
+                saveGray(line, File(segments, "$prefix.png"))
+                progress.stage = "识别第 $frame 帧第 $lineNumber 行第 $partNumber 段"
+                val value = recognizer.recognize(line)
+                progress.stage = "保存第 $frame 帧第 $lineNumber 行第 $partNumber 段识别结果"
+                saveText(value, File(segments, "$prefix-ocr.txt"))
+                if (value.isNotEmpty()) texts += value
+            }
+            if (lineHasContent) contentLine++
+        }
+        return texts.joinToString("\n")
+    }
+
+    private fun toGrayInPlace(colors: IntArray) {
+        for (index in colors.indices) {
+            val color = colors[index]
+            colors[index] = (android.graphics.Color.red(color) * 299 + android.graphics.Color.green(color) * 587 + android.graphics.Color.blue(color) * 114) / 1000
         }
     }
     private fun hasRecognizableContent(pixels: IntArray): Boolean = pixels.any { it < WHITE_CONTENT_THRESHOLD }
@@ -184,33 +263,168 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
         while (start < height) { val end = minOf(start + FIXED_BLOCK_HEIGHT, height); bounds += start to end; start = end }
         return bounds
     }
-    private fun coverPinyin(pixels: IntArray, width: Int, bounds: List<Pair<Int, Int>>): IntArray = pixels.copyOf().also { output ->
-        for ((start, end) in bounds) {
-            val coverEnd = start + kotlin.math.round((end - start) * PINYIN_TOP_COVER_RATIO).toInt()
-            for (y in start until coverEnd) java.util.Arrays.fill(output, y * width, (y + 1) * width, 255)
-        }
+    private fun coverPinyinInPlace(pixels: IntArray, width: Int, height: Int) {
+        val coverEnd = kotlin.math.round(height * PINYIN_TOP_COVER_RATIO).toInt()
+        for (y in 0 until coverEnd) java.util.Arrays.fill(pixels, y * width, (y + 1) * width, 255)
     }
     private fun saveGray(image: GrayImage, file: File) {
-        runCatching {
-            file.parentFile?.mkdirs()
-            image.toBitmap().useBitmap { bitmap ->
-                FileOutputStream(file).use { output -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, output) }
+        file.parentFile?.let { parent -> require(parent.isDirectory || parent.mkdirs()) { "无法创建诊断目录：${parent.absolutePath}" } }
+        image.toBitmap().useBitmap { bitmap ->
+            FileOutputStream(file).use { output ->
+                require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "无法保存诊断图片：${file.absolutePath}" }
             }
         }
     }
-    private fun saveRgb(colors: IntArray, width: Int, height: Int, file: File) { saveBitmap(Bitmap.createBitmap(colors, width, height, Bitmap.Config.ARGB_8888), file) }
-    private fun saveMask(mask: BooleanArray, width: Int, height: Int, file: File) { saveBitmap(Bitmap.createBitmap(IntArray(mask.size) { if (mask[it]) android.graphics.Color.WHITE else android.graphics.Color.BLACK }, width, height, Bitmap.Config.ARGB_8888), file) }
-    private fun saveBitmap(bitmap: Bitmap, file: File) { runCatching { file.parentFile?.mkdirs(); FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) } }; bitmap.recycle() }
-    private fun saveText(text: String, file: File) { runCatching { file.parentFile?.mkdirs(); file.writeText(text, Charsets.UTF_8) } }
+    private fun saveBitmapCopy(bitmap: Bitmap, file: File) {
+        file.parentFile?.let { parent -> require(parent.isDirectory || parent.mkdirs()) { "无法创建诊断目录：${parent.absolutePath}" } }
+        FileOutputStream(file).use { output ->
+            require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "无法保存诊断图片：${file.absolutePath}" }
+        }
+    }
+    private fun saveText(text: String, file: File) {
+        file.parentFile?.let { parent -> require(parent.isDirectory || parent.mkdirs()) { "无法创建诊断目录：${parent.absolutePath}" } }
+        file.writeText(text, Charsets.UTF_8)
+    }
     private fun frameFileName(frame: Int, suffix: String): String = "frame-${frame.toString().padStart(4, '0')}-$suffix"
+
+    private fun writeFailureReport(segments: File?, stage: String, error: Throwable): String? {
+        val directory = segments ?: return null
+        return runCatching {
+            val report = File(directory, "ocr-failure.txt")
+            FileOutputStream(report).use { output ->
+                PrintWriter(OutputStreamWriter(output, StandardCharsets.UTF_8)).use { writer ->
+                    writer.println("stage: $stage")
+                    writer.println("error: ${error.javaClass.name}")
+                    writer.println("message: ${error.message ?: "(no message)"}")
+                    writer.println()
+                    error.printStackTrace(writer)
+                }
+            }
+            report.absolutePath
+        }.getOrNull()
+    }
+
+    private fun formatFailure(stage: String, error: Throwable, report: String?): String {
+        if (error is OutOfMemoryError) {
+            return "Android OCR 内存不足（阶段：$stage）。${report?.let { "诊断报告：$it" } ?: "未能写入诊断报告"}"
+        }
+        val causes = generateSequence(error) { it.cause }
+            .take(4)
+            .joinToString(" <- ") { cause -> "${cause.javaClass.name}: ${cause.message ?: "(无消息)"}" }
+        return "Android OCR 失败（阶段：$stage；异常：$causes）。${report?.let { "诊断报告：$it" } ?: "未能写入诊断报告"}"
+    }
+
+    private class OcrProgress(var stage: String = "初始化")
 
     private class OnnxChapterRecognizer(private val activity: Activity) : AutoCloseable {
         private val environment = OrtEnvironment.getEnvironment()
         private val sessionOptions = OrtSession.SessionOptions().apply { setIntraOpNumThreads(1); setInterOpNumThreads(1) }
         private val modelFile = materializeModel()
+        private val characters = loadCharacterTable(modelFile)
         private val session = environment.createSession(modelFile.absolutePath, sessionOptions)
         private val inputName = session.inputNames.single()
-        private val characters = session.metadata.customMetadata["character"]?.lines()?.takeIf { it.isNotEmpty() } ?: throw IllegalStateException("OCR 识别模型未包含字符表")
+
+        /**
+         * Android ONNX Runtime 1.22 can abort in JNI while constructing model metadata.
+         * Read the ONNX ModelProto metadata entry directly instead of calling session.metadata.
+         */
+        private fun loadCharacterTable(file: File): List<String> {
+            val characterText = BufferedInputStream(file.inputStream()).use { input ->
+                while (true) {
+                    val tag = readProtoTag(input) ?: break
+                    val field = (tag ushr 3).toInt()
+                    val wireType = (tag and 0x07).toInt()
+                    if (field == ONNX_METADATA_PROPERTIES_FIELD && wireType == PROTO_LENGTH_DELIMITED) {
+                        parseMetadataEntry(readProtoBytes(input))?.let { return@use it }
+                    } else {
+                        skipProtoField(input, wireType)
+                    }
+                }
+                null
+            }
+            return characterText
+                ?.lineSequence()
+                ?.filter { it.isNotEmpty() }
+                ?.toList()
+                ?.takeIf { it.isNotEmpty() }
+                ?: throw IllegalStateException("OCR 识别模型未包含字符表")
+        }
+
+        private fun parseMetadataEntry(entry: ByteArray): String? {
+            var key: String? = null
+            var value: String? = null
+            entry.inputStream().use { input ->
+                while (true) {
+                    val tag = readProtoTag(input) ?: break
+                    val field = (tag ushr 3).toInt()
+                    val wireType = (tag and 0x07).toInt()
+                    if (wireType != PROTO_LENGTH_DELIMITED) {
+                        skipProtoField(input, wireType)
+                    } else when (field) {
+                        1 -> key = String(readProtoBytes(input), StandardCharsets.UTF_8)
+                        2 -> value = String(readProtoBytes(input), StandardCharsets.UTF_8)
+                        else -> skipProtoField(input, wireType)
+                    }
+                }
+            }
+            return value?.takeIf { key == "character" }
+        }
+
+        private fun readProtoTag(input: InputStream): Long? {
+            val firstByte = input.read()
+            return if (firstByte == -1) null else readProtoVarint(input, firstByte)
+        }
+
+        private fun readProtoVarint(input: InputStream, firstByte: Int? = null): Long {
+            var value = 0L
+            var shift = 0
+            var nextByte = firstByte ?: input.read().also { require(it != -1) { "OCR 模型文件意外结束" } }
+            while (true) {
+                value = value or ((nextByte and 0x7f).toLong() shl shift)
+                if (nextByte and 0x80 == 0) return value
+                shift += 7
+                require(shift < 64) { "OCR 模型包含无效的 protobuf 变长整数" }
+                nextByte = input.read()
+                require(nextByte != -1) { "OCR 模型文件意外结束" }
+            }
+        }
+
+        private fun readProtoBytes(input: InputStream): ByteArray {
+            val length = readProtoVarint(input)
+            require(length in 0..MAX_PROTO_FIELD_BYTES.toLong()) { "OCR 模型 protobuf 字段过大：$length" }
+            return ByteArray(length.toInt()).also { bytes ->
+                var offset = 0
+                while (offset < bytes.size) {
+                    val count = input.read(bytes, offset, bytes.size - offset)
+                    require(count > 0) { "OCR 模型文件意外结束" }
+                    offset += count
+                }
+            }
+        }
+
+        private fun skipProtoField(input: InputStream, wireType: Int) {
+            when (wireType) {
+                0 -> readProtoVarint(input)
+                1 -> skipProtoBytes(input, 8)
+                2 -> skipProtoBytes(input, readProtoVarint(input))
+                5 -> skipProtoBytes(input, 4)
+                else -> throw IllegalArgumentException("OCR 模型包含不支持的 protobuf 字段类型：$wireType")
+            }
+        }
+
+        private fun skipProtoBytes(input: InputStream, byteCount: Long) {
+            require(byteCount >= 0) { "OCR 模型 protobuf 字段长度无效：$byteCount" }
+            var remaining = byteCount
+            while (remaining > 0) {
+                val skipped = input.skip(remaining)
+                if (skipped > 0) {
+                    remaining -= skipped
+                } else {
+                    require(input.read() != -1) { "OCR 模型文件意外结束" }
+                    remaining--
+                }
+            }
+        }
         fun recognize(line: GrayImage): String {
             val maxWidth = maxOf(RECOGNITION_DEFAULT_WIDTH, (RECOGNITION_HEIGHT * line.width.toFloat() / line.height).toInt())
             val source = line.toBitmap(); val resized = Bitmap.createScaledBitmap(source, maxWidth, RECOGNITION_HEIGHT, true); source.recycle()
@@ -224,16 +438,24 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
                 }
                 OnnxTensor.createTensor(environment, FloatBuffer.wrap(input), longArrayOf(1, 3, RECOGNITION_HEIGHT.toLong(), maxWidth.toLong())).use { tensor ->
                     session.run(mapOf(inputName to tensor)).use { result ->
-                        return decodeCtc((result[0].value as Array<Array<FloatArray>>).single())
+                        return decodeCtc(result[0] as OnnxTensor)
                     }
                 }
             } finally { resized.recycle() }
         }
-        private fun decodeCtc(predictions: Array<FloatArray>): String {
+        private fun decodeCtc(output: OnnxTensor): String {
+            val shape = (output.info as TensorInfo).shape
+            require(shape.size == 3 && shape[0] == 1L) { "OCR 模型输出形状无效：${shape.contentToString()}" }
+            val timeSteps = shape[1].toInt()
+            val classCount = shape[2].toInt()
+            val scores = output.floatBuffer
             val text = StringBuilder(); var previous = -1
-            for (scores in predictions) {
+            for (step in 0 until timeSteps) {
                 var token = 0; var best = Float.NEGATIVE_INFINITY
-                for (index in scores.indices) if (scores[index] > best) { best = scores[index]; token = index }
+                for (index in 0 until classCount) {
+                    val score = scores.get()
+                    if (score > best) { best = score; token = index }
+                }
                 if (token != 0 && token != previous) when { token <= characters.size -> text.append(characters[token - 1]); token == characters.size + 1 -> text.append(' '); else -> throw IllegalStateException("OCR 模型输出了未知字符索引：$token") }
                 previous = token
             }
@@ -251,6 +473,7 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private companion object {
+        const val LOG_TAG = "SfacgOcr"
         const val FIXED_BLOCK_HEIGHT = 38
         const val FIXED_TOP_PAD = 5
         const val PINYIN_TOP_COVER_RATIO = 0.39f
@@ -261,11 +484,19 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
         const val WATERMARK_COLOR_TOLERANCE = 25
         const val WATERMARK_MIN_BRIGHTNESS = 150
         const val WATERMARK_LIGHT_BRIGHTNESS = 185
-        const val MAX_OCR_SOURCE_BYTES = 32L * 1024L * 1024L
+        // A bounded working block, not a source-image or line-count limit.
+        const val WATERMARK_PROCESS_ROWS = 128
+        const val WATERMARK_MASK_EXPANSION = 1
+        // Every fixed-height line is traversed from left to right in 728-pixel parts.
+        const val OCR_PART_WIDTH = 728
         const val RECOGNITION_HEIGHT = 48
         const val RECOGNITION_DEFAULT_WIDTH = 320
         const val RECOGNITION_MODEL_FILE = "PP-OCRv6_rec_small.onnx"
         const val RECOGNITION_MODEL_BYTES = 21_234_383L
+        const val ONNX_METADATA_PROPERTIES_FIELD = 14
+        const val PROTO_LENGTH_DELIMITED = 2
+        // The model's metadata entries are small; this protects the parser from corrupt model files.
+        const val MAX_PROTO_FIELD_BYTES = 1 * 1024 * 1024
     }
 }
 

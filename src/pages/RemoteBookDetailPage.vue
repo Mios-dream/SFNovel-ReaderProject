@@ -260,7 +260,7 @@ function groupChaptersByVolume(chapters: Chapter[]) {
 }
 
 function textChapterBadge(
-  kind: ChapterVolume["chapters"][number]["contentKind"],
+  _kind: ChapterVolume["chapters"][number]["contentKind"],
 ) {
   // if (kind === "imageVip") return "图片 OCR";
   // if (kind === "encryptedVip") return "加密 OCR";

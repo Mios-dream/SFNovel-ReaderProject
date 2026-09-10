@@ -236,7 +236,7 @@ function canDownload(chapter: SelectableChapter) {
   return !chapter.isVip || chapter.isUnlocked;
 }
 
-function textContentLabel(kind: TextChapter["contentKind"]) {
+function textContentLabel(_kind: TextChapter["contentKind"]) {
   // if (kind === "imageVip") return "图片 OCR";
   // if (kind === "encryptedVip") return "加密 OCR";
   return "VIP";
