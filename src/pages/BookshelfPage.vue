@@ -124,8 +124,7 @@ function jumpToPage(event: Event) {
             @change="jumpToPage"
             @keydown.enter.prevent="jumpToPage"
           /><span class="page-status"
-            >/ {{ desk.bookshelfTotalPages.value }} 页 ·
-            {{ desk.filteredBookshelf.value.length }} 本</span
+            >/ {{ desk.bookshelfTotalPages.value }} 页</span
           ><button
             class="icon-button"
             title="下一页"

@@ -158,6 +158,11 @@ export function useNovelDesk() {
   function navigate(view: ViewName) {
     active.value = view;
     if (view === "bookshelf") void bookshelf.loadBookshelf();
+    if (view === "library") {
+      void library.ensureLibraryAssetAccess().then((granted) => {
+        if (granted) void library.refreshLibrary();
+      });
+    }
   }
 
   function continueDownload(mode: "novel" | "audio" | "comic") {
@@ -230,6 +235,11 @@ export function useNovelDesk() {
     event.preventDefault();
   }
 
+  function refreshLibraryAfterReturningToApp() {
+    if (document.visibilityState === "visible" && active.value === "library")
+      void library.refreshLibrary();
+  }
+
   onMounted(() => {
     void onBackButtonPress(() => handleBackNavigation())
       .then((unlisten) => {
@@ -241,12 +251,17 @@ export function useNovelDesk() {
       });
     void auth.refreshAuthStatus().then(() => auth.loadAccountProfile());
     document.addEventListener("copy", blockCopy);
+    document.addEventListener("visibilitychange", refreshLibraryAfterReturningToApp);
   });
   onBeforeUnmount(() => {
     disposed = true;
     void stopBackListener?.unregister();
     window.clearTimeout(toastTimer);
     document.removeEventListener("copy", blockCopy);
+    document.removeEventListener(
+      "visibilitychange",
+      refreshLibraryAfterReturningToApp,
+    );
   });
 
   return {

@@ -29,16 +29,35 @@ export function useDeskLibrary({
   const localComicChapter = ref<LocalComicChapter>();
   const localAudioTrackIndex = ref(0);
   const exportingFormat = ref<ExportFormat>();
+  let libraryAssetVersion = 0;
 
   async function refreshLibrary() {
     try {
       const books = await invoke<Book[]>("list_local_library");
+      libraryAssetVersion += 1;
       library.value = books.map((book) => ({
         ...book,
-        cover: localAssetSource(book.cover),
+        cover: localAssetSource(book.cover, libraryAssetVersion),
       }));
     } catch {
       /* No local library exists yet. */
+    }
+  }
+
+  /**
+   * Requests Android's all-files access only after the user enters the local
+   * library. The public library directory cannot be read by the WebView asset
+   * protocol without this permission.
+   */
+  async function ensureLibraryAssetAccess() {
+    try {
+      const granted = await invoke<boolean>("ensure_external_storage_access");
+      if (!granted)
+        notify("请在系统设置中允许管理所有文件，然后返回本地书库");
+      return granted;
+    } catch {
+      // Browser previews do not expose the mobile command.
+      return true;
     }
   }
 
@@ -209,6 +228,7 @@ export function useDeskLibrary({
     localAudioTrackIndex,
     exportingFormat,
     refreshLibrary,
+    ensureLibraryAssetAccess,
     loadLocalBook,
     deleteBook,
     confirmDeleteBook,

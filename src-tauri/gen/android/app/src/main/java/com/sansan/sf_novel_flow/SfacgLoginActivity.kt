@@ -3,6 +3,7 @@ package com.sansan.sf_novel_flow
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.os.Bundle
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
@@ -27,6 +28,9 @@ class SfacgLoginActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         CookieManager.getInstance().setAcceptCookie(true)
         webView = WebView(this).apply {
+            overScrollMode = View.OVER_SCROLL_NEVER
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.javaScriptCanOpenWindowsAutomatically = false

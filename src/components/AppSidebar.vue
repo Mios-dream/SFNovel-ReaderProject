@@ -276,10 +276,8 @@ nav button.active {
     min-height: calc(64px + env(safe-area-inset-bottom));
     padding: 7px 12px calc(7px + env(safe-area-inset-bottom));
     border-top: 1px solid rgba(224, 176, 154, 0.6);
-    background: rgba(255, 249, 245, 0.96);
+    background: #fff9f5;
     box-shadow: 0 -8px 24px rgba(137, 76, 55, 0.1);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
   }
   .sidebar nav button {
     flex: 1 1 0;

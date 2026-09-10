@@ -2,9 +2,10 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 
 export type Notify = (message: string) => void;
 
-export function localAssetSource(path?: string) {
+export function localAssetSource(path?: string, cacheKey?: number) {
   if (!path || !isTauri()) return path;
-  return convertFileSrc(path);
+  const source = convertFileSrc(path);
+  return cacheKey == null ? source : `${source}?assetVersion=${cacheKey}`;
 }
 
 /** Converts native command failures into a UI-safe message. */

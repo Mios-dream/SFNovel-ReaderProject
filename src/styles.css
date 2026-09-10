@@ -26,6 +26,12 @@
   font-synthesis: none;
 }
 
+html,
+body,
+#app {
+  overscroll-behavior: none;
+}
+
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
