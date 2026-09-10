@@ -9,6 +9,13 @@ type UseDeskJobsOptions = {
   refreshLibrary: () => Promise<void>;
 };
 
+const libraryRefreshStatuses = new Set<Job["status"]>([
+  "done",
+  "error",
+  "paused",
+  "cancelled",
+]);
+
 export function useDeskJobs({ notify, refreshLibrary }: UseDeskJobsOptions) {
   const jobs = ref<Job[]>([]);
   let stopJobListener: (() => void) | undefined;
@@ -34,7 +41,8 @@ export function useDeskJobs({ notify, refreshLibrary }: UseDeskJobsOptions) {
   async function refreshJobs() {
     try {
       jobs.value = await invoke<Job[]>("list_download_jobs");
-      if (jobs.value.some((job) => job.status === "done")) void refreshLibrary();
+      if (jobs.value.some((job) => libraryRefreshStatuses.has(job.status)))
+        void refreshLibrary();
     } catch {
       /* Native runtime may be restarting during development. */
     }
@@ -73,7 +81,7 @@ export function useDeskJobs({ notify, refreshLibrary }: UseDeskJobsOptions) {
   onMounted(() => {
     void listen<Job>("download-progress", (event) => {
       upsertJob(event.payload);
-      if (event.payload.status === "done") void refreshLibrary();
+      if (libraryRefreshStatuses.has(event.payload.status)) void refreshLibrary();
     }).then((unlisten) => {
       if (disposed) unlisten();
       else stopJobListener = unlisten;

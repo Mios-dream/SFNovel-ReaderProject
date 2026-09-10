@@ -92,6 +92,21 @@ fn downloaded_text_chapter_ids(store: &StoredChapterStore) -> Vec<i64> {
     chapter_ids
 }
 
+/// 将书籍详情和媒体进度作为一个原子检查点写入。
+///
+/// # 参数
+/// * `directory` - 已校验的本地书籍目录。
+/// * `metadata` - 包含本次可用详情和已完成媒体记录的完整元数据。
+///
+/// # 错误
+/// 元数据无法序列化或原子替换目标文件失败时返回错误。
+fn persist_book_metadata(
+    directory: &std::path::PathBuf,
+    metadata: &StoredBookMetadata,
+) -> Result<(), String> {
+    write_atomically(&directory.join(".novel-flow.json"), metadata, "书籍元数据")
+}
+
 /// 下载章节插图，并将 HTML 图片标签改写为本地 Markdown 路径。
 async fn materialize_chapter_images(
     client: &WebClient,
@@ -302,15 +317,22 @@ async fn run_text_download(
         // 阻断正文下载，避免非正文资源的短暂异常使已选章节无法保存。
         let mut metadata =
             read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?;
-        let _ = update_local_novel_metadata(
+        initialize_local_novel_metadata(&mut metadata, novel_id, &title);
+        // 目录创建后立即写入最低限度详情，书库刷新不会把正在初始化的任务误删。
+        persist_book_metadata(&directory, &metadata)?;
+        let _ = enrich_local_novel_metadata(
             &app_client,
             &web_client,
             &directory,
-            &mut metadata,
+            metadata
+                .novel
+                .as_mut()
+                .ok_or_else(|| "小说元数据初始化失败".to_string())?,
             novel_id,
-            &title,
         )
         .await;
+        // 详情刷新或封面保存完成后再提交一次，章节目录与正文请求从此之后才开始。
+        persist_book_metadata(&directory, &metadata)?;
 
         // 章节索引是逐章检查点：下载中断后可从已写入的章节继续，而不必重新请求全部正文。
         let mut store = read_or_default::<StoredChapterStore>(
@@ -357,7 +379,7 @@ async fn run_text_download(
         // 元数据也必须先建立检查点。普通章节在后续网络或图片资源请求中失败时，已保存的
         // 章节索引仍能被本地书库关联到正确的作品，而不是只留下无法识别的 JSON 文件。
         metadata.downloaded_text_chapter_ids = Some(downloaded_text_chapter_ids(&store));
-        write_atomically(&directory.join(".novel-flow.json"), &metadata, "书籍元数据")?;
+        persist_book_metadata(&directory, &metadata)?;
         let total = chapters.len();
         let mut failed_vip_chapters = Vec::new();
         // 按章节顺序下载，VIP 章节可能会被跳过但仍计入总数。
@@ -507,7 +529,7 @@ async fn run_text_download(
                 // 章节与完成标记作为同一检查点更新。即使下一章请求失败、任务暂停或进程
                 // 退出，恢复后的书库和下载队列也会看见已经可靠保存的内容。
                 metadata.downloaded_text_chapter_ids = Some(downloaded_text_chapter_ids(&store));
-                write_atomically(&directory.join(".novel-flow.json"), &metadata, "书籍元数据")?;
+                persist_book_metadata(&directory, &metadata)?;
             }
             // 限速发生在每个章节处理完成后；取消标记在下一个章节开始前读取。
             tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
@@ -515,7 +537,7 @@ async fn run_text_download(
 
         // 仅在遍历完成后更新书籍级完成记录，使 UI 可依据实际持久化的章节索引显示状态。
         metadata.downloaded_text_chapter_ids = Some(downloaded_text_chapter_ids(&store));
-        write_atomically(&directory.join(".novel-flow.json"), &metadata, "书籍元数据")?;
+        persist_book_metadata(&directory, &metadata)?;
 
         if failed_vip_chapters.is_empty() {
             Ok(directory.to_string_lossy().into_owned())
@@ -570,19 +592,14 @@ fn safe_audio_name(value: &str) -> String {
     safe_library_name(value).chars().take(100).collect()
 }
 
-/// 初始化并更新一本本地文字小说的元数据。
+/// 初始化一本本地文字小说的最小元数据。
 ///
-/// 调用方只需传入整份书籍元数据，无须了解 `novel` 的可选存储形式。本方法先保证本地
-/// 已知的作品编号、标题及作者/简介默认值，再尝试从公开 App 详情刷新扩展字段和封面。
-/// 即使远程刷新失败，已经初始化的元数据仍会由调用方随章节索引正常保存。
-async fn update_local_novel_metadata(
-    client: &AppClient,
-    web_client: &WebClient,
-    directory: &std::path::PathBuf,
+/// 此步骤不访问网络，调用方应在其后立刻写入元数据，再单独请求远程详情和封面。
+fn initialize_local_novel_metadata(
     book_metadata: &mut StoredBookMetadata,
     novel_id: i64,
     title: &str,
-) -> Result<(), String> {
+) {
     let metadata = book_metadata.novel.get_or_insert_with(Default::default);
     metadata.id = Some(novel_id);
     metadata.title = Some(title.to_string());
@@ -592,8 +609,6 @@ async fn update_local_novel_metadata(
     metadata
         .description
         .get_or_insert_with(|| "暂无简介".to_string());
-
-    enrich_local_novel_metadata(client, web_client, directory, metadata, novel_id).await
 }
 
 /// 从公开详情刷新小说扩展字段，并将封面保存在下载媒体旁。
@@ -983,7 +998,7 @@ async fn enrich_local_comic_book(
         })
     };
     metadata.id = Some(comic_id);
-    metadata.online_path = text(&["folderName"]);
+    metadata.online_path = text(&["folderName"]).or_else(|| metadata.online_path.clone());
     metadata.title = text(&["comicName", "novelName"]).or_else(|| metadata.title.clone());
     metadata.author = text(&["authorName", "author"]).or_else(|| metadata.author.clone());
     metadata.description =
@@ -1106,6 +1121,39 @@ async fn run_audio_download(
         sync_android_auth_session(&app).await?;
         let app_client = app_endpoint_client(&app, EndpointCapability::NovelDetail)?;
         let web_client = web_endpoint_client(&app, EndpointCapability::Audio)?;
+        let directory = library_directory(&app)?.join(safe_library_name(&title));
+        fs::create_dir_all(&directory).map_err(|error| format!("无法创建本地书籍目录：{error}"))?;
+        let mut metadata =
+            read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?;
+        {
+            let audio_metadata = metadata.audio.get_or_insert_with(Default::default);
+            audio_metadata.id = Some(album_id.unwrap_or(novel_id));
+            audio_metadata.catalog_id = Some(novel_id);
+            audio_metadata.title = Some(title.clone());
+            audio_metadata
+                .author
+                .get_or_insert_with(|| "未知作者".to_string());
+            audio_metadata
+                .description
+                .get_or_insert_with(|| "暂无简介".to_string());
+        }
+        // 目录创建后立即写入基础详情，避免书库刷新将正在请求封面的任务当作旧空目录。
+        persist_book_metadata(&directory, &metadata)?;
+        let _ = enrich_local_audio_book(
+            &app_client,
+            &web_client,
+            &directory,
+            metadata
+                .audio
+                .as_mut()
+                .ok_or_else(|| "有声元数据初始化失败".to_string())?,
+            novel_id,
+            album_id,
+        )
+        .await;
+        // 先保存详情和封面，再请求目录与具体音频文件。
+        persist_book_metadata(&directory, &metadata)?;
+
         let (_catalog_title, catalog) = web_client
             .get_audio_catalog(novel_id)
             .await
@@ -1120,31 +1168,9 @@ async fn run_audio_download(
         if chapters.is_empty() {
             return Err("没有可下载的有声章节".to_string());
         }
-        let directory = library_directory(&app)?.join(safe_library_name(&title));
         let audio_directory = directory.join("audio");
         fs::create_dir_all(&audio_directory)
             .map_err(|error| format!("无法创建有声目录：{error}"))?;
-        let mut metadata =
-            read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?;
-        let audio_metadata = metadata.audio.get_or_insert_with(Default::default);
-        audio_metadata.id = Some(album_id.unwrap_or(novel_id));
-        audio_metadata.catalog_id = Some(novel_id);
-        audio_metadata.title = Some(title.clone());
-        audio_metadata
-            .author
-            .get_or_insert_with(|| "未知作者".to_string());
-        audio_metadata
-            .description
-            .get_or_insert_with(|| "暂无简介".to_string());
-        let _ = enrich_local_audio_book(
-            &app_client,
-            &web_client,
-            &directory,
-            audio_metadata,
-            novel_id,
-            album_id,
-        )
-        .await;
         let mut downloaded = metadata
             .downloaded_audio_chapter_ids
             .take()
@@ -1208,6 +1234,8 @@ async fn run_audio_download(
                     .map_err(|error| format!("无法完成有声章节写入：{error}"))?;
             }
             downloaded.insert(chapter.id);
+            metadata.downloaded_audio_chapter_ids = Some(downloaded.iter().copied().collect());
+            persist_book_metadata(&directory, &metadata)?;
             tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
         }
         let mut playlist = vec!["#EXTM3U".to_string()];
@@ -1224,19 +1252,7 @@ async fn run_audio_download(
         )
         .map_err(|error| format!("无法写入有声播放列表：{error}"))?;
         metadata.downloaded_audio_chapter_ids = Some(downloaded.into_iter().collect());
-        let payload = serde_json::to_vec_pretty(&metadata)
-            .map_err(|error| format!("无法序列化书籍元数据：{error}"))?;
-        fs::write(directory.join(".novel-flow.json.tmp"), payload)
-            .map_err(|error| format!("无法写入书籍元数据：{error}"))?;
-        if directory.join(".novel-flow.json").exists() {
-            fs::remove_file(directory.join(".novel-flow.json"))
-                .map_err(|error| format!("无法替换书籍元数据：{error}"))?;
-        }
-        fs::rename(
-            directory.join(".novel-flow.json.tmp"),
-            directory.join(".novel-flow.json"),
-        )
-        .map_err(|error| format!("无法完成书籍元数据写入：{error}"))?;
+        persist_book_metadata(&directory, &metadata)?;
         Ok("audio/有声目录.m3u8".to_string())
     }
     .await;
@@ -1301,6 +1317,7 @@ async fn run_comic_download(
     let result: Result<String, String> = async {
         #[cfg(target_os = "android")]
         sync_android_auth_session(&app).await?;
+        let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
         let web_client = web_endpoint_client(&app, EndpointCapability::ComicCatalog)?;
         let pages_client = web_endpoint_client(&app, EndpointCapability::ComicPages)?;
         let folder = if let Some(folder) = source_path.filter(|value| {
@@ -1310,10 +1327,41 @@ async fn run_comic_download(
         }) {
             folder
         } else {
-            let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
             let (_, folder) = app_client.comic_identity(comic_id).await?;
             folder
         };
+        let directory = library_directory(&app)?.join(safe_library_name(&title));
+        fs::create_dir_all(&directory).map_err(|error| format!("无法创建本地书籍目录：{error}"))?;
+        let mut metadata =
+            read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?;
+        {
+            let comic_metadata = metadata.comic.get_or_insert_with(Default::default);
+            comic_metadata.id = Some(comic_id);
+            comic_metadata.title = Some(title.clone());
+            comic_metadata
+                .author
+                .get_or_insert_with(|| "未知作者".to_string());
+            comic_metadata
+                .description
+                .get_or_insert_with(|| "暂无简介".to_string());
+            comic_metadata.online_path.get_or_insert(folder.clone());
+        }
+        // 目录创建后立即写入基础详情，避免书库刷新将正在请求封面的任务当作旧空目录。
+        persist_book_metadata(&directory, &metadata)?;
+        let _ = enrich_local_comic_book(
+            &app_client,
+            &web_client,
+            &directory,
+            metadata
+                .comic
+                .as_mut()
+                .ok_or_else(|| "漫画元数据初始化失败".to_string())?,
+            comic_id,
+        )
+        .await;
+        // 详情和封面先落盘，后续网页目录或图片失败时仍可从书库删除或续传。
+        persist_book_metadata(&directory, &metadata)?;
+
         let catalog = web_client
             .get_comic_catalog(&folder)
             .await
@@ -1328,21 +1376,9 @@ async fn run_comic_download(
         if chapters.is_empty() {
             return Err("所选漫画章节不在当前目录中".to_string());
         }
-        let directory = library_directory(&app)?.join(safe_library_name(&title));
         let comic_directory = directory.join("comic");
         fs::create_dir_all(&comic_directory)
             .map_err(|error| format!("无法创建漫画目录：{error}"))?;
-        let mut metadata =
-            read_or_default::<StoredBookMetadata>(&directory.join(".novel-flow.json"), "本地数据")?;
-        let comic_metadata = metadata.comic.get_or_insert_with(Default::default);
-        comic_metadata.id = Some(comic_id);
-        comic_metadata.title = Some(title.clone());
-        comic_metadata
-            .author
-            .get_or_insert_with(|| "未知作者".to_string());
-        comic_metadata
-            .description
-            .get_or_insert_with(|| "暂无简介".to_string());
         let mut downloaded = metadata
             .downloaded_comic_chapter_ids
             .take()
@@ -1463,22 +1499,12 @@ async fn run_comic_download(
                     .map_err(|error| format!("无法完成漫画章节写入：{error}"))?;
             }
             downloaded.insert(chapter.id);
+            metadata.downloaded_comic_chapter_ids = Some(downloaded.iter().copied().collect());
+            persist_book_metadata(&directory, &metadata)?;
             tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
         }
         metadata.downloaded_comic_chapter_ids = Some(downloaded.into_iter().collect());
-        let payload = serde_json::to_vec_pretty(&metadata)
-            .map_err(|error| format!("无法序列化漫画元数据：{error}"))?;
-        fs::write(directory.join(".novel-flow.json.tmp"), payload)
-            .map_err(|error| format!("无法写入漫画元数据：{error}"))?;
-        if directory.join(".novel-flow.json").exists() {
-            fs::remove_file(directory.join(".novel-flow.json"))
-                .map_err(|error| format!("无法替换漫画元数据：{error}"))?;
-        }
-        fs::rename(
-            directory.join(".novel-flow.json.tmp"),
-            directory.join(".novel-flow.json"),
-        )
-        .map_err(|error| format!("无法完成漫画元数据写入：{error}"))?;
+        persist_book_metadata(&directory, &metadata)?;
         if skipped_chapters.is_empty() {
             Ok("comic".to_string())
         } else {
