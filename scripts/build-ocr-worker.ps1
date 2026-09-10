@@ -14,7 +14,16 @@ if ($Python) {
   $env:UV_PYTHON = $Python
 }
 uv sync --project (Split-Path -Parent $workerProject) --group build
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to prepare the OCR worker Python environment"
+}
 $rapidOcrRoot = uv run --project (Split-Path -Parent $workerProject) python -c "from pathlib import Path; import rapidocr; print(Path(rapidocr.__file__).parent)"
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to locate RapidOCR in the OCR worker Python environment"
+}
+if ([string]::IsNullOrWhiteSpace($rapidOcrRoot)) {
+  throw "RapidOCR did not report its installation directory"
+}
 if (-not (Test-Path -LiteralPath (Join-Path $rapidOcrRoot "config.yaml"))) {
   throw "RapidOCR configuration is missing from the worker environment"
 }
@@ -30,11 +39,17 @@ $pythonArgs = @(
   $worker
 )
 uv @pythonArgs
+if ($LASTEXITCODE -ne 0) {
+  throw "PyInstaller failed to build the OCR worker"
+}
 if (-not (Test-Path -LiteralPath (Join-Path $output "ocr_worker.exe"))) {
   throw "PyInstaller did not create src-tauri/ocr-worker/ocr_worker.exe"
 }
-$embeddedModels = uv run --project (Split-Path -Parent $workerProject) pyi-archive_viewer -l (Join-Path $output "ocr_worker.exe") |
-  Select-String -Pattern '\.onnx$|\.onnx\s'
+$archiveContents = uv run --project (Split-Path -Parent $workerProject) pyi-archive_viewer -l (Join-Path $output "ocr_worker.exe")
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to inspect the packaged OCR worker"
+}
+$embeddedModels = $archiveContents | Select-String -Pattern '\.onnx$|\.onnx\s'
 if ($embeddedModels) {
   throw "The worker must not embed OCR models: $embeddedModels"
 }
