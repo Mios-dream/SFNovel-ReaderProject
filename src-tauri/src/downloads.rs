@@ -1366,7 +1366,7 @@ async fn run_comic_download(
             let marker = chapter_directory.join(".complete");
             if !marker.is_file() {
                 let images = match pages_client
-                    .comic_chapter_images(&folder, chapter.id)
+                    .comic_chapter_images(comic_id, chapter.id)
                     .await
                 {
                     Ok(images) => images,

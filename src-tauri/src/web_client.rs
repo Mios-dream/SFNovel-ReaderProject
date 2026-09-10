@@ -511,47 +511,29 @@ impl WebClient {
         parse_comic_catalog(&html, folder)
     }
 
-    /// 通过 SF 漫画网站解析一个章节的图片地址。
+    /// 通过 SF 漫画图片 AJAX 接口读取一个章节的图片地址。
     ///
     /// 图片地址仅供原生下载工作线程使用，不会直接返回渲染进程。
     ///
     /// # 错误
-    /// 章节不可访问、页面缺少资源标识或图片接口拒绝请求时返回错误。
+    /// 章节编号无效或图片接口拒绝请求时返回错误。
     pub(super) async fn comic_chapter_images(
         &self,
-        folder: &str,
+        comic_id: i64,
         chapter_id: i64,
     ) -> Result<Vec<String>, String> {
-        if chapter_id <= 0 {
-            return Err("漫画章节编号无效".to_string());
+        if comic_id <= 0 || chapter_id <= 0 {
+            return Err("漫画或章节编号无效".to_string());
         }
-        let chapter_url = format!("https://manhua.sfacg.com/mh/{folder}/{chapter_id}/");
-        let html = self
-            .page_request(&chapter_url, None)
-            .send()
-            .await
-            .map_err(|error| format!("无法读取 SF 漫画章节：{error}"))?
-            .error_for_status()
-            .map_err(|error| format!("SF 漫画章节请求被拒绝：{error}"))?
-            .text()
-            .await
-            .map_err(|error| format!("SF 漫画章节格式无效：{error}"))?;
-        let source_comic_id =
-            extract_js_number(&html, "c").ok_or_else(|| "该漫画章节当前不可下载".to_string())?;
-        let source_chapter_id = extract_js_number(&html, "chapId")
-            .ok_or_else(|| "该漫画章节当前不可下载".to_string())?;
-        let serial = extract_js_string(&html, "fn")
-            .ok_or_else(|| "SF 漫画章节未返回资源标识".to_string())?;
-        let path = extract_js_string(&html, "nv")
-            .ok_or_else(|| "SF 漫画章节未返回资源路径".to_string())?;
         let payload = self
-            .ajax_request("https://manhua.sfacg.com/ajax/Common.ashx", &chapter_url)
+            .ajax_request(
+                "https://manhua.sfacg.com/ajax/Common.ashx",
+                "https://manhua.sfacg.com/",
+            )
             .query(&[
                 ("op", "getPics"),
-                ("cid", &source_comic_id.to_string()),
-                ("chapId", &source_chapter_id.to_string()),
-                ("serial", serial.as_str()),
-                ("path", path.as_str()),
+                ("cid", &comic_id.to_string()),
+                ("chapId", &chapter_id.to_string()),
             ])
             .send()
             .await
@@ -764,32 +746,6 @@ fn chapter_html_to_markdown(value: &str) -> String {
     }
     output.push_str(remaining);
     output
-}
-
-/// 从漫画章节页面的内联脚本提取数值变量。
-fn extract_js_number(html: &str, variable: &str) -> Option<i64> {
-    let marker = format!("var {variable} =");
-    html.split(&marker)
-        .nth(1)?
-        .split(';')
-        .next()?
-        .trim()
-        .parse()
-        .ok()
-}
-
-/// 从漫画章节页面的内联脚本提取带引号的字符串变量。
-fn extract_js_string(html: &str, variable: &str) -> Option<String> {
-    let marker = format!("var {variable} =");
-    html.split(&marker)
-        .nth(1)?
-        .split(';')
-        .next()?
-        .trim()
-        .strip_prefix('"')?
-        .strip_suffix('"')
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
 }
 
 /// 解析 SF 漫画目录页中的章节链接。
