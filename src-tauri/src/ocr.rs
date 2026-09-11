@@ -95,7 +95,7 @@ pub(crate) async fn recognize_image(
             segments_dir,
         )
         .await?;
-        finish_worker_result(result)
+        finish_worker_result(result).map(|text| format_ocr_novel_text(&text))
     }
 }
 
@@ -180,6 +180,19 @@ fn finish_worker_result(result: std::process::Output) -> Result<String, String> 
         return Err("OCR 未识别到可用文字；原始图片已保留，可稍后重试".to_string());
     }
     Ok(text)
+}
+
+/// 将逐行 OCR 结果整理成按句号分段的小说正文。
+///
+/// 识别器按图片条带输出，每个条带的字数不固定，直接保留其换行会让单字或短语单独成行。
+/// 因此先移除条带边界的换行和空白，再仅在中文句号后保留段落换行；末尾不额外增加空行。
+pub(crate) fn format_ocr_novel_text(text: &str) -> String {
+    text.split(['\r', '\n'])
+        .map(str::trim)
+        .collect::<String>()
+        .replace('。', "。\n")
+        .trim_end()
+        .to_string()
 }
 
 /// 从 OCR worker 的标准错误中提取一条可展示的诊断信息。

@@ -652,9 +652,9 @@ impl WebClient {
                 ("quick", "true"),
                 ("cid", &chapter_id.to_string()),
                 ("nid", &novel_id.to_string()),
-                ("font", "16"),
+                ("font", "18"),
                 ("lang", ""),
-                ("w", "5000"),
+                ("w", "728"),
             ])
             .header(
                 reqwest::header::ACCEPT,

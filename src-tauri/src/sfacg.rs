@@ -8,6 +8,8 @@ use crate::endpoint_policy::{app_endpoint_client, web_endpoint_client, EndpointC
 use crate::library::{
     get_request_policy, library_directory, safe_library_name, StoredBookMetadata,
 };
+#[cfg(target_os = "android")]
+use crate::ocr::format_ocr_novel_text;
 use crate::utils::json::read_or_default;
 use serde::{Deserialize, Serialize, Serializer};
 #[cfg(target_os = "android")]
@@ -821,7 +823,7 @@ pub(crate) async fn recognize_android_image(
     if result.text.trim().is_empty() {
         return Err("Android OCR 未识别到可用文字；原始图片已保留，可稍后重试".to_string());
     }
-    Ok(result.text)
+    Ok(format_ocr_novel_text(&result.text))
 }
 
 /// 通过 Android 原生插件持久化 App 会话 Cookie。
