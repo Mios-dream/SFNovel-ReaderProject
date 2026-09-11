@@ -5,8 +5,17 @@ use crate::sfacg::{
     UserProfile, SF_WEB_USER_AGENT,
 };
 use crate::utils::cookie::{filter_cookie_header, has_cookie_name};
+use md5::{Digest, Md5};
 use serde_json::Value;
 use tauri::Manager;
+
+/// SF 网页在未订阅图片 VIP 正文时返回的固定 PNG 的 MD5 摘要。
+///
+/// 该资源仍会以 `200 image/png` 返回，不能仅通过 HTTP 状态或 MIME 类型判断访问成功。
+/// 摘要来自实际未授权响应，仅作为阅读页授权标记之后的防御性校验。
+const VIP_SUBSCRIPTION_PLACEHOLDER_MD5: [u8; 16] = [
+    0x41, 0x2c, 0xee, 0x87, 0x2b, 0x67, 0xea, 0x5d, 0x63, 0x70, 0xe8, 0x59, 0x68, 0x65, 0x89, 0xc4,
+];
 
 /// 从公开网页书架解析出的一条小说或漫画记录。
 pub(crate) struct PublicShelfItem {
@@ -622,8 +631,8 @@ impl WebClient {
 
     /// 请求已授权 VIP 文字章节的图片内容。
     ///
-    /// 请求刻意限制为原生 Web 会话，并使用 VIP 阅读页作为 Referer。仅有成功 HTTP 状态
-    /// 不足以证明可用，因为上游可能以 200 状态返回 HTML 错误页。
+    /// 请求刻意限制为原生 Web 会话。仅有成功 HTTP 状态或图片 MIME 类型不足以证明可用，
+    /// 因为上游会以 `200 image/png` 返回订阅提示图。
     pub(super) async fn vip_chapter_image(
         &self,
         novel_id: i64,
@@ -691,6 +700,9 @@ impl WebClient {
         if bytes.len() < 512 {
             return Err("VIP 章节图片数据无效或为空".to_string());
         }
+        if is_vip_subscription_placeholder(&bytes) {
+            return Err("VIP 章节未授权访问：网页返回了订阅提示图，请确认本章已订阅".to_string());
+        }
         Ok(VipChapterImage { bytes, extension })
     }
 
@@ -714,6 +726,19 @@ impl WebClient {
             None => request,
         }
     }
+}
+
+/// 判断二进制图片是否为 SF 网页返回的已知订阅提示图。
+///
+/// 官方阅读器在浏览器端动态创建 `#vipImage`，不能将静态 HTML 是否含该节点作为授权
+/// 信号。此摘要直接验证实际 `getChapPic` 响应，避免把已授权章节误判为未授权。
+fn is_vip_subscription_placeholder(bytes: &[u8]) -> bool {
+    is_vip_subscription_placeholder_digest(Md5::digest(bytes).as_slice())
+}
+
+/// 判断 MD5 摘要是否对应已知订阅提示图。
+fn is_vip_subscription_placeholder_digest(digest: &[u8]) -> bool {
+    digest == VIP_SUBSCRIPTION_PLACEHOLDER_MD5
 }
 
 /// 移除文字标记，同时将上游图片地址保留为 SF 图片标签。
@@ -1252,4 +1277,17 @@ fn strip_html_text(value: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_vip_subscription_placeholder_digest, VIP_SUBSCRIPTION_PLACEHOLDER_MD5};
+
+    #[test]
+    fn recognizes_only_the_known_subscription_placeholder() {
+        assert!(is_vip_subscription_placeholder_digest(
+            &VIP_SUBSCRIPTION_PLACEHOLDER_MD5
+        ));
+        assert!(!is_vip_subscription_placeholder_digest(&[0; 16]));
+    }
 }

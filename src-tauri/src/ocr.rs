@@ -77,7 +77,7 @@ fn desktop_ocr_resources(app: &tauri::AppHandle) -> Result<DesktopOcrResources, 
 pub(crate) async fn recognize_image(
     app: &tauri::AppHandle,
     source: PathBuf,
-    segments_dir: PathBuf,
+    segments_dir: Option<PathBuf>,
 ) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
@@ -102,8 +102,8 @@ pub(crate) async fn recognize_image(
 /// 在阻塞线程中启动已验证的 OCR worker。
 ///
 /// 已打包的可执行文件直接运行；开发资源中的 Python 脚本固定通过其同目录的 `uv`
-/// 项目运行。输入图片和分段目录均来自原生下载路径，不接受渲染进程路径；识别文本
-/// 通过 worker 标准输出返回。
+/// 项目运行。输入图片和可选的分段目录均来自原生下载路径，不接受渲染进程路径；
+/// 识别文本通过 worker 标准输出返回。
 ///
 /// # 错误
 /// worker 不存在、开发项目目录无效、进程不能启动或等待任务异常时返回错误。
@@ -113,7 +113,7 @@ async fn run_worker(
     model: PathBuf,
     bundled: bool,
     source: PathBuf,
-    segments_dir: PathBuf,
+    segments_dir: Option<PathBuf>,
 ) -> Result<std::process::Output, String> {
     tokio::task::spawn_blocking(move || {
         let mut command = if bundled {
@@ -135,9 +135,11 @@ async fn run_worker(
             .arg("--input")
             .arg(source)
             .arg("--model-path")
-            .arg(model)
-            .arg("--segments-dir")
-            .arg(segments_dir)
+            .arg(model);
+        if let Some(segments_dir) = segments_dir {
+            command.arg("--segments-dir").arg(segments_dir);
+        }
+        command
             .arg("--workers")
             .arg("1")
             .output()

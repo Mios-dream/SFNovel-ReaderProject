@@ -197,6 +197,9 @@ pub(crate) struct RequestPolicy {
     pub(crate) app_api_preferred_enabled: bool,
     #[serde(default = "default_android_device_report_enabled")]
     pub(crate) android_device_report_enabled: bool,
+    /// 是否保存 OCR 分行、预处理和识别结果等过程文件。
+    #[serde(default)]
+    pub(crate) ocr_process_files_enabled: bool,
 }
 
 /// 一条本地存储的漫画章节及其有序页面文件。
@@ -235,6 +238,7 @@ impl Default for RequestPolicy {
             max_concurrent_downloads: 1,
             app_api_preferred_enabled: true,
             android_device_report_enabled: true,
+            ocr_process_files_enabled: false,
         }
     }
 }
@@ -603,7 +607,7 @@ pub(crate) fn restore_native_jobs(app: &tauri::AppHandle) -> Result<(), String> 
     persist_native_jobs(app, &state)
 }
 
-/// 读取或初始化原生下载任务使用的请求限制
+/// 读取或初始化原生下载任务使用的请求策略。
 ///
 /// # 参数
 /// * `app` - 用于解析私有应用数据的 Tauri 应用句柄。
@@ -622,7 +626,7 @@ pub(crate) fn get_request_policy(app: tauri::AppHandle) -> Result<RequestPolicy,
 ///
 /// # 参数
 /// * `app` - 用于解析私有应用数据的 Tauri 应用句柄。
-/// * `policy` - 渲染进程提交的请求间隔和并发候选值。
+/// * `policy` - 渲染进程提交的请求、设备上报和 OCR 过程文件策略。
 ///
 /// # 错误
 /// 值不在安全范围内，或策略无法序列化、保存时返回错误。

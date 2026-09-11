@@ -247,6 +247,7 @@ async fn resolve_vip_image_content(
     directory: &std::path::Path,
     novel_id: i64,
     chapter_id: i64,
+    save_ocr_process_files: bool,
 ) -> Result<(String, String), String> {
     // 来源请求必须登记为独立的仅网页能力。第二个客户端仅用于强制校验会话边界；传入
     // 的客户端拥有实际请求及其 Cookie 快照。
@@ -264,9 +265,11 @@ async fn resolve_vip_image_content(
     fs::rename(&source_partial, &source)
         .map_err(|error| format!("无法完成 VIP 章节原图写入：{error}"))?;
 
-    let segments = ocr_directory
-        .join("segments")
-        .join(format!("chapter-{chapter_id}"));
+    let segments = save_ocr_process_files.then(|| {
+        ocr_directory
+            .join("segments")
+            .join(format!("chapter-{chapter_id}"))
+    });
     let recognized = recognize_image(app, source.clone(), segments).await?;
     let source_relative = relative_book_path(&source, directory)?;
     Ok((recognized, source_relative))
@@ -457,6 +460,7 @@ async fn run_text_download(
                                     &directory,
                                     novel_id,
                                     chapter_id,
+                                    policy.ocr_process_files_enabled,
                                 )
                                 .await;
                                 let (content, source_path) = match vip_result {

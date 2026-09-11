@@ -10,6 +10,7 @@ export function useRequestPolicy(notify: Notify) {
     maxConcurrentDownloads: 1,
     appApiPreferredEnabled: true,
     androidDeviceReportEnabled: true,
+    ocrProcessFilesEnabled: false,
   });
   const requestPolicySaving = ref(false);
   const contentDictionarySize = ref(0);

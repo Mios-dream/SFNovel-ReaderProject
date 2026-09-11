@@ -29,6 +29,7 @@ const defaultPolicy: RequestPolicy = {
   maxConcurrentDownloads: 1,
   appApiPreferredEnabled: true,
   androidDeviceReportEnabled: true,
+  ocrProcessFilesEnabled: false,
 };
 // 使用本地草稿编辑，只有提交表单时才将设置发送给后端。
 const draft = reactive<RequestPolicy>({ ...props.policy });
@@ -127,6 +128,22 @@ function resetDraft() {
                 <span class="toggle" aria-hidden="true"></span>
                 <span>{{
                   draft.appApiPreferredEnabled ? "已启用" : "已关闭"
+                }}</span>
+              </label>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>保存 OCR 过程文件</strong>
+                <small
+                  >保存分行图片、预处理结果和逐段识别文本到章节 OCR 目录，便于检查识别问题</small
+                >
+              </div>
+              <label class="setting-control toggle-control">
+                <input v-model="draft.ocrProcessFilesEnabled" type="checkbox" />
+                <span class="toggle" aria-hidden="true"></span>
+                <span>{{
+                  draft.ocrProcessFilesEnabled ? "已启用" : "已关闭"
                 }}</span>
               </label>
             </div>

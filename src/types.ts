@@ -165,4 +165,5 @@ export type RequestPolicy = {
   maxConcurrentDownloads: number;
   appApiPreferredEnabled: boolean;
   androidDeviceReportEnabled: boolean;
+  ocrProcessFilesEnabled: boolean;
 };

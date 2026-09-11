@@ -804,7 +804,7 @@ pub(crate) async fn initialize_device_identity(app: &tauri::AppHandle) -> Result
 pub(crate) async fn recognize_android_image(
     app: &tauri::AppHandle,
     source: std::path::PathBuf,
-    segments_dir: std::path::PathBuf,
+    segments_dir: Option<std::path::PathBuf>,
 ) -> Result<String, String> {
     let result = app
         .state::<AndroidSfacgOcr<tauri::Wry>>()
@@ -813,7 +813,7 @@ pub(crate) async fn recognize_android_image(
             "recognizeChapter",
             serde_json::json!({
                 "sourcePath": source.to_string_lossy(),
-                "segmentsDir": segments_dir.to_string_lossy(),
+                "segmentsDir": segments_dir.map(|directory| directory.to_string_lossy().into_owned()),
             }),
         )
         .await

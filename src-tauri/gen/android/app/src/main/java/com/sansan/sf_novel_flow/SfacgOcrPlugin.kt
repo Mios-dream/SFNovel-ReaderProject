@@ -29,7 +29,7 @@ import pl.droidsonroids.gif.GifDrawable
 @InvokeArg
 class RecognizeChapterArgs {
     lateinit var sourcePath: String
-    lateinit var segmentsDir: String
+    var segmentsDir: String? = null
 }
 
 /** Android image OCR plugin. Authentication and cookie state are intentionally out of scope. */
@@ -50,8 +50,9 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
                 progress.stage = "检查输入文件"
                 val source = File(args.sourcePath)
                 require(source.isFile) { "OCR 输入图片不存在：${source.absolutePath}" }
-                progress.stage = "准备诊断目录"
-                val segmentDirectory = prepareSegmentsDirectory(args.segmentsDir)
+                val segmentDirectory = args.segmentsDir
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(::prepareSegmentsDirectory)
                 segments = segmentDirectory
                 progress.stage = "加载 OCR 模型"
                 val text = OnnxChapterRecognizer(activity).use { recognizer ->
@@ -72,7 +73,7 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
         require(directory.isDirectory) { "OCR 诊断目录不是文件夹：${directory.absolutePath}" }
     }
 
-    private fun recognizeFrames(source: File, segments: File, recognizer: OnnxChapterRecognizer, progress: OcrProgress): String {
+    private fun recognizeFrames(source: File, segments: File?, recognizer: OnnxChapterRecognizer, progress: OcrProgress): String {
         val frameTexts = ArrayList<String>()
         if (source.extension.lowercase(Locale.ROOT) != "gif") {
             progress.stage = "解码输入图片"
@@ -105,8 +106,10 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
             }
         }
         return frameTexts.filter { it.isNotBlank() }.joinToString("\n\n").also {
-            progress.stage = "保存 OCR 结果"
-            saveText(it, File(segments, "ocr-result.txt"))
+            if (segments != null) {
+                progress.stage = "保存 OCR 结果"
+                saveText(it, File(segments, "ocr-result.txt"))
+            }
         }
     }
 
@@ -126,12 +129,14 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    private fun recognizeBitmap(bitmap: Bitmap, segments: File, frame: Int, recognizer: OnnxChapterRecognizer, progress: OcrProgress): String {
+    private fun recognizeBitmap(bitmap: Bitmap, segments: File?, frame: Int, recognizer: OnnxChapterRecognizer, progress: OcrProgress): String {
         // Keep only this cleaned page bitmap. Watermark buffers are bounded to a small row chunk.
         progress.stage = "第 $frame 帧去水印"
         cleanWatermarkInPlace(bitmap)
-        progress.stage = "保存第 $frame 帧去水印图"
-        saveBitmapCopy(bitmap, File(segments, frameFileName(frame, "watermark-removed.png")))
+        if (segments != null) {
+            progress.stage = "保存第 $frame 帧去水印图"
+            saveBitmapCopy(bitmap, File(segments, frameFileName(frame, "watermark-removed.png")))
+        }
         return recognizeCleanedBitmap(bitmap, segments, frame, recognizer, progress)
     }
 
@@ -219,7 +224,7 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    private fun recognizeCleanedBitmap(bitmap: Bitmap, segments: File, frame: Int, recognizer: OnnxChapterRecognizer, progress: OcrProgress): String {
+    private fun recognizeCleanedBitmap(bitmap: Bitmap, segments: File?, frame: Int, recognizer: OnnxChapterRecognizer, progress: OcrProgress): String {
         val texts = ArrayList<String>()
         var contentLine = 0
         for ((start, end) in fixedHeightBounds(bitmap.height)) {
@@ -237,12 +242,16 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
                 lineHasContent = true
                 partNumber++
                 val prefix = "frame-${frame.toString().padStart(4, '0')}-line-${lineNumber.toString().padStart(4, '0')}-part-${partNumber.toString().padStart(4, '0')}"
-                progress.stage = "保存第 $frame 帧第 $lineNumber 行第 $partNumber 段"
-                saveGray(line, File(segments, "$prefix.png"))
+                if (segments != null) {
+                    progress.stage = "保存第 $frame 帧第 $lineNumber 行第 $partNumber 段"
+                    saveGray(line, File(segments, "$prefix.png"))
+                }
                 progress.stage = "识别第 $frame 帧第 $lineNumber 行第 $partNumber 段"
                 val value = recognizer.recognize(line)
-                progress.stage = "保存第 $frame 帧第 $lineNumber 行第 $partNumber 段识别结果"
-                saveText(value, File(segments, "$prefix-ocr.txt"))
+                if (segments != null) {
+                    progress.stage = "保存第 $frame 帧第 $lineNumber 行第 $partNumber 段识别结果"
+                    saveText(value, File(segments, "$prefix-ocr.txt"))
+                }
                 if (value.isNotEmpty()) texts += value
             }
             if (lineHasContent) contentLine++
