@@ -19,3 +19,9 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# ONNX Runtime's JNI library resolves Java wrapper and value classes by their
+# original binary names. R8 cannot infer those FindClass lookups from Java
+# references, so renaming or removing this package can leave a pending JNI
+# exception and abort the Android process.
+-keep class ai.onnxruntime.** { *; }
