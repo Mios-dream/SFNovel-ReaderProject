@@ -29,6 +29,7 @@ export function useDeskLibrary({
   const localComicChapter = ref<LocalComicChapter>();
   const localAudioTrackIndex = ref(0);
   const exportingFormat = ref<ExportFormat>();
+  const openingDownloadDirectory = ref(false);
   let libraryAssetVersion = 0;
 
   async function refreshLibrary() {
@@ -90,6 +91,28 @@ export function useDeskLibrary({
     } catch {
       // Browser previews do not expose the mobile command.
       return true;
+    }
+  }
+
+  /**
+   * 打开系统文件管理器中的本地书库目录。
+   *
+   * 安卓端会先确认公开下载目录的访问权限，桌面端则直接交给系统打开应用书库目录。
+   */
+  async function openDownloadDirectory() {
+    if (openingDownloadDirectory.value) return;
+    openingDownloadDirectory.value = true;
+    try {
+      if (!(await ensureLibraryAssetAccess())) return;
+      await invoke<void>("open_download_directory");
+      notify("已打开下载目录");
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "无法打开下载目录",
+        "error",
+      );
+    } finally {
+      openingDownloadDirectory.value = false;
     }
   }
 
@@ -276,9 +299,11 @@ export function useDeskLibrary({
     localComicChapter,
     localAudioTrackIndex,
     exportingFormat,
+    openingDownloadDirectory,
     refreshLibrary,
     refreshLocalBook,
     ensureLibraryAssetAccess,
+    openDownloadDirectory,
     loadLocalBook,
     deleteBook,
     confirmDeleteBook,

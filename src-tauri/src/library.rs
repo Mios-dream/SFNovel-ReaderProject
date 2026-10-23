@@ -694,6 +694,36 @@ pub(crate) fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBoo
     Ok(books)
 }
 
+/// 在系统文件管理器中打开本地书库目录。
+///
+/// 目录始终由原生端解析，渲染进程无法借此打开任意路径。安卓端通过系统文件
+/// 提供器打开公开下载目录；其他平台使用系统默认的文件管理器。
+///
+/// # 参数
+/// * `app` - 用于定位平台书库目录和安卓原生插件的应用句柄。
+///
+/// # 错误
+/// 无法创建目录、启动系统文件管理器，或安卓插件调用失败时返回错误。
+#[tauri::command]
+pub(crate) async fn open_download_directory(app: tauri::AppHandle) -> Result<(), String> {
+    let directory = library_directory(&app)?;
+
+    #[cfg(target_os = "android")]
+    {
+        app.state::<AndroidSfacgAuth<tauri::Wry>>()
+            .mobile_plugin_handle
+            .run_mobile_plugin_async::<Value>("openDownloadDirectory", ())
+            .await
+            .map_err(|error| format!("无法打开下载目录：{error}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        tauri_plugin_opener::open_path(&directory, None::<&str>)
+            .map_err(|error| format!("无法打开下载目录：{error}"))
+    }
+}
+
 /// 解析应用自有书库内的单个子目录。
 ///
 /// # 参数

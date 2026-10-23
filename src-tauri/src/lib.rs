@@ -83,6 +83,7 @@ pub fn run() {
             diagnostics::greet,
             diagnostics::app_runtime_version,
             library::list_local_library,
+            library::open_download_directory,
             library::get_request_policy,
             library::save_request_policy,
             library::get_content_dictionary,

@@ -2,11 +2,13 @@ package com.sansan.sf_novel_flow
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.Settings
 import android.util.Base64
 import android.webkit.CookieManager
@@ -19,6 +21,7 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.io.File
 import java.security.KeyStore
 import java.util.UUID
 import javax.crypto.Cipher
@@ -140,6 +143,35 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         } catch (error: Exception) { invoke.reject(error.message ?: "无法写入系统保存位置") }
     }
 
+    @Command
+    fun openDownloadDirectory(invoke: Invoke) {
+        try {
+            val downloadRoot = Environment.getExternalStorageDirectory()
+            val directory = File(downloadRoot, "Download/SF Novel Flow")
+            if (!directory.exists() && !directory.mkdirs()) {
+                throw java.io.IOException("无法创建下载目录")
+            }
+            val documentId = "primary:${directory.relativeTo(downloadRoot).invariantSeparatorsPath}"
+            val uri = DocumentsContract.buildDocumentUri(EXTERNAL_STORAGE_AUTHORITY, documentId)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, DocumentsContract.Document.MIME_TYPE_DIR)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+            }
+            try {
+                activity.startActivity(intent)
+            } catch (_: ActivityNotFoundException) {
+                val picker = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                    putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+                }
+                activity.startActivity(picker)
+            }
+            invoke.resolve()
+        } catch (error: Exception) {
+            invoke.reject(error.message ?: "无法打开系统文件管理器")
+        }
+    }
+
     private fun readSfacgSessionCookie(): String? {
         val cookiePairs = linkedMapOf<String, String>(); val manager = CookieManager.getInstance()
         for (url in SFACG_COOKIE_URLS) for (part in (manager.getCookie(url) ?: "").split(";")) {
@@ -186,5 +218,6 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         const val DEVICE_TOKEN_KEY = "device-token"
         const val APP_SESSION_KEY = "app-session"
         const val KEY_ALIAS = "sfacg-auth-key"
+        const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
     }
 }

@@ -5,6 +5,7 @@ import {
   BookOpen,
   ChevronRight,
   FileText,
+  FolderOpen,
   Headphones,
   LibraryBig,
   Pause,
@@ -53,16 +54,31 @@ async function openDiscover() {
             }}
           </h2>
         </div>
-        <button
-          class="manage-button"
-          :class="{ active: desk.libraryManaging.value }"
-          :disabled="!desk.library.value.length"
-          @click="desk.libraryManaging.value = !desk.libraryManaging.value"
-        >
-          <Settings2 :size="17" /><span>{{
-            desk.libraryManaging.value ? "完成管理" : "管理"
-          }}</span>
-        </button>
+        <div class="library-actions">
+          <button
+            class="open-download-button"
+            :disabled="desk.openingDownloadDirectory.value"
+            aria-label="打开下载目录"
+            title="打开下载目录"
+            @click="desk.openDownloadDirectory"
+          >
+            <FolderOpen :size="17" /><span>{{
+              desk.openingDownloadDirectory.value ? "正在打开" : "打开下载目录"
+            }}</span>
+          </button>
+          <button
+            class="manage-button"
+            :class="{ active: desk.libraryManaging.value }"
+            :disabled="!desk.library.value.length"
+            :aria-label="desk.libraryManaging.value ? '完成管理' : '管理本地作品'"
+            :title="desk.libraryManaging.value ? '完成管理' : '管理本地作品'"
+            @click="desk.libraryManaging.value = !desk.libraryManaging.value"
+          >
+            <Settings2 :size="17" /><span>{{
+              desk.libraryManaging.value ? "完成管理" : "管理"
+            }}</span>
+          </button>
+        </div>
       </section>
       <section
         v-if="desk.libraryJobs.value.length"
@@ -182,6 +198,7 @@ async function openDiscover() {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
+  gap: 12px;
   margin: 33px 0 15px;
 }
 .library-head {
@@ -199,7 +216,13 @@ async function openDiscover() {
   font-family: KaTongFont, "Microsoft YaHei", sans-serif;
   font-size: 20px;
 }
-.manage-button {
+.library-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.manage-button,
+.open-download-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -215,12 +238,14 @@ async function openDiscover() {
   transition: 0.2s;
 }
 .manage-button:hover:not(:disabled),
-.manage-button.active {
+.manage-button.active,
+.open-download-button:hover:not(:disabled) {
   border-color: #b85f51;
   color: #fff;
   background: #b85f51;
 }
-.manage-button:disabled {
+.manage-button:disabled,
+.open-download-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
@@ -437,6 +462,24 @@ async function openDiscover() {
 
   .library-grid {
     grid-template-columns: 1fr;
+  }
+  .library-head {
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .library-actions {
+    margin-left: auto;
+  }
+  .manage-button,
+  .open-download-button {
+    justify-content: center;
+    width: 38px;
+    min-height: 38px;
+    padding: 0;
+  }
+  .manage-button span,
+  .open-download-button span {
+    display: none;
   }
   .library-download-row {
     flex-wrap: wrap;
