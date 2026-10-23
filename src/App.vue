@@ -1,11 +1,13 @@
 <template>
   <RouterView />
   <AppOverlays />
+  <ToastHost />
 </template>
 <script setup lang="ts">
 import { provide, reactive, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import AppOverlays from "./components/AppOverlays.vue";
+import ToastHost from "./components/ToastHost.vue";
 import { useNovelDesk } from "./composables/useNovelDesk";
 import { deskInjectionKey } from "./deskContext";
 

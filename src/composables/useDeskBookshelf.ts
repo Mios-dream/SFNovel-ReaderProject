@@ -81,7 +81,7 @@ export function useDeskBookshelf({
         bookshelfCategory.value = "全部";
       bookshelfPage.value = 1;
     } catch (error) {
-      notify(nativeErrorMessage(error, "读取书架失败"));
+      notify(nativeErrorMessage(error, "读取书架失败"), "error");
     } finally {
       bookshelfLoading.value = false;
     }

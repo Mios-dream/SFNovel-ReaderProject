@@ -82,7 +82,7 @@ export function useChapterPicker({
       selectDownloadableChapters();
     } catch (error) {
       chapterModalOpen.value = false;
-      notify(nativeErrorMessage(error, "读取章节目录失败"));
+      notify(nativeErrorMessage(error, "读取章节目录失败"), "error");
     } finally {
       chapterLoading.value = false;
     }
@@ -160,7 +160,7 @@ export function useChapterPicker({
       notify(`已将《${novel.novelName}》加入下载队列`);
       void refreshJobs();
     } catch (error) {
-      notify(nativeErrorMessage(error, "创建下载任务失败"));
+      notify(nativeErrorMessage(error, "创建下载任务失败"), "error");
     }
   }
 

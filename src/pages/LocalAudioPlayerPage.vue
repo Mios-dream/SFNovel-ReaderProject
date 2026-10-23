@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-vue-next";
 import AudioPlayerDrawer from "../components/AudioPlayerDrawer.vue";
+import { reportError } from "../composables/useToast";
 import { deskInjectionKey } from "../deskContext";
 
 function requireDesk() {
@@ -389,8 +390,9 @@ async function play() {
   try {
     await audio.value.play();
     playing.value = true;
-  } catch {
+  } catch (error) {
     playing.value = false;
+    reportError(error, "音频播放失败，请检查音频文件或设备音量");
   }
 }
 

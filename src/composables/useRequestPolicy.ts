@@ -24,7 +24,7 @@ export function useRequestPolicy(notify: Notify) {
       const dictionary = await invoke<{ size: number }>("get_content_dictionary");
       contentDictionarySize.value = dictionary.size;
     } catch (error) {
-      notify(error instanceof Error ? error.message : "读取请求设置失败");
+      notify(error instanceof Error ? error.message : "读取请求设置失败", "error");
     }
   }
 
@@ -43,7 +43,7 @@ export function useRequestPolicy(notify: Notify) {
       contentDictionarySize.value = result.size;
       notify(`正文恢复字典已更新，新增 ${result.added ?? 0} 个字符`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "正文恢复字典更新失败");
+      notify(error instanceof Error ? error.message : "正文恢复字典更新失败", "error");
     } finally {
       contentDictionaryUpdating.value = false;
     }
@@ -58,7 +58,7 @@ export function useRequestPolicy(notify: Notify) {
       requestPolicyOpen.value = false;
       notify("请求设置已更新");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "保存请求设置失败");
+      notify(error instanceof Error ? error.message : "保存请求设置失败", "error");
     } finally {
       requestPolicySaving.value = false;
     }

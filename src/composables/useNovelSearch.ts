@@ -24,7 +24,7 @@ export function useNovelSearch({ refreshAuthStatus, notify }: UseNovelSearchOpti
         query: query.value.trim(),
       });
     } catch (error) {
-      notify(nativeErrorMessage(error, "搜索失败"));
+      notify(nativeErrorMessage(error, "搜索失败"), "error");
     } finally {
       loading.value = false;
     }

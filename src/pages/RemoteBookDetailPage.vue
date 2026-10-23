@@ -20,6 +20,7 @@ import {
 } from "lucide-vue-next";
 import { deskInjectionKey } from "../deskContext";
 import { nativeErrorMessage } from "../composables/deskShared";
+import { reportError } from "../composables/useToast";
 import type { Chapter, ChapterMode, ChapterVolume } from "../types";
 
 function requireDesk() {
@@ -203,8 +204,8 @@ async function openOnline() {
       : `https://book.sfacg.com/Novel/${work.novelId}/`;
   try {
     await openUrl(url);
-  } catch {
-    // The opener plugin reports platform-specific failures without a safe detail.
+  } catch (error) {
+    reportError(error, "打开官方页面失败");
   }
 }
 

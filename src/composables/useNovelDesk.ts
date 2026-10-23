@@ -9,6 +9,7 @@ import { useDeskJobs } from "./useDeskJobs";
 import { useDeskLibrary } from "./useDeskLibrary";
 import { useNovelSearch } from "./useNovelSearch";
 import { useRequestPolicy } from "./useRequestPolicy";
+import { showToast, type ToastType } from "./useToast";
 
 type RemoteMediaType = "novel" | "audio" | "comic";
 type RemoteMedia = Partial<Record<RemoteMediaType, Novel>>;
@@ -43,22 +44,16 @@ export function useNovelDesk() {
   const active = ref<ViewName>("discover");
   const libraryDetailReturnView = ref<ViewName>("library");
   const queueOpen = ref(false);
-  const toast = ref("");
   const remoteBook = ref<Novel>();
   const remoteBookLoading = ref(false);
   const remoteMedia = ref<RemoteMedia>({});
   const remoteMediaDetecting = ref(false);
-  let toastTimer: number | undefined;
   let stopBackListener: { unregister: () => Promise<void> } | undefined;
   let disposed = false;
   let remoteBookRequest = 0;
 
-  function notify(message: string) {
-    toast.value = message;
-    window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => {
-      toast.value = "";
-    }, 2800);
+  function notify(message: string, type: ToastType = "info") {
+    showToast(message, type);
   }
 
   const auth = useDeskAuth(notify);
@@ -125,7 +120,7 @@ export function useNovelDesk() {
       }
     } catch (error) {
       if (request === remoteBookRequest)
-        notify(error instanceof Error ? error.message : "读取作品详情失败");
+        notify(error instanceof Error ? error.message : "读取作品详情失败", "error");
     } finally {
       if (request === remoteBookRequest) remoteBookLoading.value = false;
     }
@@ -256,7 +251,6 @@ export function useNovelDesk() {
   onBeforeUnmount(() => {
     disposed = true;
     void stopBackListener?.unregister();
-    window.clearTimeout(toastTimer);
     document.removeEventListener("copy", blockCopy);
     document.removeEventListener(
       "visibilitychange",
@@ -267,7 +261,6 @@ export function useNovelDesk() {
   return {
     active,
     queueOpen,
-    toast,
     ...search,
     ...jobs,
     ...library,

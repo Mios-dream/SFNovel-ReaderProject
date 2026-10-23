@@ -73,7 +73,7 @@ export function useDeskLibrary({
       library.value = library.value.filter((item) => item.name !== book.name);
       notify(`已删除《${book.name}》本地内容`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "删除本地内容失败");
+      notify(error instanceof Error ? error.message : "删除本地内容失败", "error");
     }
     confirmBook.value = undefined;
   }
@@ -104,7 +104,7 @@ export function useDeskLibrary({
       localBook.value = bookDetail;
       return bookDetail;
     } catch (error) {
-      notify(error instanceof Error ? error.message : "无法读取本地书籍详情");
+      notify(error instanceof Error ? error.message : "无法读取本地书籍详情", "error");
       return undefined;
     }
   }
@@ -125,7 +125,7 @@ export function useDeskLibrary({
       localComicChapter.value = chapter;
       return chapter;
     } catch (error) {
-      notify(error instanceof Error ? error.message : "无法读取本地漫画章节");
+      notify(error instanceof Error ? error.message : "无法读取本地漫画章节", "error");
     }
   }
 
@@ -141,7 +141,7 @@ export function useDeskLibrary({
       localChapter.value = chapter;
       return chapter;
     } catch (error) {
-      notify(error instanceof Error ? error.message : "无法读取本地章节");
+      notify(error instanceof Error ? error.message : "无法读取本地章节", "error");
     }
   }
 
@@ -220,7 +220,7 @@ export function useDeskLibrary({
       );
       notify(`已导出到 ${result.href}`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "导出失败");
+      notify(error instanceof Error ? error.message : "导出失败", "error");
     } finally {
       exportingFormat.value = undefined;
     }

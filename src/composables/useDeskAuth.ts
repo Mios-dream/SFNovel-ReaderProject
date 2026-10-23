@@ -85,7 +85,7 @@ export function useDeskAuth(notify: Notify) {
           : "App 高级能力已连接，可选择继续连接网站功能",
       );
     } catch (error) {
-      notify(nativeErrorMessage(error, "SF 账号密码登录失败"));
+      notify(nativeErrorMessage(error, "SF 账号密码登录失败"), "error");
     } finally {
       loginBusy.value = false;
     }
@@ -102,7 +102,7 @@ export function useDeskAuth(notify: Notify) {
       }
       auth.value = result;
       if (!(await loadAccountProfile())) {
-        notify(accountProfileError.value || "网页登录会话已失效");
+        notify(accountProfileError.value || "网页登录会话已失效", "error");
         return;
       }
       notify(
@@ -111,7 +111,7 @@ export function useDeskAuth(notify: Notify) {
           : "网站功能已连接，可选择继续连接 App 高级能力",
       );
     } catch (error) {
-      notify(nativeErrorMessage(error, "无法打开官方登录窗口"));
+      notify(nativeErrorMessage(error, "无法打开官方登录窗口"), "error");
     } finally {
       loginBusy.value = false;
     }
@@ -127,7 +127,7 @@ export function useDeskAuth(notify: Notify) {
       accountProfileError.value = "";
       notify("已清除本地登录会话");
     } catch {
-      notify("退出登录失败");
+      notify("退出登录失败", "error");
     }
   }
 
@@ -142,7 +142,7 @@ export function useDeskAuth(notify: Notify) {
       }
       notify("App 登录凭证已退出，网站功能不受影响");
     } catch (error) {
-      notify(nativeErrorMessage(error, "退出 App 登录失败"));
+      notify(nativeErrorMessage(error, "退出 App 登录失败"), "error");
     }
   }
 
@@ -154,7 +154,7 @@ export function useDeskAuth(notify: Notify) {
       accountOpen.value = false;
       notify("网站登录凭证已退出，App 功能不受影响");
     } catch (error) {
-      notify(nativeErrorMessage(error, "退出网站登录失败"));
+      notify(nativeErrorMessage(error, "退出网站登录失败"), "error");
     }
   }
 

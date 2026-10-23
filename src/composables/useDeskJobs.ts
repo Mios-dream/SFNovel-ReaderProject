@@ -54,7 +54,7 @@ export function useDeskJobs({ notify, refreshLibrary }: UseDeskJobsOptions) {
       job.status = "paused";
       job.message = "已暂停，可继续下载";
     } catch (error) {
-      notify(error instanceof Error ? error.message : "暂停下载失败");
+      notify(error instanceof Error ? error.message : "暂停下载失败", "error");
     }
   }
 
@@ -65,7 +65,7 @@ export function useDeskJobs({ notify, refreshLibrary }: UseDeskJobsOptions) {
       job.message = "正在继续下载";
       void refreshJobs();
     } catch (error) {
-      notify(error instanceof Error ? error.message : "继续下载失败");
+      notify(error instanceof Error ? error.message : "继续下载失败", "error");
     }
   }
 
@@ -74,7 +74,7 @@ export function useDeskJobs({ notify, refreshLibrary }: UseDeskJobsOptions) {
       await invoke<void>("delete_download_job", { jobId: job.id });
       jobs.value = jobs.value.filter((item) => item.id !== job.id);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "删除任务失败");
+      notify(error instanceof Error ? error.message : "删除任务失败", "error");
     }
   }
 

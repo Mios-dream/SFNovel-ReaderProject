@@ -1,6 +1,7 @@
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
+import type { ToastType } from "./useToast";
 
-export type Notify = (message: string) => void;
+export type Notify = (message: string, type?: ToastType) => void;
 
 export function localAssetSource(path?: string, cacheKey?: number) {
   if (!path || !isTauri()) return path;
