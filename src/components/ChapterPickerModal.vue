@@ -107,27 +107,48 @@
               >
             </div></template
           ><template v-else-if="mode === 'audio'"
-            ><label
-              v-for="chapter in audioChapters"
-              :key="chapter.id"
-              :class="{ downloaded: chapter.downloaded }"
-              ><input
-                :checked="selectedIds.includes(chapter.id)"
-                :disabled="chapter.downloaded"
-                type="checkbox"
-                :value="chapter.id"
-                @change="
-                  toggleChapter(
-                    chapter.id,
-                    ($event.target as HTMLInputElement).checked,
-                  )
-                "
-              /><span class="chapter-title"
-                >{{ chapter.volume }} - {{ chapter.title }}</span
-              ><span v-if="chapter.downloaded" class="chapter-state downloaded"
-                ><CheckCircle2 :size="15" />已下载</span
-              ></label
-            ></template
+            ><div
+              v-for="volume in audioVolumes"
+              :key="volume.title"
+              class="chapter-volume"
+            >
+              <div class="volume-heading">
+                <strong>{{ volume.title }}</strong>
+                <button
+                  class="volume-select-all"
+                  :disabled="!selectableAudioIds(volume).length"
+                  @click="toggleAudioVolume(volume)"
+                >
+                  {{
+                    isAudioVolumeSelected(volume) ? "取消全选" : "全选本卷"
+                  }}（{{ selectedAudioVolumeCount(volume) }}/{{
+                    selectableAudioIds(volume).length
+                  }}）
+                </button>
+              </div>
+              <label
+                v-for="chapter in volume.chapters"
+                :key="chapter.id"
+                :class="{ downloaded: chapter.downloaded }"
+                ><input
+                  :checked="selectedIds.includes(chapter.id)"
+                  :disabled="chapter.downloaded"
+                  type="checkbox"
+                  :value="chapter.id"
+                  @change="
+                    toggleChapter(
+                      chapter.id,
+                      ($event.target as HTMLInputElement).checked,
+                    )
+                  "
+                /><span class="chapter-title">{{ chapter.title }}</span
+                ><span
+                  v-if="chapter.downloaded"
+                  class="chapter-state downloaded"
+                  ><CheckCircle2 :size="15" />已下载</span
+                ></label
+              >
+            </div></template
           ><template v-else
             ><label
               v-for="chapter in comicChapters"
@@ -221,6 +242,7 @@ type SelectableChapter = (TextChapter | Chapter) & {
   contentKind?: TextChapter["contentKind"];
   accessState?: TextChapter["accessState"];
 };
+type AudioVolume = { title: string; chapters: Chapter[] };
 
 // 文本、有声和漫画章节统一转换为可选择结构，模板无需区分目录来源。
 /**
@@ -250,6 +272,16 @@ const allChapters = computed<SelectableChapter[]>(() =>
       ? props.audioChapters
       : props.comicChapters,
 );
+const audioVolumes = computed<AudioVolume[]>(() => {
+  const grouped = new Map<string, AudioVolume>();
+  for (const chapter of props.audioChapters) {
+    const title = chapter.volume.trim() || "未分卷";
+    const volume = grouped.get(title);
+    if (volume) volume.chapters.push(chapter);
+    else grouped.set(title, { title, chapters: [chapter] });
+  }
+  return [...grouped.values()];
+});
 const downloadModes = computed(() => {
   const modes: Array<{ mode: ChapterMode; label: string }> = [];
   if (props.volumes.length) modes.push({ mode: "text", label: "小说" });
@@ -298,6 +330,48 @@ function selectedVolumeCount(volume: ChapterVolume) {
 function isVolumeSelected(volume: ChapterVolume) {
   const ids = selectableVolumeIds(volume);
   return ids.length > 0 && selectedVolumeCount(volume) === ids.length;
+}
+
+/**
+ * 获取有声卷中所有可下载章节 ID。
+ * @param volume 要检查的有声卷。
+ * @returns 该卷中可下载的有声章节 ID 数组。
+ */
+function selectableAudioIds(volume: AudioVolume) {
+  return volume.chapters.filter(canDownload).map((chapter) => chapter.id);
+}
+
+/**
+ * 统计有声卷内已选章节数量。
+ * @param volume 要统计的有声卷。
+ * @returns 当前已选的有声章节数量。
+ */
+function selectedAudioVolumeCount(volume: AudioVolume) {
+  const ids = selectableAudioIds(volume);
+  return props.selectedIds.filter((id) => ids.includes(id)).length;
+}
+
+/**
+ * 判断有声卷是否已全选。
+ * @param volume 要判断的有声卷。
+ * @returns 有声卷中存在可选章节且全部已选时返回 true。
+ */
+function isAudioVolumeSelected(volume: AudioVolume) {
+  const ids = selectableAudioIds(volume);
+  return ids.length > 0 && selectedAudioVolumeCount(volume) === ids.length;
+}
+
+/**
+ * 切换整卷有声章节的选择状态。
+ * @param volume 要切换的有声卷。
+ * @returns 无返回值；通过事件通知父组件更新选中 ID。
+ */
+function toggleAudioVolume(volume: AudioVolume) {
+  const ids = selectableAudioIds(volume);
+  const nextIds = isAudioVolumeSelected(volume)
+    ? props.selectedIds.filter((id) => !ids.includes(id))
+    : [...new Set([...props.selectedIds, ...ids])];
+  emit("update:selectedIds", nextIds);
 }
 
 /**
@@ -352,7 +426,10 @@ function toggleChapter(id: number, checked: boolean) {
   width: min(760px, 100%);
   max-height: 80%;
   overflow: auto;
+  scrollbar-width: auto;
+  scrollbar-color: #edb18d transparent;
 }
+
 .chapter-hero {
   position: relative;
   min-height: 170px;
@@ -387,6 +464,8 @@ function toggleChapter(id: number, checked: boolean) {
   z-index: 1;
   max-height: 72px;
   overflow: auto;
+  scrollbar-width: auto;
+  scrollbar-color: #edb18d transparent;
   font-size: 14px;
   color: white;
 }
@@ -506,6 +585,8 @@ function toggleChapter(id: number, checked: boolean) {
   min-height: 100px;
   padding-right: 5px;
   overflow: auto;
+  scrollbar-width: auto;
+  scrollbar-color: #edb18d transparent;
 }
 
 .chapter-volume {
