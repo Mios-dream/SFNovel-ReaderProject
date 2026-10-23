@@ -7,6 +7,7 @@ import type { Notify } from "./deskShared";
 type UseDeskJobsOptions = {
   notify: Notify;
   refreshLibrary: () => Promise<void>;
+  refreshLocalBook: () => Promise<void>;
 };
 
 const libraryRefreshStatuses = new Set<Job["status"]>([
@@ -16,9 +17,14 @@ const libraryRefreshStatuses = new Set<Job["status"]>([
   "cancelled",
 ]);
 
-export function useDeskJobs({ notify, refreshLibrary }: UseDeskJobsOptions) {
+export function useDeskJobs({
+  notify,
+  refreshLibrary,
+  refreshLocalBook,
+}: UseDeskJobsOptions) {
   const jobs = ref<Job[]>([]);
   let stopJobListener: (() => void) | undefined;
+  let stopLibraryListener: (() => void) | undefined;
   let disposed = false;
 
   const runningJobs = computed(() =>
@@ -38,11 +44,16 @@ export function useDeskJobs({ notify, refreshLibrary }: UseDeskJobsOptions) {
     else jobs.value[index] = job;
   }
 
+  function refreshLibraryViews() {
+    void refreshLibrary();
+    void refreshLocalBook();
+  }
+
   async function refreshJobs() {
     try {
       jobs.value = await invoke<Job[]>("list_download_jobs");
       if (jobs.value.some((job) => libraryRefreshStatuses.has(job.status)))
-        void refreshLibrary();
+        refreshLibraryViews();
     } catch {
       /* Native runtime may be restarting during development. */
     }
@@ -81,10 +92,19 @@ export function useDeskJobs({ notify, refreshLibrary }: UseDeskJobsOptions) {
   onMounted(() => {
     void listen<Job>("download-progress", (event) => {
       upsertJob(event.payload);
-      if (libraryRefreshStatuses.has(event.payload.status)) void refreshLibrary();
+      if (libraryRefreshStatuses.has(event.payload.status)) refreshLibraryViews();
     }).then((unlisten) => {
       if (disposed) unlisten();
       else stopJobListener = unlisten;
+    }).catch(() => {
+      // The native event bridge is unavailable in browser-only previews.
+    });
+    void listen<Job>("download-library-update", (event) => {
+      upsertJob(event.payload);
+      refreshLibraryViews();
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else stopLibraryListener = unlisten;
     }).catch(() => {
       // The native event bridge is unavailable in browser-only previews.
     });
@@ -94,6 +114,7 @@ export function useDeskJobs({ notify, refreshLibrary }: UseDeskJobsOptions) {
   onBeforeUnmount(() => {
     disposed = true;
     stopJobListener?.();
+    stopLibraryListener?.();
   });
 
   return {

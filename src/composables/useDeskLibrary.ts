@@ -44,6 +44,38 @@ export function useDeskLibrary({
     }
   }
 
+  async function refreshLocalBook() {
+    const name = localBook.value?.name;
+    if (!name) return;
+    try {
+      const bookDetail = await invoke<LocalBookDetail>("get_local_book", {
+        name,
+      });
+      if (localBook.value?.name !== name) return;
+      for (const media of [
+        bookDetail.novel,
+        bookDetail.audio,
+        bookDetail.comic,
+      ]) {
+        if (media) media.cover = localAssetSource(media.cover);
+      }
+      bookDetail.epubHref = localAssetSource(bookDetail.epubHref);
+      bookDetail.audioTracks = bookDetail.audioTracks.map((track) => ({
+        ...track,
+        href: localAssetSource(track.href) || "",
+      }));
+      bookDetail.comicChapters = (bookDetail.comicChapters || []).map(
+        (chapter) => ({
+          ...chapter,
+          cover: localAssetSource(chapter.cover),
+        }),
+      );
+      localBook.value = bookDetail;
+    } catch {
+      // A content checkpoint may be read while the native task is writing it.
+    }
+  }
+
   /**
    * Requests Android's all-files access only after the user enters the local
    * library. The public library directory cannot be read by the WebView asset
@@ -245,6 +277,7 @@ export function useDeskLibrary({
     localAudioTrackIndex,
     exportingFormat,
     refreshLibrary,
+    refreshLocalBook,
     ensureLibraryAssetAccess,
     loadLocalBook,
     deleteBook,

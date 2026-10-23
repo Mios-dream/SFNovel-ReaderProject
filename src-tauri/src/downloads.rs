@@ -13,7 +13,10 @@ use crate::library::{
 use crate::ocr::{recognize_image, relative_book_path};
 #[cfg(target_os = "android")]
 use crate::sfacg::sync_android_auth_session;
-use crate::sfacg::{validate_novel_id, NativeJob, NativeJobSpec, NativeJobState, TextContentKind};
+use crate::sfacg::{
+    validate_novel_id, NativeAudioChapter, NativeJob, NativeJobSpec, NativeJobState,
+    TextContentKind,
+};
 use crate::utils::json::{read_or_default, write_atomically};
 use crate::web_client::WebClient;
 use serde_json::Value;
@@ -56,6 +59,21 @@ fn emit_native_job_update(app: &tauri::AppHandle, state: &NativeJobState, job_id
         .and_then(|jobs| jobs.get(job_id).cloned());
     if let Some(job) = job {
         let _ = app.emit("download-progress", job);
+    }
+}
+
+/// 通知渲染进程重新读取书库中的已持久化内容。
+///
+/// 该事件只在元数据或一条内容完成原子写入后发送。漫画下载过程中的单页进度仍只走
+/// `download-progress`，避免页面在章节尚未完成时频繁读取不完整的本地记录。
+fn emit_native_library_update(app: &tauri::AppHandle, state: &NativeJobState, job_id: &str) {
+    let job = state
+        .jobs
+        .lock()
+        .ok()
+        .and_then(|jobs| jobs.get(job_id).cloned());
+    if let Some(job) = job {
+        let _ = app.emit("download-library-update", job);
     }
 }
 
@@ -336,6 +354,13 @@ async fn run_text_download(
         .await;
         // 详情刷新或封面保存完成后再提交一次，章节目录与正文请求从此之后才开始。
         persist_book_metadata(&directory, &metadata)?;
+        update_native_job(&state, &job_id, |job| {
+            job.status = "downloading".to_string();
+            job.progress = 1;
+            job.message = "作品信息已保存，准备下载".to_string();
+        });
+        emit_native_job_update(&app, &state, &job_id);
+        emit_native_library_update(&app, &state, &job_id);
 
         // 章节索引是逐章检查点：下载中断后可从已写入的章节继续，而不必重新请求全部正文。
         let mut store = read_or_default::<StoredChapterStore>(
@@ -514,7 +539,7 @@ async fn run_text_download(
                     chapter_id.to_string(),
                     StoredChapter {
                         id: chapter_id,
-                        title: chapter_title,
+                        title: chapter_title.clone(),
                         volume,
                         content,
                         volume_index,
@@ -535,6 +560,12 @@ async fn run_text_download(
                 metadata.downloaded_text_chapter_ids = Some(downloaded_text_chapter_ids(&store));
                 persist_book_metadata(&directory, &metadata)?;
             }
+            update_native_job(&state, &job_id, |job| {
+                job.progress = 2 + (((index + 1) * 94) / total) as u8;
+                job.message = format!("已完成：{chapter_title}");
+            });
+            emit_native_job_update(&app, &state, &job_id);
+            emit_native_library_update(&app, &state, &job_id);
             // 限速发生在每个章节处理完成后；取消标记在下一个章节开始前读取。
             tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
         }
@@ -594,6 +625,26 @@ async fn run_text_download(
 /// 不含 Windows 保留字符、长度受限的文件名片段。
 fn safe_audio_name(value: &str) -> String {
     safe_library_name(value).chars().take(100).collect()
+}
+
+/// 根据当前已落盘的音频文件重建本地播放列表。
+fn persist_audio_playlist(
+    audio_directory: &std::path::Path,
+    catalog: &[NativeAudioChapter],
+) -> Result<(), String> {
+    let mut playlist = vec!["#EXTM3U".to_string()];
+    for (index, chapter) in catalog.iter().enumerate() {
+        let file_name = format!("{:03} - {}.mp3", index + 1, safe_audio_name(&chapter.title));
+        if audio_directory.join(&file_name).is_file() {
+            playlist.push(format!("#EXTINF:-1,{} - {}", chapter.volume, chapter.title));
+            playlist.push(file_name);
+        }
+    }
+    fs::write(
+        audio_directory.join("有声目录.m3u8"),
+        format!("{}\n", playlist.join("\n")),
+    )
+    .map_err(|error| format!("无法写入有声播放列表：{error}"))
 }
 
 /// 初始化一本本地文字小说的最小元数据。
@@ -940,6 +991,9 @@ async fn save_audio_cover(
     cover_url: &str,
 ) -> Result<(), String> {
     let cover = directory.join("imgs").join("audio-cover.jpeg");
+    if cover.is_file() {
+        return Ok(());
+    }
     let source = if cover_url.starts_with("http://") || cover_url.starts_with("https://") {
         cover_url.to_string()
     } else {
@@ -1157,6 +1211,13 @@ async fn run_audio_download(
         .await;
         // 先保存详情和封面，再请求目录与具体音频文件。
         persist_book_metadata(&directory, &metadata)?;
+        update_native_job(&state, &job_id, |job| {
+            job.status = "downloading".to_string();
+            job.progress = 1;
+            job.message = "作品信息已保存，准备下载".to_string();
+        });
+        emit_native_job_update(&app, &state, &job_id);
+        emit_native_library_update(&app, &state, &job_id);
 
         let (_catalog_title, catalog) = web_client
             .get_audio_catalog(novel_id)
@@ -1240,21 +1301,16 @@ async fn run_audio_download(
             downloaded.insert(chapter.id);
             metadata.downloaded_audio_chapter_ids = Some(downloaded.iter().copied().collect());
             persist_book_metadata(&directory, &metadata)?;
+            persist_audio_playlist(&audio_directory, &catalog)?;
+            update_native_job(&state, &job_id, |job| {
+                job.progress = 2 + (((selected_index + 1) * 94) / total) as u8;
+                job.message = format!("已完成：{}", chapter.title);
+            });
+            emit_native_job_update(&app, &state, &job_id);
+            emit_native_library_update(&app, &state, &job_id);
             tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
         }
-        let mut playlist = vec!["#EXTM3U".to_string()];
-        for (index, chapter) in catalog.iter().enumerate() {
-            let file_name = format!("{:03} - {}.mp3", index + 1, safe_audio_name(&chapter.title));
-            if audio_directory.join(&file_name).is_file() {
-                playlist.push(format!("#EXTINF:-1,{} - {}", chapter.volume, chapter.title));
-                playlist.push(file_name);
-            }
-        }
-        fs::write(
-            audio_directory.join("有声目录.m3u8"),
-            format!("{}\n", playlist.join("\n")),
-        )
-        .map_err(|error| format!("无法写入有声播放列表：{error}"))?;
+        persist_audio_playlist(&audio_directory, &catalog)?;
         metadata.downloaded_audio_chapter_ids = Some(downloaded.into_iter().collect());
         persist_book_metadata(&directory, &metadata)?;
         Ok("audio/有声目录.m3u8".to_string())
@@ -1365,6 +1421,13 @@ async fn run_comic_download(
         .await;
         // 详情和封面先落盘，后续网页目录或图片失败时仍可从书库删除或续传。
         persist_book_metadata(&directory, &metadata)?;
+        update_native_job(&state, &job_id, |job| {
+            job.status = "downloading".to_string();
+            job.progress = 1;
+            job.message = "作品信息已保存，准备下载".to_string();
+        });
+        emit_native_job_update(&app, &state, &job_id);
+        emit_native_library_update(&app, &state, &job_id);
 
         let catalog = web_client
             .get_comic_catalog(&folder)
@@ -1505,6 +1568,12 @@ async fn run_comic_download(
             downloaded.insert(chapter.id);
             metadata.downloaded_comic_chapter_ids = Some(downloaded.iter().copied().collect());
             persist_book_metadata(&directory, &metadata)?;
+            update_native_job(&state, &job_id, |job| {
+                job.progress = 2 + (((chapter_index + 1) * 94) / total) as u8;
+                job.message = format!("已完成：{}", chapter.title);
+            });
+            emit_native_job_update(&app, &state, &job_id);
+            emit_native_library_update(&app, &state, &job_id);
             tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
         }
         metadata.downloaded_comic_chapter_ids = Some(downloaded.into_iter().collect());

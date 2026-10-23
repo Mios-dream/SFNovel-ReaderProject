@@ -65,6 +65,7 @@ export function useNovelDesk() {
   const jobs = useDeskJobs({
     notify,
     refreshLibrary: library.refreshLibrary,
+    refreshLocalBook: library.refreshLocalBook,
   });
   const search = useNovelSearch({
     refreshAuthStatus: auth.refreshAuthStatus,
