@@ -18,6 +18,9 @@ import java.io.PrintWriter
 import java.nio.FloatBuffer
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -35,6 +38,14 @@ class RecognizeChapterArgs {
 /** Android image OCR plugin. Authentication and cookie state are intentionally out of scope. */
 @TauriPlugin
 class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
+    private val recognizerLock = Any()
+    private val unloadExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "sfacg-ocr-idle").apply { isDaemon = true }
+    }
+    private var cachedRecognizer: OnnxChapterRecognizer? = null
+    private var unloadTask: ScheduledFuture<*>? = null
+    private var unloadGeneration = 0L
+
     @Command
     fun recognizeChapter(invoke: Invoke) {
         val args = try {
@@ -55,7 +66,7 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
                     ?.let(::prepareSegmentsDirectory)
                 segments = segmentDirectory
                 progress.stage = "加载 OCR 模型"
-                val text = OnnxChapterRecognizer(activity).use { recognizer ->
+                val text = recognizeWithCachedRecognizer { recognizer ->
                     recognizeFrames(source, segmentDirectory, recognizer, progress)
                 }
                 if (text.isBlank()) throw IllegalStateException("未识别到可用文字")
@@ -66,6 +77,41 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
                 invoke.reject(formatFailure(progress.stage, error, report))
             }
         }.start()
+    }
+
+    private fun recognizeWithCachedRecognizer(
+        block: (OnnxChapterRecognizer) -> String,
+    ): String = synchronized(recognizerLock) {
+        cancelScheduledUnloadLocked()
+        val recognizer = cachedRecognizer ?: OnnxChapterRecognizer(activity).also {
+            cachedRecognizer = it
+        }
+        try {
+            block(recognizer)
+        } finally {
+            scheduleRecognizerUnloadLocked()
+        }
+    }
+
+    private fun cancelScheduledUnloadLocked() {
+        unloadGeneration++
+        unloadTask?.cancel(false)
+        unloadTask = null
+    }
+
+    private fun scheduleRecognizerUnloadLocked() {
+        val generation = ++unloadGeneration
+        unloadTask?.cancel(false)
+        unloadTask = unloadExecutor.schedule({
+            synchronized(recognizerLock) {
+                if (generation != unloadGeneration) return@synchronized
+                val recognizer = cachedRecognizer
+                cachedRecognizer = null
+                unloadTask = null
+                runCatching { recognizer?.close() }
+                    .onFailure { error -> Log.w(LOG_TAG, "Failed to unload idle OCR model", error) }
+            }
+        }, OCR_IDLE_SECONDS, TimeUnit.SECONDS)
     }
 
     private fun prepareSegmentsDirectory(path: String): File = File(path).also { directory ->
@@ -500,6 +546,7 @@ class SfacgOcrPlugin(private val activity: Activity) : Plugin(activity) {
         const val OCR_PART_WIDTH = 728
         const val RECOGNITION_HEIGHT = 48
         const val RECOGNITION_DEFAULT_WIDTH = 320
+        const val OCR_IDLE_SECONDS = 3 * 60L
         const val RECOGNITION_MODEL_FILE = "PP-OCRv6_rec_small.onnx"
         const val RECOGNITION_MODEL_BYTES = 21_234_383L
         const val ONNX_METADATA_PROPERTIES_FIELD = 14

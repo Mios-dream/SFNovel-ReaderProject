@@ -69,6 +69,10 @@ pub fn run() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init());
+    #[cfg(not(target_os = "android"))]
+    {
+        builder = builder.manage(ocr::DesktopOcrState::default());
+    }
     #[cfg(target_os = "android")]
     {
         builder = builder.plugin(android_sfacg_auth_plugin());

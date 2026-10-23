@@ -1,6 +1,9 @@
 import argparse
 import contextlib
+import gc
+import json
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -25,6 +28,10 @@ WATERMARK_COLOR_TOLERANCE = 25
 WATERMARK_MIN_BRIGHTNESS = 150
 # 水印掩码在检测到的水印边缘外扩张一圈像素，补上抗锯齿边缘。
 WATERMARK_MASK_EXPANSION = 1
+# 常驻 worker 在最后一次识别后保留模型的时间；模型释放后下次请求再延迟加载。
+ENGINE_IDLE_SECONDS = 3 * 60
+
+
 def flatten_frame(frame: Image.Image) -> Image.Image:
     """
     将 GIF 帧转换为不含透明通道的 RGB 图像，便于后续灰度化和 OCR。
@@ -126,7 +133,17 @@ class RecognitionEngine:
         config.Rec.model_root_dir = config.Global.model_root_dir
         self.engine = TextRecognizer(config.Rec)
 
+    def close(self) -> None:
+        """释放底层 ONNX session；没有 close 方法的版本交给垃圾回收处理。"""
+        engine = self.engine
+        self.engine = None
+        close = getattr(engine, "close", None)
+        if callable(close):
+            close()
+
     def recognize(self, image: np.ndarray) -> str:
+        if self.engine is None:
+            raise RuntimeError("OCR 识别引擎已释放")
         result = self.engine(TextRecInput(img=image, return_word_box=False))
         return result.txts[0] if result.txts else ""
 
@@ -134,6 +151,84 @@ class RecognitionEngine:
 def create_engine(model_path: Path) -> RecognitionEngine:
     """创建单模型识别引擎，不初始化检测或方向分类器。"""
     return RecognitionEngine(model_path)
+
+
+class EngineCache:
+    """常驻 worker 内的单例引擎，按需加载并在空闲后释放。"""
+
+    def __init__(self, model_path: Path):
+        self.model_path = model_path
+        self._engine: RecognitionEngine | None = None
+        self._lock = threading.Lock()
+        self._unload_timer: threading.Timer | None = None
+        self._generation = 0
+
+    def _unload_if_current(self, generation: int) -> None:
+        with self._lock:
+            if generation != self._generation:
+                return
+            self._unload_timer = None
+            self._unload_engine_locked()
+
+    def _unload_engine_locked(self) -> None:
+        engine = self._engine
+        self._engine = None
+        if engine is None:
+            return
+        try:
+            engine.close()
+        except Exception as error:
+            print(f"OCR 引擎释放失败：{error}", file=sys.stderr)
+        finally:
+            # ONNX Runtime 可能持有较大的 native buffer，及时断开 Python 引用并回收。
+            del engine
+            gc.collect()
+
+    def _schedule_unload_locked(self) -> None:
+        self._generation += 1
+        generation = self._generation
+        if self._unload_timer is not None:
+            self._unload_timer.cancel()
+        timer = threading.Timer(
+            ENGINE_IDLE_SECONDS,
+            self._unload_if_current,
+            args=(generation,),
+        )
+        timer.daemon = True
+        self._unload_timer = timer
+        timer.start()
+
+    def recognize(self, path: Path, segments_dir: Path | None) -> str:
+        # 同一进程内串行使用一个 session，既保证单例，也避免 ONNX session 跨线程共享。
+        with self._lock:
+            self._generation += 1
+            if self._unload_timer is not None:
+                self._unload_timer.cancel()
+                self._unload_timer = None
+            try:
+                return recognize(
+                    path,
+                    self.model_path,
+                    1,
+                    segments_dir,
+                    engine_factory=self._get_engine_locked,
+                )
+            finally:
+                if self._engine is not None:
+                    self._schedule_unload_locked()
+
+    def _get_engine_locked(self) -> RecognitionEngine:
+        if self._engine is None:
+            self._engine = create_engine(self.model_path)
+        return self._engine
+
+    def close(self) -> None:
+        with self._lock:
+            self._generation += 1
+            if self._unload_timer is not None:
+                self._unload_timer.cancel()
+                self._unload_timer = None
+            self._unload_engine_locked()
 
 
 def recognition_only(engine, line: Image.Image) -> str:
@@ -256,6 +351,8 @@ def recognize(
     model_path: Path,
     workers: int,
     segments_dir: Path | None,
+    engine: RecognitionEngine | None = None,
+    engine_factory=None,
 ) -> str:
     line_images: list[Image.Image] = []
     # 静态图片仅产生一个帧，GIF 依原始帧顺序分别预处理并保持输出顺序。
@@ -267,12 +364,18 @@ def recognize(
     if not line_images:
         return ""
     # 单线程模式只加载一个引擎，避免重复初始化 ONNX 模型。
-    engine = create_engine(model_path)
+    active_engine = (
+        engine
+        if engine is not None
+        else engine_factory()
+        if engine_factory is not None
+        else create_engine(model_path)
+    )
     # ONNX Runtime 会话默认复用；显式并发时每项独占一个会话，避免跨线程共享状态。
     if workers <= 1:
         # 过滤空结果后逐行拼接，保留 line_images 中的原始阅读顺序。
         return "\n".join(
-            filter(None, (recognition_only(engine, line) for line in line_images))
+            filter(None, (recognition_only(active_engine, line) for line in line_images))
         )
 
     def one(index: int, image: Image.Image) -> tuple[int, str]:
@@ -296,27 +399,64 @@ def recognize(
     return "\n".join(results[index] for index in sorted(results))
 
 
+def serve(model_path: Path, protocol_stdout) -> None:
+    """处理 Rust 发来的请求；每行一个 JSON 请求和响应。"""
+    cache = EngineCache(model_path)
+    try:
+        for raw_line in sys.stdin.buffer:
+            if not raw_line.strip():
+                continue
+            try:
+                request = json.loads(raw_line)
+                input_path = Path(request["input"])
+                segments_value = request.get("segments_dir")
+                segments_dir = Path(segments_value) if segments_value else None
+                if not input_path.is_file():
+                    raise RuntimeError("OCR 输入图片不存在")
+                text = cache.recognize(input_path, segments_dir)
+                response = {"ok": True, "text": text}
+            except Exception as error:
+                detail = str(error).strip() or "未提供详细信息"
+                print(f"{type(error).__name__}: {detail}", file=sys.stderr)
+                response = {"ok": False, "error": f"{type(error).__name__}: {detail}"}
+            protocol_stdout.write(
+                (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
+            )
+            protocol_stdout.flush()
+    finally:
+        cache.close()
+
+
 def main() -> int:
     # 参数由 Rust OCR 调用层传入；worker 只处理已落地的本地图片，不访问网络或账号数据。
     parser = argparse.ArgumentParser()
     # 使用 Path 类型，令后续文件校验和 Pillow 打开都操作同一个路径对象。
-    parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument("--input", type=Path)
     parser.add_argument("--model-path", required=True, type=Path)
     # 可选中间图输出目录，供人工核查水印掩码、拼音覆盖和固定高度条带。
     parser.add_argument("--segments-dir", type=Path)
     # workers 只影响逐行 OCR 的并发度；图像帧的预处理始终按顺序执行。
     parser.add_argument("--workers", default=1, type=int)
+    parser.add_argument(
+        "--server",
+        action="store_true",
+        help="以常驻 JSON 协议进程运行，复用 OCR 引擎",
+    )
     args = parser.parse_args()
-    # 先验证输入存在，避免在加载模型后才将路径问题表现成 OCR 错误。
-    if not args.input.is_file():
-        raise RuntimeError("OCR 输入图片不存在")
+    # 先验证模型存在；常驻模式的输入图片由每条 JSON 请求分别验证。
     if not args.model_path.is_file():
         raise RuntimeError("OCR 识别模型不存在；请按 README.md 中的说明下载 PP-OCRv6_rec_small.onnx")
+    if not args.server:
+        if args.input is None or not args.input.is_file():
+            raise RuntimeError("OCR 输入图片不存在")
     # 预先保存 stdout 的二进制协议流。redirect_stdout 会替换 sys.stdout；若之后通过
     # sys.stdout.buffer 输出结果，成功文本会误写到 stderr，Rust 将只能收到空输出。
     protocol_stdout = sys.stdout.buffer
     # stdout 是 Rust 约定的唯一成功结果通道，运行时日志全部送入 stderr。
     with contextlib.redirect_stdout(sys.stderr):
+        if args.server:
+            serve(args.model_path, protocol_stdout)
+            return 0
         # 将用户给出的并发数夹在 1 到 4 内，防止零/负值及过多模型实例占用内存。
         text = recognize(
             args.input,
