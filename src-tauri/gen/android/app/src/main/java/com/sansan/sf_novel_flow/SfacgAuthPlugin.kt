@@ -12,11 +12,12 @@ import android.provider.DocumentsContract
 import android.provider.Settings
 import android.util.Base64
 import android.webkit.CookieManager
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
+import app.tauri.annotation.Permission
+import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
@@ -36,7 +37,17 @@ class WriteSessionCookieArgs { lateinit var cookie: String }
 class WriteExportToUriArgs { lateinit var sourcePath: String; lateinit var uri: String }
 
 /** Bridges Android authentication state and the official login WebView to Rust. */
-@TauriPlugin
+@TauriPlugin(
+    permissions = [
+        Permission(
+            strings = [
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            ],
+            alias = "externalStorage",
+        ),
+    ],
+)
 class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun startOfficialLogin(invoke: Invoke) {
@@ -118,17 +129,37 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun ensureExternalStorageAccess(invoke: Invoke) {
-        val granted = when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> ContextCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-            else -> true
+        if (hasExternalStorageAccess()) {
+            invoke.resolve(JSObject().put("granted", true))
+            return
         }
-        if (!granted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            activity.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${activity.packageName}")))
-        } else if (!granted) {
-            ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), STORAGE_PERMISSION_REQUEST_CODE)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            invoke.resolve(JSObject().put("granted", false))
+            return
         }
-        invoke.resolve(JSObject().put("granted", granted))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            requestAllFilesAccess(invoke)
+        } else {
+            requestPermissionForAliases(
+                arrayOf("externalStorage"),
+                invoke,
+                "onExternalStoragePermissionFinished",
+            )
+        }
+    }
+
+    @PermissionCallback
+    fun onExternalStoragePermissionFinished(invoke: Invoke) {
+        invoke.resolve(JSObject().put("granted", hasExternalStorageAccess()))
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    @ActivityCallback
+    fun onAllFilesAccessFinished(
+        invoke: Invoke,
+        _result: androidx.activity.result.ActivityResult,
+    ) {
+        invoke.resolve(JSObject().put("granted", hasExternalStorageAccess()))
     }
 
     @Command
@@ -169,6 +200,34 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve()
         } catch (error: Exception) {
             invoke.reject(error.message ?: "无法打开系统文件管理器")
+        }
+    }
+
+    private fun hasExternalStorageAccess(): Boolean = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->
+            ContextCompat.checkSelfPermission(
+                activity,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            ) == PackageManager.PERMISSION_GRANTED
+        else -> true
+    }
+
+    private fun requestAllFilesAccess(invoke: Invoke) {
+        val packageUri = Uri.parse("package:${activity.packageName}")
+        val appSettings = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, packageUri)
+        try {
+            startActivityForResult(invoke, appSettings, "onAllFilesAccessFinished")
+        } catch (_: ActivityNotFoundException) {
+            try {
+                startActivityForResult(
+                    invoke,
+                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+                    "onAllFilesAccessFinished",
+                )
+            } catch (_: ActivityNotFoundException) {
+                invoke.resolve(JSObject().put("granted", false))
+            }
         }
     }
 
@@ -213,7 +272,6 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
     private companion object {
         val SFACG_COOKIE_URLS = arrayOf("https://book.sfacg.com/", "https://api.sfacg.com/", "https://m.sfacg.com/login")
         const val SESSION_MAX_AGE = 30 * 24 * 60 * 60
-        const val STORAGE_PERMISSION_REQUEST_CODE = 4101
         const val DEVICE_PREFS = "sfacg-device"
         const val DEVICE_TOKEN_KEY = "device-token"
         const val APP_SESSION_KEY = "app-session"

@@ -200,6 +200,9 @@ pub(crate) struct RequestPolicy {
     /// 是否保存 OCR 分行、预处理和识别结果等过程文件。
     #[serde(default)]
     pub(crate) ocr_process_files_enabled: bool,
+    /// Android 是否将书库保存到公开下载目录；桌面端始终使用应用数据目录。
+    #[serde(default)]
+    pub(crate) use_external_storage: bool,
 }
 
 /// 一条本地存储的漫画章节及其有序页面文件。
@@ -239,6 +242,7 @@ impl Default for RequestPolicy {
             app_api_preferred_enabled: true,
             android_device_report_enabled: true,
             ocr_process_files_enabled: false,
+            use_external_storage: false,
         }
     }
 }
@@ -445,8 +449,8 @@ pub(crate) async fn update_content_dictionary(
 
 /// 解析应用自有书库目录，不接受渲染进程传入的路径。
 ///
-/// 此目录位于平台应用数据目录下，因此 Windows 和 Android 均可写入，无需授予宽泛
-/// 文件系统权限。Android 使用公开下载目录，桌面端使用私有应用数据目录。
+/// Android 根据用户设置选择公开下载目录或应用内部数据目录，桌面端始终使用
+/// 应用数据目录。
 ///
 /// # 参数
 /// * `app` - 用于解析平台数据目录的 Tauri 应用句柄。
@@ -454,62 +458,17 @@ pub(crate) async fn update_content_dictionary(
 /// # 错误
 /// 无法解析或创建书库目录时返回错误。
 pub(crate) fn library_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    #[cfg(target_os = "android")]
-    let directory = PathBuf::from("/storage/emulated/0/Download/SF Novel Flow");
-    #[cfg(not(target_os = "android"))]
-    let directory = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("无法解析应用数据目录：{error}"))?
-        .join("library");
-
-    #[cfg(target_os = "android")]
-    migrate_legacy_android_library(app, &directory)?;
+    let policy = get_request_policy(app.clone())?;
+    let directory = if cfg!(target_os = "android") && policy.use_external_storage {
+        PathBuf::from("/storage/emulated/0/Download/SF Novel Flow")
+    } else {
+        app.path()
+            .app_data_dir()
+            .map_err(|error| format!("无法解析应用数据目录：{error}"))?
+            .join("library")
+    };
     fs::create_dir_all(&directory).map_err(|error| format!("无法创建本地书库目录：{error}"))?;
     Ok(directory)
-}
-
-/// 将已有 Android 私有书库一次性迁移至公开下载目录。
-#[cfg(target_os = "android")]
-fn migrate_legacy_android_library(app: &tauri::AppHandle, target: &PathBuf) -> Result<(), String> {
-    if target.exists() {
-        return Ok(());
-    }
-    let legacy = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("无法解析旧书库目录：{error}"))?
-        .join("library");
-    if !legacy.is_dir() {
-        return Ok(());
-    }
-    fs::create_dir_all(target).map_err(|error| format!("无法创建外部书库目录：{error}"))?;
-    copy_directory_contents(&legacy, target)
-        .map_err(|error| format!("无法迁移旧书库到外部目录：{error}"))
-}
-
-/// 递归复制旧 Android 私有书库的所有内容。
-///
-/// # 参数
-/// * `source` - 已确认存在的旧书库目录。
-/// * `target` - 已创建的公开下载目录。
-///
-/// # 错误
-/// 枚举源目录、创建子目录或复制任一文件失败时返回 I/O 错误。
-#[cfg(target_os = "android")]
-fn copy_directory_contents(source: &PathBuf, target: &PathBuf) -> std::io::Result<()> {
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let source_path = entry.path();
-        let target_path = target.join(entry.file_name());
-        if source_path.is_dir() {
-            fs::create_dir_all(&target_path)?;
-            copy_directory_contents(&source_path, &target_path)?;
-        } else {
-            fs::copy(source_path, target_path)?;
-        }
-    }
-    Ok(())
 }
 
 /// 解析原生请求策略文件，不接受渲染进程控制的位置。
@@ -696,8 +655,8 @@ pub(crate) fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBoo
 
 /// 在系统文件管理器中打开本地书库目录。
 ///
-/// 目录始终由原生端解析，渲染进程无法借此打开任意路径。安卓端通过系统文件
-/// 提供器打开公开下载目录；其他平台使用系统默认的文件管理器。
+/// 目录始终由原生端解析，渲染进程无法借此打开任意路径。安卓端仅在公开下载目录
+/// 实际启用时通过系统文件提供器打开；其他平台使用系统默认的文件管理器。
 ///
 /// # 参数
 /// * `app` - 用于定位平台书库目录和安卓原生插件的应用句柄。
@@ -706,10 +665,12 @@ pub(crate) fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryBoo
 /// 无法创建目录、启动系统文件管理器，或安卓插件调用失败时返回错误。
 #[tauri::command]
 pub(crate) async fn open_download_directory(app: tauri::AppHandle) -> Result<(), String> {
-    let directory = library_directory(&app)?;
-
     #[cfg(target_os = "android")]
     {
+        library_directory(&app)?;
+        if !get_request_policy(app.clone())?.use_external_storage {
+            return Err("书库当前使用内部存储，无法从文件管理器直接打开".to_string());
+        }
         app.state::<AndroidSfacgAuth<tauri::Wry>>()
             .mobile_plugin_handle
             .run_mobile_plugin_async::<Value>("openDownloadDirectory", ())
@@ -719,6 +680,7 @@ pub(crate) async fn open_download_directory(app: tauri::AppHandle) -> Result<(),
     }
     #[cfg(not(target_os = "android"))]
     {
+        let directory = library_directory(&app)?;
         tauri_plugin_opener::open_path(&directory, None::<&str>)
             .map_err(|error| format!("无法打开下载目录：{error}"))
     }
@@ -1061,9 +1023,12 @@ pub(crate) struct LocalExport {
     pub(crate) file_name: String,
 }
 
-/// 确保 Android 可写入书库使用的公开下载目录。
+/// 用户选择外部存储时请求 Android 对应版本的存储权限。
 #[tauri::command]
 pub(crate) async fn ensure_external_storage_access(app: tauri::AppHandle) -> Result<bool, String> {
+    if !get_request_policy(app.clone())?.use_external_storage {
+        return Ok(true);
+    }
     #[cfg(target_os = "android")]
     {
         let result = app
@@ -1072,10 +1037,15 @@ pub(crate) async fn ensure_external_storage_access(app: tauri::AppHandle) -> Res
             .run_mobile_plugin_async::<Value>("ensureExternalStorageAccess", ())
             .await
             .map_err(|error| format!("无法检查 Android 外部存储权限：{error}"))?;
-        return Ok(result
+        let granted = result
             .get("granted")
             .and_then(Value::as_bool)
-            .unwrap_or(false));
+            .unwrap_or(false);
+        if granted {
+            fs::create_dir_all("/storage/emulated/0/Download/SF Novel Flow")
+                .map_err(|error| format!("无法创建外部书库目录：{error}"))?;
+        }
+        return Ok(granted);
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -1273,9 +1243,6 @@ pub(crate) async fn export_local_book(
     format: String,
     output_path: String,
 ) -> Result<LocalExport, String> {
-    if !ensure_external_storage_access(app.clone()).await? {
-        return Err("请在系统设置中允许本应用管理所有文件，然后重试导出".to_string());
-    }
     if !matches!(
         format.as_str(),
         "epub" | "markdown" | "txt" | "audio" | "comic"

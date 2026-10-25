@@ -30,10 +30,12 @@ const defaultPolicy: RequestPolicy = {
   appApiPreferredEnabled: true,
   androidDeviceReportEnabled: true,
   ocrProcessFilesEnabled: false,
+  useExternalStorage: false,
 };
 // 使用本地草稿编辑，只有提交表单时才将设置发送给后端。
 const draft = reactive<RequestPolicy>({ ...props.policy });
 const dictionaryChapterDraft = ref(props.dictionaryChapterId);
+const isAndroid = /Android/i.test(navigator.userAgent);
 
 watch(
   () => props.policy,
@@ -78,8 +80,21 @@ function resetDraft() {
         <div class="settings-content">
           <section class="settings-group">
             <header class="settings-group-header">
-              <strong>下载设置</strong>
+              <strong>存储与下载</strong>
             </header>
+
+            <div v-if="isAndroid" class="setting-row">
+              <div class="setting-info">
+                <strong>本地存储位置</strong>
+                <small>外部存储位于 Download/SF Novel Flow</small>
+              </div>
+              <label class="setting-control">
+                <select v-model="draft.useExternalStorage">
+                  <option :value="false">内部存储</option>
+                  <option :value="true">外部存储</option>
+                </select>
+              </label>
+            </div>
 
             <div class="setting-row">
               <div class="setting-info">
@@ -136,7 +151,8 @@ function resetDraft() {
               <div class="setting-info">
                 <strong>保存 OCR 过程文件</strong>
                 <small
-                  >保存分行图片、预处理结果和逐段识别文本到章节 OCR 目录，便于检查识别问题</small
+                  >保存分行图片、预处理结果和逐段识别文本到章节 OCR
+                  目录，便于检查识别问题</small
                 >
               </div>
               <label class="setting-control toggle-control">
@@ -373,7 +389,8 @@ function resetDraft() {
   color: #987166;
   font-size: 12px;
 }
-input {
+input,
+select {
   width: 130px;
   min-height: 42px;
   border: 1px solid #efcfbf;
@@ -383,7 +400,8 @@ input {
   background: #fffaf7;
   outline: none;
 }
-input:focus {
+input:focus,
+select:focus {
   border-color: var(--theme-color);
   box-shadow: 0 0 0 3px #f8d7c6;
 }

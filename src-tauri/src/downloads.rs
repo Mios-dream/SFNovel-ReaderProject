@@ -1644,7 +1644,7 @@ pub(crate) async fn create_text_download(
         return Err("章节选择无效".to_string());
     }
     if !ensure_external_storage_access(app.clone()).await? {
-        return Err("请在系统设置中允许本应用管理所有文件，然后重试下载".to_string());
+        return Err("外部存储不可用，请授权或在设置中切换为内部存储".to_string());
     }
     let id = format!(
         "{}-{novel_id}",
@@ -1728,7 +1728,7 @@ pub(crate) async fn create_audio_download(
         return Err("章节选择无效".to_string());
     }
     if !ensure_external_storage_access(app.clone()).await? {
-        return Err("请在系统设置中允许本应用管理所有文件，然后重试下载".to_string());
+        return Err("外部存储不可用，请授权或在设置中切换为内部存储".to_string());
     }
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;
@@ -1820,7 +1820,7 @@ pub(crate) async fn create_comic_download(
         return Err("漫画章节选择无效".to_string());
     }
     if !ensure_external_storage_access(app.clone()).await? {
-        return Err("请在系统设置中允许本应用管理所有文件，然后重试下载".to_string());
+        return Err("外部存储不可用，请授权或在设置中切换为内部存储".to_string());
     }
     #[cfg(target_os = "android")]
     sync_android_auth_session(&app).await?;

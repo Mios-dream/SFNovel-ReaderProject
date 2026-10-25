@@ -166,4 +166,5 @@ export type RequestPolicy = {
   appApiPreferredEnabled: boolean;
   androidDeviceReportEnabled: boolean;
   ocrProcessFilesEnabled: boolean;
+  useExternalStorage: boolean;
 };

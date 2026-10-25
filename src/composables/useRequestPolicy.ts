@@ -11,6 +11,7 @@ export function useRequestPolicy(notify: Notify) {
     appApiPreferredEnabled: true,
     androidDeviceReportEnabled: true,
     ocrProcessFilesEnabled: false,
+    useExternalStorage: false,
   });
   const requestPolicySaving = ref(false);
   const contentDictionarySize = ref(0);
@@ -52,11 +53,19 @@ export function useRequestPolicy(notify: Notify) {
   async function saveRequestPolicy(policy: RequestPolicy) {
     requestPolicySaving.value = true;
     try {
-      requestPolicy.value = await invoke<RequestPolicy>("save_request_policy", {
+      const saved = await invoke<RequestPolicy>("save_request_policy", {
         policy,
       });
+      requestPolicy.value = saved;
+      if (
+        saved.useExternalStorage &&
+        !(await invoke<boolean>("ensure_external_storage_access"))
+      ) {
+        notify("外部存储不可用，请授权或在设置中切换为内部存储", "error");
+        return;
+      }
       requestPolicyOpen.value = false;
-      notify("请求设置已更新");
+      notify("设置已更新");
     } catch (error) {
       notify(error instanceof Error ? error.message : "保存请求设置失败", "error");
     } finally {
