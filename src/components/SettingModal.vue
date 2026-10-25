@@ -134,8 +134,8 @@ function resetDraft() {
               <div class="setting-info">
                 <strong>优先使用 App API 下载正文</strong>
                 <small
-                  >存在 App 凭证时优先使用 App API。网页图片正文需要
-                  OCR，较耗性能且可能存在识别错误</small
+                  >如可用，优先使用 App API
+                  下载正文，以提高解析速度和准确率</small
                 >
               </div>
               <label class="setting-control toggle-control">
@@ -171,10 +171,7 @@ function resetDraft() {
             <div class="setting-row">
               <div class="setting-info">
                 <strong>App 设备信息上报（实验）</strong>
-                <small
-                  >App
-                  登录成功后尝试上报当前安装信息，可能会减少账号风控风险；默认开启</small
-                >
+                <small>尝试上报当前安装信息，可能会减少账号风控风险</small>
               </div>
               <label class="setting-control toggle-control">
                 <input
@@ -235,12 +232,12 @@ function resetDraft() {
 
         <footer class="settings-actions">
           <button class="reset-button" type="button" @click="resetDraft">
-            <RotateCcw :size="16" />重设设置
+            <RotateCcw :size="16" />重设
           </button>
           <button class="primary-button" :disabled="saving" type="submit">
             <LoaderCircle v-if="saving" class="spin" :size="17" />
             <Save v-else :size="17" />
-            {{ saving ? "正在保存" : "保存设置" }}
+            {{ saving ? "正在保存" : "保存" }}
           </button>
         </footer>
       </form>
@@ -265,11 +262,14 @@ function resetDraft() {
   padding: 28px;
   border-radius: 20px;
   background: rgba(255, 249, 245, 0.8);
-  margin: 5%;
+  margin: 0;
 }
 .settings-modal {
   width: min(760px, 100%);
-  height: min(680px, 80%);
+  height: min(680px, calc(100vh - 40px));
+  height: min(680px, calc(100dvh - 40px));
+  max-height: calc(100vh - 36px);
+  max-height: calc(100dvh - 36px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -334,6 +334,7 @@ function resetDraft() {
   min-height: 0;
   overflow-y: auto;
   padding-right: 8px;
+  overscroll-behavior: contain;
 }
 .settings-group + .settings-group {
   margin-top: 26px;
@@ -399,6 +400,7 @@ select {
   color: #624740;
   background: #fffaf7;
   outline: none;
+  font-size: 16px;
 }
 input:focus,
 select:focus {
@@ -512,31 +514,136 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 600px) {
-  .settings-modal {
-    height: 80%;
-    padding: 22px;
+  .modal-backdrop {
+    z-index: 20;
+    align-items: flex-end;
+    padding: 0;
   }
-  .setting-row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-    padding: 17px 0;
+  .settings-modal {
+    width: 100%;
+    height: min(88dvh, 760px);
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 10px);
+    padding: 17px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 20px 20px 0 0;
+    background: rgba(255, 249, 245, 0.97);
+    box-shadow: 0 -12px 32px rgba(137, 76, 55, 0.16);
+  }
+  .settings-header {
+    gap: 10px;
+    padding-right: 42px;
+  }
+  .modal-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+  }
+  .modal-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+  .modal h2 {
+    font-size: 20px;
+  }
+  .close-button {
+    top: 13px;
+    right: 13px;
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+  }
+  .settings-form {
+    margin-top: 16px;
+  }
+  .settings-content {
+    padding-right: 2px;
+    scroll-padding-bottom: 8px;
+  }
+  .settings-group + .settings-group {
+    margin-top: 17px;
   }
   .settings-group-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 7px;
+    border-bottom-width: 2px;
+  }
+  .settings-group-header strong {
+    font-size: 15px;
+  }
+  .settings-group-header small {
+    font-size: 10.5px;
+    line-height: 1.4;
+    text-align: right;
+  }
+  .setting-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+    min-height: 0;
+    padding: 12px 0;
+  }
+  .setting-info strong {
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .setting-info small {
+    margin-top: 3px;
+    font-size: 11px;
+    line-height: 1.45;
   }
   .setting-control {
-    flex: 1 1 auto;
-    width: 100%;
-    justify-content: flex-start;
+    width: auto;
+    gap: 7px;
+    justify-content: flex-end;
+    justify-self: end;
+    font-size: 11px;
+  }
+  .setting-control input:not([type="checkbox"]),
+  .setting-control select {
+    width: 98px;
+    min-height: 38px;
+    border-radius: 9px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .setting-control select {
+    width: 116px;
+  }
+  .toggle {
+    width: 40px;
+    height: 23px;
+  }
+  .toggle::after {
+    width: 17px;
+    height: 17px;
+  }
+  .toggle-control input:checked + .toggle::after {
+    transform: translateX(17px);
   }
   .secondary-button {
-    align-self: flex-start;
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 12px;
   }
   .settings-actions {
-    margin-top: 22px;
+    gap: 10px;
+    margin-top: 13px;
+    padding-top: 12px;
+    border-top: 1px solid #efd7ca;
+  }
+  .reset-button {
+    flex: 0 0 auto;
+    min-width: 76px;
+    min-height: 40px;
+    padding: 0 14px;
+  }
+  .primary-button {
+    flex: 0 0 auto;
+    min-width: 96px;
+    min-height: 40px;
   }
 }
 </style>

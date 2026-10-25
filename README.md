@@ -138,6 +138,8 @@ Android 开发还需要 Android Studio、Android SDK、JDK 和对应的 Tauri An
 
    Android 发布构建使用 `npm run tauri:android:build`。OCR 识别模型已作为 Android assets 内置，运行时仅使用 ONNX Runtime Mobile。
 
+   USB 真机调试时，如果手机无法访问开发机局域网或不需要走局域网，可使用 `adb reverse` 转发并配合 `--host 127.0.0.1`，详见 [Android 真机调试记录](./docs/ANDROID-DEVICE-DEBUGGING.md)。
+
 ## ⚙️ 应用数据与配置
 
 书库、下载任务、请求策略、正文恢复字典和登录会话均由原生端保存在操作系统的应用数据目录中，而非项目根目录的 `config.json`。应用会自行创建和维护这些文件；请通过界面的请求设置与下载功能调整用户配置。

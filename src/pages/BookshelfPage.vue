@@ -213,7 +213,7 @@ function jumpToPage(event: Event) {
   gap: 7px;
   padding: 2px 1px 12px;
   overflow-x: auto;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
 .category-tab {
   min-height: 32px;
