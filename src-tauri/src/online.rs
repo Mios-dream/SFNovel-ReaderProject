@@ -470,14 +470,22 @@ pub(crate) fn handle_online_media_request<R: Runtime>(
 }
 
 /// 校验上游资源地址，避免原生请求被页面注入到任意主机。
+///
+/// SF 网页正文偶尔仍返回 `http://*.sfacg.com` 的旧图片地址，但这些资源的 HTTPS
+/// 端点可用。校验域名后统一升级为 HTTPS，客户端始终使用返回的规范化地址。
 fn validate_sfacg_asset_url(value: &str) -> Result<reqwest::Url, String> {
-    let url = reqwest::Url::parse(value).map_err(|_| "上游资源地址无效".to_string())?;
-    if url.scheme() != "https" {
-        return Err("上游资源必须使用 HTTPS".to_string());
-    }
+    let mut url = reqwest::Url::parse(value).map_err(|_| "上游资源地址无效".to_string())?;
     let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
     if host != "sfacg.com" && !host.ends_with(".sfacg.com") {
         return Err("上游资源域名不受支持".to_string());
+    }
+    match url.scheme() {
+        "https" => {}
+        "http" => {
+            url.set_scheme("https")
+                .map_err(|_| "上游资源地址无法升级为 HTTPS".to_string())?;
+        }
+        _ => return Err("上游资源必须使用 HTTPS".to_string()),
     }
     Ok(url)
 }
@@ -520,7 +528,7 @@ async fn cache_remote_image(
     referer: &str,
     target_without_extension: &Path,
 ) -> Result<String, String> {
-    validate_sfacg_asset_url(url)?;
+    let url = validate_sfacg_asset_url(url)?;
     let response = client
         .asset_request(
             url,
@@ -819,11 +827,11 @@ pub(crate) async fn load_online_comic_chapter(
     }
     let mut pages = Vec::with_capacity(image_urls.len());
     for (index, url) in image_urls.iter().enumerate() {
-        validate_sfacg_asset_url(url)?;
+        let source = validate_sfacg_asset_url(url)?;
         let token = register_online_media_resource(
             &media,
             OnlineMediaResource::ComicPage {
-                source: url.clone(),
+                source: source.to_string(),
                 referer: referer.clone(),
                 cache_path: directory.join(format!("{:03}.image", index + 1)),
             },
@@ -861,11 +869,11 @@ pub(crate) async fn load_online_audio_track(
         .iter()
         .find(|chapter| chapter.id == chapter_id)
         .ok_or_else(|| "该有声章节不在当前目录中".to_string())?;
-    validate_sfacg_asset_url(&chapter.source)?;
+    let source = validate_sfacg_asset_url(&chapter.source)?;
     let token = register_online_media_resource(
         &media,
         OnlineMediaResource::Audio {
-            source: chapter.source.clone(),
+            source: source.to_string(),
             referer: "https://i.sfacg.com/consume/book/".to_string(),
         },
     )?;
