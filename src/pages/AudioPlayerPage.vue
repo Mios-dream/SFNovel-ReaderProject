@@ -15,6 +15,7 @@ import {
   Check,
   Headphones,
   ListMusic,
+  LoaderCircle,
   Pause,
   Play,
   SkipBack,
@@ -26,7 +27,7 @@ import {
   X,
 } from "lucide-vue-next";
 import AudioPlayerDrawer from "../components/AudioPlayerDrawer.vue";
-import { reportError } from "../composables/useToast";
+import { reportError, showToast } from "../composables/useToast";
 import { deskInjectionKey } from "../deskContext";
 
 function requireDesk() {
@@ -88,20 +89,82 @@ function readAudioPreferences(): AudioPlayerPreferences {
 
 const desk = requireDesk();
 const router = useRouter();
-const bookName = computed(
-  () =>
-    desk.localBook.value?.audio?.title ||
-    desk.localBook.value?.name ||
-    "本地有声书",
+const online = computed(() => desk.readerSource.value === "online");
+const bookName = computed(() =>
+  online.value
+    ? desk.onlineBook.value?.novelName || "在线有声书"
+    : desk.localBook.value?.audio?.title ||
+      desk.localBook.value?.name ||
+      "本地有声书",
 );
-const author = computed(() => desk.localBook.value?.audio?.author || "");
-const cover = computed(() => desk.localBook.value?.audio?.cover);
-const tracks = computed(() => desk.localBook.value?.audioTracks || []);
+const author = computed(() =>
+  online.value
+    ? desk.onlineBook.value?.authorName || "未知作者"
+    : desk.localBook.value?.audio?.author || "",
+);
+const cover = computed(() =>
+  online.value
+    ? desk.onlineBook.value?.novelCover
+    : desk.localBook.value?.audio?.cover,
+);
+type ReaderAudioTrack = {
+  key: string;
+  id?: number;
+  title: string;
+  href?: string;
+  volume?: string;
+};
+const tracks = computed<ReaderAudioTrack[]>(() => {
+  if (online.value)
+    return desk.audioChapters.value.map((chapter) => ({
+      key: `online-${chapter.id}`,
+      id: chapter.id,
+      title: chapter.title,
+      volume: chapter.volume,
+    }));
+  return (desk.localBook.value?.audioTracks || []).map((track, index) => ({
+    key: `local-${index}-${track.href}`,
+    title: track.title,
+    href: track.href,
+  }));
+});
+const onlineError = computed(() =>
+  online.value
+    ? desk.chapterError.value || desk.directoryError.value
+    : "",
+);
+const onlineNeedsAuth = computed(
+  () => online.value && !desk.auth.value.webAuthenticated,
+);
 const initialTrackIndex = computed(() => desk.localAudioTrackIndex.value);
+const onlineDirectoryReady = ref(false);
+watch(
+  () => ({
+    ready: onlineDirectoryReady.value,
+    loading: desk.directoryLoading.value,
+    error: onlineError.value,
+    count: tracks.value.length,
+  }),
+  ({ ready, loading, error, count }) => {
+    if (!online.value || !ready || loading) return;
+    if (error) {
+      showToast(
+        onlineNeedsAuth.value
+          ? "请先连接网站登录凭证，再在线收听有声章节"
+          : error,
+        "error",
+      );
+      return;
+    }
+    if (!count) showToast("暂时没有可播放的章节", "warning");
+  },
+  { immediate: true },
+);
 
 const audio = ref<HTMLAudioElement>();
 const trackIndex = ref(0);
 const playing = ref(false);
+const startingPlayback = ref(false);
 const currentTime = ref(0);
 const timelinePosition = ref(0);
 const seeking = ref(false);
@@ -136,6 +199,27 @@ const compactViewport = ref(
     window.matchMedia("(max-width: 800px)").matches,
 );
 const currentTrack = computed(() => tracks.value[trackIndex.value]);
+const currentTrackHref = computed(() => {
+  const track = currentTrack.value;
+  if (!track) return undefined;
+  if (!online.value) return track.href;
+  const onlineTrack = desk.audioTrack.value;
+  if (!onlineTrack || !track.id || onlineTrack.id !== track.id)
+    return undefined;
+  return onlineTrack.url;
+});
+const onlineLoading = computed(
+  () =>
+    online.value &&
+    (desk.directoryLoading.value ||
+      desk.audioTrackLoading.value ||
+      (!currentTrackHref.value &&
+        tracks.value.length > 0 &&
+        !onlineError.value)),
+);
+const playbackLoading = computed(
+  () => onlineLoading.value || startingPlayback.value,
+);
 
 let compactViewportQuery: MediaQueryList | undefined;
 let pendingPlay = false;
@@ -229,7 +313,7 @@ function handleDesktopSettingsViewportChange() {
   void nextTick(positionDesktopSettings);
 }
 
-onMounted(() => {
+onMounted(async () => {
   compactViewportQuery = window.matchMedia("(max-width: 800px)");
   syncCompactViewport();
   compactViewportQuery.addEventListener("change", syncCompactViewport);
@@ -239,6 +323,25 @@ onMounted(() => {
     handleDesktopSettingsViewportChange,
     true,
   );
+  if (online.value) {
+    applyAudioPreferences();
+    if (!desk.onlineBook.value) {
+      void router.replace("/remote-book");
+      return;
+    }
+    try {
+      await desk.loadDirectory();
+      const targetId =
+        desk.pendingChapterId.value || tracks.value[0]?.id;
+      const index = tracks.value.findIndex((track) => track.id === targetId);
+      if (index >= 0) await selectTrack(index, false);
+    } catch {
+      // 目录错误由页面状态和通知承接。
+    } finally {
+      onlineDirectoryReady.value = true;
+    }
+    return;
+  }
   if (!desk.localBook.value?.audioTracks.length) {
     void router.replace("/library");
     return;
@@ -385,14 +488,17 @@ const formatTime = (seconds: number) => {
 };
 
 async function play() {
-  if (!audio.value) return;
+  if (!audio.value || playbackLoading.value || !currentTrackHref.value) return;
   applyAudioPreferences();
+  startingPlayback.value = true;
   try {
     await audio.value.play();
     playing.value = true;
   } catch (error) {
     playing.value = false;
     reportError(error, "音频播放失败，请检查音频文件或设备音量");
+  } finally {
+    startingPlayback.value = false;
   }
 }
 
@@ -403,32 +509,50 @@ function pause() {
 }
 
 function togglePlayback() {
+  if (playbackLoading.value) return;
+  if (online.value && (!tracks.value.length || !currentTrackHref.value)) {
+    void retryOnlineAudio(true);
+    return;
+  }
+  if (!currentTrackHref.value) return;
   if (playing.value) pause();
   else void play();
 }
 
-function selectTrack(index: number, shouldPlay = playing.value) {
+async function selectTrack(index: number, shouldPlay = playing.value) {
   if (!tracks.value.length) return;
-  trackIndex.value = Math.min(Math.max(0, index), tracks.value.length - 1);
+  // 音轨尚未载入完成时避免重复发起请求。不能使用 onlineLoading：
+  // 首次选择音轨时 currentTrackHref 尚不存在，同样会使该状态为 true。
+  if (online.value && (desk.audioTrackLoading.value || startingPlayback.value))
+    return;
+  const target = Math.min(Math.max(0, index), tracks.value.length - 1);
+  const track = tracks.value[target];
+  if (online.value) {
+    if (!track?.id) return;
+    if (playing.value) pause();
+    const payload = await desk.loadOnlineAudioTrack(track.id);
+    if (!payload) return;
+  }
+  trackIndex.value = target;
   currentTime.value = 0;
   timelinePosition.value = 0;
   seeking.value = false;
   duration.value = 0;
   pendingPlay = shouldPlay;
-  void nextTick(() => {
+  await nextTick(() => {
     applyAudioPreferences();
     audio.value?.load();
   });
 }
 
 function previous() {
-  selectTrack(
+  void selectTrack(
     trackIndex.value > 0 ? trackIndex.value - 1 : tracks.value.length - 1,
   );
 }
 
 function next() {
-  selectTrack(
+  void selectTrack(
     trackIndex.value < tracks.value.length - 1 ? trackIndex.value + 1 : 0,
   );
 }
@@ -442,13 +566,13 @@ function handleEnded() {
       return;
     }
     timer.remaining -= 1;
-    selectTrack(trackIndex.value + 1, true);
+    void selectTrack(trackIndex.value + 1, true);
     return;
   }
   if (!autoPlayNext.value || trackIndex.value >= tracks.value.length - 1) {
     return;
   }
-  selectTrack(trackIndex.value + 1, true);
+  void selectTrack(trackIndex.value + 1, true);
 }
 
 function updateTimeline(event: Event) {
@@ -502,11 +626,45 @@ watch([volume, playbackRate, autoPlayNext], () => {
 watch(
   () => initialTrackIndex.value,
   (index) => {
+    if (online.value) return;
     if (!tracks.value.length) return;
-    selectTrack(index || 0, false);
+    void selectTrack(index || 0, false);
   },
   { immediate: true },
 );
+
+function goBack() {
+  if (online.value) {
+    desk.backFromOnlineReading();
+    return;
+  }
+  void router.push(`/library/${encodeURIComponent(bookName.value)}`);
+}
+
+async function retryOnlineAudio(shouldPlay = true) {
+  if (!online.value || playbackLoading.value) return;
+  if (onlineNeedsAuth.value) {
+    desk.credentialsOpen.value = true;
+    showToast("请先连接网站登录凭证，再在线收听有声章节", "info");
+    return;
+  }
+  try {
+    if (!tracks.value.length || desk.directoryError.value) {
+      await desk.loadDirectory(true);
+    }
+    if (!tracks.value.length) return;
+    const targetId =
+      desk.pendingChapterId.value ||
+      currentTrack.value?.id ||
+      tracks.value[0]?.id;
+    const index = tracks.value.findIndex((track) => track.id === targetId);
+    await selectTrack(index >= 0 ? index : 0, shouldPlay);
+  } catch {
+    // 目录错误由 Toast 提示承接。
+  } finally {
+    onlineDirectoryReady.value = true;
+  }
+}
 </script>
 
 <template>
@@ -514,10 +672,7 @@ watch(
     <div class="audio-backdrop" aria-hidden="true">
       <img v-if="cover" :src="cover" alt="" />
     </div>
-    <button
-      class="back-button"
-      @click="router.push(`/library/${encodeURIComponent(bookName)}`)"
-    >
+    <button class="back-button" @click="goBack">
       <ChevronLeft :size="17" />
     </button>
     <Transition name="drawer-backdrop">
@@ -545,7 +700,7 @@ watch(
         </div>
         <audio
           ref="audio"
-          :src="currentTrack?.href"
+          :src="currentTrackHref"
           preload="metadata"
           @loadedmetadata="handleLoadedMetadata"
           @timeupdate="syncPlaybackTime"
@@ -608,20 +763,45 @@ watch(
             </div>
           </div>
           <div class="playback-controls">
-            <button title="上一章" :disabled="!tracks.length" @click="previous">
+            <button
+              title="上一章"
+              :disabled="!tracks.length || playbackLoading"
+              @click="previous"
+            >
               <SkipBack :size="21" /></button
             ><button
               class="play-button"
-              :title="playing ? '暂停' : '播放'"
-              :disabled="!tracks.length"
+              :title="
+                playbackLoading
+                  ? '正在加载音频'
+                  : online && !currentTrackHref
+                    ? '重试加载音频'
+                    : !currentTrackHref
+                      ? '音频尚未就绪'
+                      : playing
+                        ? '暂停'
+                        : '播放'
+              "
+              :disabled="
+                playbackLoading ||
+                (!online && (!tracks.length || !currentTrackHref))
+              "
               @click="togglePlayback"
             >
-              <Pause v-if="playing" :size="27" /><Play
+              <LoaderCircle
+                v-if="playbackLoading"
+                class="spin"
+                :size="25"
+              /><Pause v-else-if="playing" :size="27" /><Play
                 v-else
                 :size="27"
                 fill="currentColor"
               /></button
-            ><button title="下一章" :disabled="!tracks.length" @click="next">
+            ><button
+              title="下一章"
+              :disabled="!tracks.length || playbackLoading"
+              @click="next"
+            >
               <SkipForward :size="21" />
             </button>
           </div>
@@ -903,8 +1083,9 @@ watch(
         <div class="track-list">
           <button
             v-for="(track, index) in tracks"
-            :key="track.href"
+            :key="track.key"
             :class="{ active: index === trackIndex }"
+            :disabled="playbackLoading"
             @click="selectTrack(index, true)"
           >
             <span>{{ String(index + 1).padStart(3, "0") }}</span
@@ -1560,6 +1741,15 @@ watch(
   50% {
     box-shadow: 0 20px 39px rgba(210, 115, 78, 0.38);
     transform: translateY(-2px);
+  }
+}
+
+.spin {
+  animation: audio-spin 0.9s linear infinite;
+}
+@keyframes audio-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

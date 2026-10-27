@@ -7,7 +7,7 @@ use crate::sfacg::{
 use crate::utils::cookie::{filter_cookie_header, has_cookie_name};
 use md5::{Digest, Md5};
 use serde_json::Value;
-use tauri::Manager;
+use tauri::{Manager, Runtime};
 
 /// SF 网页在未订阅图片 VIP 正文时返回的固定 PNG 的 MD5 摘要。
 ///
@@ -54,7 +54,7 @@ impl WebClient {
     ///
     /// # 错误
     /// 当会话状态无法读取或 HTTP 客户端无法创建时返回错误。
-    pub(crate) fn new(app: &tauri::AppHandle) -> Result<Self, String> {
+    pub(crate) fn new<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Self, String> {
         let web_cookie = Self::read_web_cookie(app)?;
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(15))
@@ -707,7 +707,7 @@ impl WebClient {
     }
 
     /// 从原生 Web 会话中读取并过滤出 `.SFCommunity` 与 `session_PC`。
-    fn read_web_cookie(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    fn read_web_cookie<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Option<String>, String> {
         let auth_state = app.state::<AuthSessionState>();
         let session = auth_state
             .session

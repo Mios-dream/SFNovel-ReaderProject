@@ -1,13 +1,14 @@
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import type { Novel, ViewName } from "../types";
+import type { Novel, ReaderSource, ViewName } from "../types";
 import { useChapterPicker } from "./useChapterPicker";
 import { useDeskAuth } from "./useDeskAuth";
 import { useDeskBookshelf } from "./useDeskBookshelf";
 import { useDeskJobs } from "./useDeskJobs";
 import { useDeskLibrary } from "./useDeskLibrary";
 import { useNovelSearch } from "./useNovelSearch";
+import { useOnlineReading } from "./useOnlineReading";
 import { useRequestPolicy } from "./useRequestPolicy";
 import { showToast, type ToastType } from "./useToast";
 
@@ -42,7 +43,10 @@ function isSameRemoteWork(candidate: Novel, source: Novel) {
  */
 export function useNovelDesk() {
   const active = ref<ViewName>("discover");
+  const readerSource = ref<ReaderSource>("local");
   const libraryDetailReturnView = ref<ViewName>("library");
+  const remoteDetailReturnView = ref<ViewName>("bookshelf");
+  const onlineReturnView = ref<ViewName>("remoteDetail");
   const queueOpen = ref(false);
   const remoteBook = ref<Novel>();
   const remoteBookLoading = ref(false);
@@ -85,8 +89,12 @@ export function useNovelDesk() {
     addJob: jobs.upsertJob,
     refreshJobs: jobs.refreshJobs,
   });
+  const online = useOnlineReading({ notify });
 
   async function openRemoteBookDetail(novel: Novel, preserveMedia = false) {
+    if (!preserveMedia && active.value !== "remoteDetail") {
+      remoteDetailReturnView.value = active.value;
+    }
     const request = ++remoteBookRequest;
     remoteBook.value = novel;
     remoteBookLoading.value = true;
@@ -151,7 +159,69 @@ export function useNovelDesk() {
     if (target) void openRemoteBookDetail(target, true);
   }
 
+  function closeRemoteBookDetail() {
+    active.value = remoteDetailReturnView.value;
+  }
+
+  function startOnlineReading(
+    novel: Novel,
+    mode: "text" | "audio" | "comic",
+    chapterId?: number,
+  ) {
+    if (
+      active.value !== "reader" &&
+      active.value !== "comicReader" &&
+      active.value !== "audioPlayer"
+    ) {
+      onlineReturnView.value = active.value;
+    }
+    online.prepareOnlineReading(novel, mode, chapterId);
+    readerSource.value = "online";
+    active.value =
+      mode === "audio"
+        ? "audioPlayer"
+        : mode === "comic"
+          ? "comicReader"
+          : "reader";
+  }
+
+  function startOnlineFromLibrary(mode: "novel" | "audio" | "comic") {
+    const book = library.localBook.value;
+    const work = book?.[mode];
+    if (!work?.id) return;
+    if (mode === "audio" && !auth.auth.value.webAuthenticated) {
+      auth.credentialsOpen.value = true;
+      notify("请先连接网站登录凭证，再在线收听有声章节");
+      return;
+    }
+    startOnlineReading(
+      {
+        novelId:
+          mode === "audio" ? work.catalogId || work.id : work.id,
+        mediaId: mode === "audio" ? work.id : undefined,
+        novelName: work.title,
+        authorName: work.author,
+        novelCover: work.cover || "",
+        lastUpdateTime: work.lastUpdateTime || "",
+        bookshelfType: mode === "novel" ? "novel" : mode,
+        sourcePath: work.onlinePath,
+      },
+      mode === "novel" ? "text" : mode,
+    );
+  }
+
+  function backFromOnlineReading() {
+    active.value = onlineReturnView.value;
+  }
+
   function navigate(view: ViewName) {
+    if (
+      view === "reader" ||
+      view === "comicReader" ||
+      view === "audioPlayer"
+    ) {
+      readerSource.value = "local";
+    }
     active.value = view;
     if (view === "bookshelf") void bookshelf.loadBookshelf();
     if (view === "library") {
@@ -219,12 +289,13 @@ export function useNovelDesk() {
       active.value === "comicReader" ||
       active.value === "audioPlayer"
     ) {
-      active.value = "libraryDetail";
+      if (readerSource.value === "online") backFromOnlineReading();
+      else active.value = "libraryDetail";
       return;
     }
     if (active.value === "libraryDetail")
       active.value = library.backFromLibraryDetail();
-    if (active.value === "remoteDetail") active.value = "bookshelf";
+    if (active.value === "remoteDetail") closeRemoteBookDetail();
   }
 
   function blockCopy(event: ClipboardEvent) {
@@ -261,6 +332,7 @@ export function useNovelDesk() {
 
   return {
     active,
+    readerSource,
     queueOpen,
     ...search,
     ...jobs,
@@ -273,10 +345,17 @@ export function useNovelDesk() {
     remoteBookLoading,
     remoteMedia,
     remoteMediaDetecting,
+    remoteDetailReturnView,
+    onlineReturnView,
     openRemoteBookDetail,
+    closeRemoteBookDetail,
     selectRemoteMedia,
+    startOnlineReading,
+    startOnlineFromLibrary,
+    backFromOnlineReading,
     continueDownload,
     navigate,
     formatDate,
+    ...online,
   };
 }

@@ -15,6 +15,8 @@ mod endpoint_policy;
 mod library;
 /// 桌面端本地图片 OCR worker 桥接。
 mod ocr;
+/// 在线阅读、漫画与有声播放的按需内容读取。
+mod online;
 /// SFACG 远程查询、认证与会话生命周期。
 mod sfacg;
 /// 不承载业务规则的原生层共享工具。
@@ -42,6 +44,7 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .manage(AuthSessionState::default())
         .manage(NativeJobState::default())
+        .manage(online::OnlineMediaState::default())
         .setup(|app| {
             #[cfg(target_os = "android")]
             tauri::async_runtime::block_on(initialize_device_identity(&app.handle()))?;
@@ -68,7 +71,11 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .register_asynchronous_uri_scheme_protocol(
+            online::ONLINE_MEDIA_SCHEME,
+            online::handle_online_media_request,
+        );
     #[cfg(not(target_os = "android"))]
     {
         builder = builder.manage(ocr::DesktopOcrState::default());
@@ -96,6 +103,9 @@ pub fn run() {
             sfacg::get_comic_chapters,
             sfacg::get_comic_details,
             sfacg::get_bookshelf,
+            online::load_online_text_chapter,
+            online::load_online_comic_chapter,
+            online::load_online_audio_track,
             library::get_local_book,
             library::get_local_chapter,
             library::get_local_comic_chapter,

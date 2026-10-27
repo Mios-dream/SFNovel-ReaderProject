@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { computed, inject, nextTick, ref, watch } from "vue";
 import {
@@ -14,13 +13,13 @@ import {
   LibraryBig,
   LoaderCircle,
   ListTree,
+  Play,
   Star,
   Ticket,
   X,
 } from "lucide-vue-next";
 import { deskInjectionKey } from "../deskContext";
-import { nativeErrorMessage } from "../composables/deskShared";
-import { reportError } from "../composables/useToast";
+import { reportError, showToast } from "../composables/useToast";
 import type { Chapter, ChapterMode, ChapterVolume } from "../types";
 
 function requireDesk() {
@@ -49,12 +48,11 @@ const mobileSwitchMediaTypes = computed(() =>
 );
 const directoryOpen = ref(false);
 const directoryElement = ref<HTMLElement>();
-const directoryLoading = ref(false);
-const directoryError = ref("");
-const loadedDirectoryKey = ref("");
-const textVolumes = ref<ChapterVolume[]>([]);
-const audioChapters = ref<Chapter[]>([]);
-const comicChapters = ref<Chapter[]>([]);
+const directoryLoading = computed(() => desk.directoryLoading.value);
+const directoryError = computed(() => desk.directoryError.value);
+const textVolumes = computed(() => desk.textVolumes.value);
+const audioChapters = computed(() => desk.audioChapters.value);
+const comicChapters = computed(() => desk.comicChapters.value);
 const audioVolumes = computed(() => groupChaptersByVolume(audioChapters.value));
 const comicVolumes = computed(() => groupChaptersByVolume(comicChapters.value));
 const selectedMedia = computed<RemoteMediaType>(
@@ -84,6 +82,9 @@ const remoteStatusLabel = computed(() =>
       ? "已完结"
       : "连载中",
 );
+const onlineActionLabel = computed(() =>
+  mode.value === "audio" ? "在线收听" : "在线阅读",
+);
 const bookFacts = computed(() => {
   const work = novel.value;
   if (!work) return [];
@@ -101,10 +102,20 @@ const bookFacts = computed(() => {
 });
 
 function goBack() {
-  desk.navigate("bookshelf");
+  desk.closeRemoteBookDetail();
 }
 function openDownload() {
   if (novel.value) void desk.openChapterPicker(novel.value, mode.value);
+}
+function startOnline(chapterId?: number) {
+  const work = novel.value;
+  if (!work) return;
+  if (mode.value === "audio" && !desk.auth.value.webAuthenticated) {
+    desk.credentialsOpen.value = true;
+    showToast("请先连接网站登录凭证，再在线收听有声章节", "info");
+    return;
+  }
+  desk.startOnlineReading(work, mode.value, chapterId);
 }
 
 function selectMedia(media: RemoteMediaType) {
@@ -126,76 +137,28 @@ function mediaDescription(media: RemoteMediaType) {
   return remoteMediaDetecting.value ? "正在探测" : "暂未发现";
 }
 
-function directoryKey() {
-  const work = novel.value;
-  return work ? `${mode.value}:${work.novelId}:${work.sourcePath || ""}` : "";
-}
-
-function clearDirectory() {
-  directoryLoading.value = false;
-  directoryError.value = "";
-  loadedDirectoryKey.value = "";
-  textVolumes.value = [];
-  audioChapters.value = [];
-  comicChapters.value = [];
-}
-
-async function browseDirectory() {
+async function ensureDirectory(force = false) {
   const work = novel.value;
   if (!work) return;
-  const isMobile = window.matchMedia("(max-width: 900px)").matches;
-  directoryOpen.value = isMobile;
-  const key = directoryKey();
-  if (key !== loadedDirectoryKey.value) {
-    directoryLoading.value = true;
-    directoryError.value = "";
-    textVolumes.value = [];
-    audioChapters.value = [];
-    comicChapters.value = [];
-    try {
-      if (mode.value === "text") {
-        textVolumes.value = await invoke<ChapterVolume[]>(
-          "get_chapter_volumes",
-          { novelId: work.novelId },
-        );
-      } else if (mode.value === "audio") {
-        if (!desk.auth.value.webAuthenticated) {
-          desk.credentialsOpen.value = true;
-          throw new Error("连接网站登录后可读取有声目录");
-        }
-        const catalog = await invoke<{ chapters: Chapter[] }>(
-          "get_audio_chapters",
-          { novelId: work.novelId },
-        );
-        audioChapters.value = catalog.chapters;
-      } else {
-        const catalog = await invoke<{ chapters: Chapter[] }>(
-          "get_comic_chapters",
-          {
-            comicId: work.novelId,
-            sourcePath: work.sourcePath,
-            titleHint: work.novelName,
-          },
-        );
-        comicChapters.value = catalog.chapters;
-      }
-      loadedDirectoryKey.value = key;
-    } catch (error) {
-      directoryError.value = nativeErrorMessage(error, "读取章节目录失败");
-    } finally {
-      directoryLoading.value = false;
-    }
-  }
-  await nextTick();
-  if (!isMobile) {
-    directoryElement.value?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-    });
+  try {
+    await desk.primeOnlineDirectory(work, mode.value, force);
+  } catch {
+    // 错误保存在共享目录状态中，由详情页和阅读器共同展示。
   }
 }
 
-async function openOnline() {
+async function showDirectory() {
+  const isMobile = window.matchMedia("(max-width: 900px)").matches;
+  directoryOpen.value = isMobile;
+  if (isMobile) return;
+  await nextTick();
+  directoryElement.value?.scrollIntoView({
+    behavior: "smooth",
+    block: "nearest",
+  });
+}
+
+async function openOfficialPage() {
   const work = novel.value;
   if (!work) return;
   const url =
@@ -210,13 +173,20 @@ async function openOnline() {
 }
 
 watch(
-  () => novel.value,
+  () =>
+    [
+      novel.value?.novelId,
+      novel.value?.mediaId,
+      novel.value?.sourcePath,
+      mode.value,
+    ] as const,
   () => {
     descriptionExpanded.value = false;
     descriptionModalOpen.value = false;
     directoryOpen.value = false;
-    clearDirectory();
+    void ensureDirectory();
   },
+  { immediate: true },
 );
 function formatMetric(value?: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
@@ -280,10 +250,8 @@ function textChapterBadge(
       />
       <div class="hero-shade" />
       <header class="detail-navigation">
-        <button class="nav-circle" title="返回远程书架" @click="goBack">
-          <ChevronLeft :size="22" /><span class="desktop-nav-label"
-            >返回书架</span
-          >
+        <button class="nav-circle" title="返回上一页" @click="goBack">
+          <ChevronLeft :size="22" /><span class="desktop-nav-label">返回</span>
         </button>
         <span class="local-label"><LibraryBig :size="14" />远程作品</span>
       </header>
@@ -347,14 +315,14 @@ function textChapterBadge(
             <span>{{ novel.description || "暂无简介" }}</span>
           </button>
           <div class="desktop-primary-actions">
-            <button class="desktop-start-reading" @click="openDownload">
-              <Download :size="18" />下载
+            <button class="desktop-start-reading" @click="startOnline()">
+              <Play :size="18" />{{ onlineActionLabel }}
             </button>
-            <button class="desktop-action" @click="openOnline">
-              <ExternalLink :size="17" />在线查看
+            <button class="desktop-action" @click="openDownload">
+              <Download :size="17" />下载
             </button>
-            <button class="desktop-action" @click="browseDirectory">
-              <ListTree :size="17" />浏览目录
+            <button class="desktop-action" @click="openOfficialPage">
+              <ExternalLink :size="17" />官方网页
             </button>
           </div>
           <div class="desktop-secondary-actions">
@@ -535,7 +503,7 @@ function textChapterBadge(
           {{ descriptionExpanded ? "收起简介" : "展开简介" }}
         </button>
       </section>
-      <button class="mobile-latest-chapter" @click="browseDirectory">
+      <button class="mobile-latest-chapter" @click="showDirectory">
         <span class="latest-badge">最近</span>
         <span class="latest-copy">
           <strong>{{ novel.latestChapterTitle || "暂无最新章节信息" }}</strong>
@@ -556,15 +524,9 @@ function textChapterBadge(
             <small>REMOTE DIRECTORY</small>
             <h3 id="remote-directory-title">{{ currentMediaLabel }}目录</h3>
           </div>
-          <button
-            class="directory-load-button"
-            :disabled="directoryLoading"
-            @click="browseDirectory"
+          <span v-if="currentDirectoryCount"
+            >{{ currentDirectoryCount }} 章</span
           >
-            <LoaderCircle v-if="directoryLoading" class="spin" :size="16" />
-            <ListTree v-else :size="16" />
-            {{ directoryLoading ? "加载中" : "加载目录" }}
-          </button>
         </header>
         <div v-if="directoryLoading" class="remote-directory-empty">
           <LoaderCircle class="spin" :size="22" /><span
@@ -573,6 +535,15 @@ function textChapterBadge(
         </div>
         <div v-else-if="directoryError" class="remote-directory-empty error">
           <span>{{ directoryError }}</span>
+          <div class="directory-error-actions">
+            <button
+              v-if="mode === 'audio' && !desk.auth.value.webAuthenticated"
+              @click="desk.credentialsOpen.value = true"
+            >
+              连接网站登录
+            </button>
+            <button @click="ensureDirectory(true)">重试</button>
+          </div>
         </div>
         <div v-else-if="currentDirectoryCount" class="remote-directory-list">
           <template v-if="mode === 'text'">
@@ -583,16 +554,18 @@ function textChapterBadge(
             >
               <h4>{{ volume.title }}</h4>
               <div class="remote-volume-chapters">
-                <div
+                <button
                   v-for="chapter in volume.chapters"
                   :key="chapter.chapId"
                   class="remote-chapter-row"
+                  @click="startOnline(chapter.chapId)"
                 >
                   <strong>{{ chapter.title }}</strong>
                   <span v-if="chapter.isVip" class="chapter-badge vip">{{
                     textChapterBadge(chapter.contentKind)
                   }}</span>
-                </div>
+                  <Play :size="13" />
+                </button>
               </div>
             </section>
           </template>
@@ -604,22 +577,24 @@ function textChapterBadge(
             >
               <h4>{{ volume.title }}</h4>
               <div class="remote-volume-chapters">
-                <div
+                <button
                   v-for="chapter in volume.chapters"
                   :key="chapter.id"
                   class="remote-chapter-row"
+                  @click="startOnline(chapter.id)"
                 >
                   <strong>{{ chapter.title }}</strong>
                   <span v-if="chapter.isVip" class="chapter-badge vip"
                     >VIP</span
                   >
-                </div>
+                  <Play :size="13" />
+                </button>
               </div>
             </section>
           </template>
         </div>
         <div v-else class="remote-directory-empty">
-          <ListTree :size="22" /><span>点击加载目录后在此浏览章节</span>
+          <ListTree :size="22" /><span>暂无目录内容</span>
         </div>
       </section>
     </section>
@@ -627,13 +602,13 @@ function textChapterBadge(
       <button
         class="directory-action"
         title="浏览远程目录"
-        @click="browseDirectory"
+        @click="showDirectory"
       >
         <ListTree :size="21" /><span>目录</span></button
-      ><button class="online-action" title="在线查看" @click="openOnline">
-        <ExternalLink :size="20" /><span>在线</span></button
-      ><button class="primary-action" @click="openDownload">
-        <Download :size="17" />下载
+      ><button class="online-action" title="下载章节" @click="openDownload">
+        <Download :size="20" /><span>下载</span></button
+      ><button class="primary-action" @click="startOnline()">
+        <Play :size="17" />{{ onlineActionLabel }}
       </button>
     </nav>
     <div
@@ -650,7 +625,6 @@ function textChapterBadge(
         <div class="drawer-handle" aria-hidden="true" />
         <header class="drawer-heading">
           <div>
-            <small>远程内容</small>
             <h3 id="remote-directory-drawer-title">
               {{ currentMediaLabel }}目录
             </h3>
@@ -663,7 +637,16 @@ function textChapterBadge(
           <LoaderCircle class="spin" :size="27" />正在读取目录
         </div>
         <div v-else-if="directoryError" class="drawer-empty error">
-          {{ directoryError }}
+          <span>{{ directoryError }}</span>
+          <div class="directory-error-actions">
+            <button
+              v-if="mode === 'audio' && !desk.auth.value.webAuthenticated"
+              @click="desk.credentialsOpen.value = true"
+            >
+              连接网站登录
+            </button>
+            <button @click="ensureDirectory(true)">重试</button>
+          </div>
         </div>
         <div
           v-else-if="currentDirectoryCount && mode === 'text'"
@@ -675,34 +658,36 @@ function textChapterBadge(
             class="chapter-volume"
           >
             <h4>{{ volume.title }}</h4>
-            <div
+            <button
               v-for="chapter in volume.chapters"
               :key="chapter.chapId"
               class="remote-drawer-row"
+              @click="startOnline(chapter.chapId)"
             >
               <strong>{{ chapter.title }}</strong>
               <span v-if="chapter.isVip" class="chapter-badge vip">{{
                 textChapterBadge(chapter.contentKind)
               }}</span>
-              <ChevronRight :size="16" />
-            </div>
+              <Play :size="16" />
+            </button>
           </section>
         </div>
         <div v-else-if="currentDirectoryCount" class="drawer-list">
-          <div
+          <button
             v-for="(chapter, index) in mode === 'audio'
               ? audioChapters
               : comicChapters"
             :key="chapter.id"
             class="remote-drawer-row"
+            @click="startOnline(chapter.id)"
           >
             <span v-if="mode === 'audio'" class="remote-drawer-index">{{
               String(index + 1).padStart(3, "0")
             }}</span>
             <strong>{{ chapter.title }}</strong>
             <span v-if="chapter.isVip" class="chapter-badge vip">VIP</span>
-            <ChevronRight :size="16" />
-          </div>
+            <Play :size="16" />
+          </button>
         </div>
         <div v-else class="drawer-empty">
           <ListTree :size="27" />暂无目录内容
@@ -779,8 +764,7 @@ function textChapterBadge(
 .desktop-content-tabs {
   display: none;
 }
-.desktop-action,
-.directory-load-button {
+.desktop-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -792,8 +776,7 @@ function textChapterBadge(
   font: inherit;
   font-size: 12px;
 }
-.desktop-action:hover,
-.directory-load-button:hover {
+.desktop-action:hover {
   border-color: #e47552;
   color: #c35e40;
   background: #fff2e9;
@@ -849,12 +832,6 @@ function textChapterBadge(
   border-radius: 5px;
   color: #b8664e;
   background: #fff0e7;
-  font-size: 11px;
-}
-.directory-load-button {
-  min-height: 34px;
-  padding: 0 11px;
-  border-radius: 8px;
   font-size: 11px;
 }
 .remote-latest-row {
@@ -923,6 +900,17 @@ function textChapterBadge(
   border-radius: 7px;
   color: #6d5c52;
   background: rgba(255, 253, 248, 0.58);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: 0.18s;
+}
+.remote-chapter-row:hover,
+.remote-chapter-row:focus-visible {
+  border-color: #e9b797;
+  color: #b95438;
+  background: #fff3e9;
+  outline: none;
 }
 .remote-chapter-row strong {
   min-width: 0;
@@ -959,7 +947,28 @@ function textChapterBadge(
   font-size: 12px;
 }
 .remote-directory-empty.error {
+  flex-direction: column;
   color: #b96e5b;
+}
+.directory-error-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.directory-error-actions button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid #e8c9bc;
+  border-radius: 7px;
+  color: #a95843;
+  background: #fff7f2;
+  font: inherit;
+  font-size: 11px;
+}
+.directory-error-actions button:hover {
+  border-color: #d98568;
+  background: #fff0e9;
 }
 .mobile-latest-chapter {
   display: none;
@@ -971,8 +980,19 @@ function textChapterBadge(
   align-items: center;
   gap: 8px;
   padding: 0 20px;
+  border: none;
   border-top: 1px solid #f0ebdf;
   color: #504a41;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.remote-drawer-row:hover,
+.remote-drawer-row:focus-visible {
+  color: #b95438;
+  background: #fff4ea;
+  outline: none;
 }
 .remote-drawer-row strong {
   min-width: 0;

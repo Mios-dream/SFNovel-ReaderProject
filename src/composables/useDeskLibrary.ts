@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { onMounted, ref, type Ref } from "vue";
 import type {
   Book,
@@ -228,21 +227,6 @@ export function useDeskLibrary({
     );
   }
 
-  async function readOnline(mode: "novel" | "audio" | "comic") {
-    const book = localBook.value;
-    const work = book?.[mode];
-    if (!work) return;
-    const url =
-      mode === "comic"
-        ? work.onlinePath
-          ? `https://manhua.sfacg.com/mh/${work.onlinePath}/`
-          : `https://manhua.sfacg.com/mh/${work.id}/`
-        : mode === "audio"
-          ? `https://i.sfacg.com/consume/book/?nid=${work.catalogId || work.id}`
-          : `https://book.sfacg.com/Novel/${work.id}/`;
-    await openUrl(url);
-  }
-
   async function exportBook(format: ExportFormat) {
     const book = localBook.value;
     if (!book) return;
@@ -311,7 +295,6 @@ export function useDeskLibrary({
     peekLocalChapter,
     openLocalComicChapter,
     openLocalAudioPlayer,
-    readOnline,
     exportBook,
     backFromLibraryDetail,
   };

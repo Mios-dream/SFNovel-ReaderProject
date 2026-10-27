@@ -1,11 +1,11 @@
 import { createRouter, createWebHashHistory } from "vue-router";
+import AudioPlayerPage from "./pages/AudioPlayerPage.vue";
 import BookshelfPage from "./pages/BookshelfPage.vue";
+import ComicReaderPage from "./pages/ComicReaderPage.vue";
 import DiscoverPage from "./pages/DiscoverPage.vue";
 import LibraryPage from "./pages/LibraryPage.vue";
-import LocalAudioPlayerPage from "./pages/LocalAudioPlayerPage.vue";
 import LocalBookDetailPage from "./pages/LocalBookDetailPage.vue";
-import LocalComicReaderPage from "./pages/LocalComicReaderPage.vue";
-import LocalReaderPage from "./pages/LocalReaderPage.vue";
+import ReaderPage from "./pages/ReaderPage.vue";
 import RemoteBookDetailPage from "./pages/RemoteBookDetailPage.vue";
 
 export const router = createRouter({
@@ -17,8 +17,8 @@ export const router = createRouter({
     { path: "/remote-book", component: RemoteBookDetailPage },
     { path: "/library", component: LibraryPage },
     { path: "/library/:name", component: LocalBookDetailPage },
-    { path: "/reader", component: LocalReaderPage },
-    { path: "/comic-reader", component: LocalComicReaderPage },
-    { path: "/audio", component: LocalAudioPlayerPage },
+    { path: "/reader", component: ReaderPage },
+    { path: "/comic-reader", component: ComicReaderPage },
+    { path: "/audio", component: AudioPlayerPage },
   ],
 });

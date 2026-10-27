@@ -91,7 +91,7 @@ const recommendationImage =
           v-if="desk.searched.value && desk.results.value.length"
           class="subtle"
         >
-          点击作品查看可用操作
+          点击作品进入详情，在线阅读或下载
         </p>
       </section>
       <div v-if="!desk.searched.value" class="empty-state">
@@ -112,6 +112,7 @@ const recommendationImage =
           :novel="novel"
           :format-date="desk.formatDate"
           @select="desk.openChapterPicker"
+          @detail="desk.openRemoteBookDetail"
         />
       </div>
     </main>

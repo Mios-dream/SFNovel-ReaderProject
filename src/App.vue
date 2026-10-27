@@ -37,6 +37,7 @@ watch(
     if (
       (view === "discover" || view === "bookshelf" || view === "library") &&
       (route.path.startsWith("/library/") ||
+        route.path === "/remote-book" ||
         route.path === "/reader" ||
         route.path === "/comic-reader" ||
         route.path === "/audio")

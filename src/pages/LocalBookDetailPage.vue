@@ -473,10 +473,10 @@ watch(
                 <Download :size="16" />补充下载
               </button>
               <button
-                v-if="currentWork.id"
-                @click="desk.readOnline(selectedMediaType)"
+                v-if="currentWork.id && selectedMediaType !== 'audio'"
+                @click="desk.startOnlineFromLibrary(selectedMediaType)"
               >
-                <ExternalLink :size="16" />在线查看
+                <ExternalLink :size="16" />在线阅读
               </button>
               <button
                 :disabled="Boolean(exporting) || !canExportCurrentMedia"
@@ -777,10 +777,10 @@ watch(
           <ListTree :size="17" />已下载目录
         </button>
         <button
-          v-if="currentWork.id"
-          @click="desk.readOnline(selectedMediaType)"
+          v-if="currentWork.id && selectedMediaType !== 'audio'"
+          @click="desk.startOnlineFromLibrary(selectedMediaType)"
         >
-          <ExternalLink :size="17" />在线查看
+          <ExternalLink :size="17" />在线阅读
         </button>
         <button
           v-if="currentWork.id"
@@ -821,6 +821,14 @@ watch(
         @click="exportCurrentMedia"
       >
         <FileDown :size="21" /><span>{{ exportActionLabel }}</span>
+      </button>
+      <button
+        v-if="currentWork.id && selectedMediaType !== 'audio'"
+        class="directory-action"
+        title="在线阅读"
+        @click="desk.startOnlineFromLibrary(selectedMediaType)"
+      >
+        <ExternalLink :size="21" /><span>在线</span>
       </button>
       <button
         class="primary-action"

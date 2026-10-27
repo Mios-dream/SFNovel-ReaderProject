@@ -8,6 +8,7 @@ export type ViewName =
   | "reader"
   | "comicReader"
   | "audioPlayer";
+export type ReaderSource = "local" | "online";
 export type ChapterMode = "text" | "audio" | "comic";
 
 export type Novel = {
@@ -136,6 +137,28 @@ export type LocalBookDetail = {
   comicChapters: LocalComicChapter[];
 };
 export type LocalChapterContent = LocalChapter & { content: string };
+
+export type OnlineTextChapter = {
+  id: number;
+  title: string;
+  volume: string;
+  content: string;
+  images: string[];
+};
+
+export type OnlineComicChapter = {
+  id: number;
+  title: string;
+  pages: string[];
+};
+
+export type OnlineAudioTrack = {
+  id: number;
+  title: string;
+  volume: string;
+  /** 原生媒体协议的流式播放地址。 */
+  url: string;
+};
 
 export type AuthStatus = {
   authenticated: boolean;
