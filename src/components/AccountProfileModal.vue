@@ -119,13 +119,13 @@ const number = (value: number | undefined) =>
           <span
             v-if="auth.appAuthenticated"
             class="credential-icon app"
-            title="App 高级能力已连接"
+            title="App 登录已连接"
             ><Smartphone :size="18"
           /></span>
           <span
             v-if="auth.webAuthenticated"
             class="credential-icon web"
-            title="网站功能已连接"
+            title="网站登录已连接"
             ><Globe2 :size="18"
           /></span>
         </div>

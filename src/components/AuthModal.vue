@@ -29,18 +29,7 @@ watch(
     if (open) activeTab.value = "official";
   },
 );
-/**
- * Emits credentials for immediate native submission without retaining either field.
- * @returns No return value.
- */
-/**
- * Emits the current credentials for immediate native authentication.
- *
- * The component does not persist either field; the parent forwards them to
- * Rust and clears the modal state after the native command completes.
- *
- * @returns No value; emits the `login` event with trimmed username and password.
- */
+
 function submit() {
   const submittedUsername = username.value.trim();
   const submittedPassword = password.value;
@@ -55,7 +44,7 @@ function submit() {
         <X :size="20" /></button
       ><span class="modal-icon"><KeyRound :size="22" /></span>
       <h2>SF 账号连接</h2>
-      <p>提供登录凭证以使用相应平台的功能</p>
+      <p>App 与网站登录彼此独立，可单独连接。</p>
       <div class="login-tabs" role="tablist" aria-label="登录方式">
         <button
           class="login-tab"
@@ -75,15 +64,15 @@ function submit() {
           type="button"
           @click="activeTab = 'password'"
         >
-          账号密码
+          App 登录
         </button>
       </div>
       <div v-if="activeTab === 'password'" class="login-panel" role="tabpanel">
         <div v-if="auth.appAuthenticated" class="connected-state">
           <span class="connection-icon app"><Smartphone :size="21" /></span>
           <div class="connection-copy">
-            <strong>App 高级能力已连接</strong>
-            <small>App 限制章节可用</small>
+            <strong>App 登录已连接</strong>
+            <small>完整目录与受限章节可用</small>
           </div>
           <CircleCheck class="connection-check" :size="20" />
           <button
@@ -95,7 +84,7 @@ function submit() {
           </button>
         </div>
         <template v-else>
-          <p>下载部分特殊的章节，但可能会导致账号风险，非必要不建议使用。</p>
+          <p>App 登录可获得完整权限，但可能触发风控。</p>
           <form class="login-form" @submit.prevent="submit">
             <input
               v-model="username"
@@ -112,7 +101,7 @@ function submit() {
             />
             <button class="primary-button full" type="submit" :disabled="busy">
               <LoaderCircle v-if="busy" class="spin" :size="18" />{{
-                busy ? "正在连接" : "连接 App 高级能力"
+                busy ? "正在连接" : "连接 App 登录"
               }}
             </button>
           </form>
@@ -122,8 +111,8 @@ function submit() {
         <div v-if="auth.webAuthenticated" class="connected-state">
           <span class="connection-icon web"><Globe2 :size="21" /></span>
           <div class="connection-copy">
-            <strong>网站功能已连接</strong>
-            <small>小说、有声、漫画与网页资源可用</small>
+            <strong>网站登录已连接</strong>
+            <small>漫画、网页书架与网页资源可用</small>
           </div>
           <CircleCheck class="connection-check" :size="20" />
           <button
@@ -135,27 +124,18 @@ function submit() {
           </button>
         </div>
         <template v-else>
-          <p>
-            用于基础功能和资源下载。将在应用内官方页面完成账号、密码和滑块验证。
-          </p>
+          <p>可使用绝大部分功能，更安全。</p>
           <button
             class="primary-button full"
             :disabled="busy"
             @click="emit('browserLogin')"
           >
             <LoaderCircle v-if="busy" class="spin" :size="18" />{{
-              busy ? "正在等待官方登录" : "连接网站功能"
+              busy ? "正在等待官方登录" : "连接网站登录"
             }}
           </button>
         </template>
       </div>
-      <!-- <button
-        v-if="auth.appAuthenticated && auth.webAuthenticated"
-        class="logout-all-button"
-        @click="emit('logout')"
-      >
-        退出全部登录会话
-      </button> -->
     </section>
   </div>
 </template>

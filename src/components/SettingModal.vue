@@ -27,8 +27,6 @@ const emit = defineEmits<{
 const defaultPolicy: RequestPolicy = {
   requestIntervalMs: 500,
   maxConcurrentDownloads: 1,
-  appApiPreferredEnabled: true,
-  androidDeviceReportEnabled: true,
   ocrProcessFilesEnabled: false,
   useExternalStorage: false,
 };
@@ -132,23 +130,6 @@ function resetDraft() {
 
             <div class="setting-row">
               <div class="setting-info">
-                <strong>优先使用 App API 下载正文</strong>
-                <small
-                  >如可用，优先使用 App API
-                  下载正文，以提高解析速度和准确率</small
-                >
-              </div>
-              <label class="setting-control toggle-control">
-                <input v-model="draft.appApiPreferredEnabled" type="checkbox" />
-                <span class="toggle" aria-hidden="true"></span>
-                <span>{{
-                  draft.appApiPreferredEnabled ? "已启用" : "已关闭"
-                }}</span>
-              </label>
-            </div>
-
-            <div class="setting-row">
-              <div class="setting-info">
                 <strong>保存 OCR 过程文件</strong>
                 <small
                   >保存分行图片、预处理结果和逐段识别文本到章节 OCR
@@ -164,28 +145,6 @@ function resetDraft() {
               </label>
             </div>
           </section>
-          <section class="settings-group dictionary-group">
-            <header class="settings-group-header">
-              <strong>安全</strong>
-            </header>
-            <div class="setting-row">
-              <div class="setting-info">
-                <strong>App 设备信息上报（实验）</strong>
-                <small>尝试上报当前安装信息，可能会减少账号风控风险</small>
-              </div>
-              <label class="setting-control toggle-control">
-                <input
-                  v-model="draft.androidDeviceReportEnabled"
-                  type="checkbox"
-                />
-                <span class="toggle" aria-hidden="true"></span>
-                <span>{{
-                  draft.androidDeviceReportEnabled ? "已启用" : "已关闭"
-                }}</span>
-              </label>
-            </div>
-          </section>
-
           <section class="settings-group dictionary-group">
             <header class="settings-group-header">
               <strong>解码字典</strong>

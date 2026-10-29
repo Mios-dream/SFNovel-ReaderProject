@@ -189,9 +189,13 @@ export function useNovelDesk() {
     const book = library.localBook.value;
     const work = book?.[mode];
     if (!work?.id) return;
-    if (mode === "audio" && !auth.auth.value.webAuthenticated) {
+    if (
+      mode === "audio" &&
+      !auth.auth.value.appAuthenticated &&
+      !auth.auth.value.webAuthenticated
+    ) {
       auth.credentialsOpen.value = true;
-      notify("请先连接网站登录凭证，再在线收听有声章节");
+      notify("请先登录 App 或网站凭证，再读取有声目录");
       return;
     }
     startOnlineReading(

@@ -134,7 +134,10 @@ const onlineError = computed(() =>
     : "",
 );
 const onlineNeedsAuth = computed(
-  () => online.value && !desk.auth.value.webAuthenticated,
+  () =>
+    online.value &&
+    !desk.auth.value.appAuthenticated &&
+    !desk.auth.value.webAuthenticated,
 );
 const initialTrackIndex = computed(() => desk.localAudioTrackIndex.value);
 const onlineDirectoryReady = ref(false);
@@ -150,7 +153,7 @@ watch(
     if (error) {
       showToast(
         onlineNeedsAuth.value
-          ? "请先连接网站登录凭证，再在线收听有声章节"
+          ? "请先登录 App 或网站凭证，再读取有声目录"
           : error,
         "error",
       );
@@ -645,7 +648,7 @@ async function retryOnlineAudio(shouldPlay = true) {
   if (!online.value || playbackLoading.value) return;
   if (onlineNeedsAuth.value) {
     desk.credentialsOpen.value = true;
-    showToast("请先连接网站登录凭证，再在线收听有声章节", "info");
+    showToast("请先登录 App 或网站凭证，再读取有声目录", "info");
     return;
   }
   try {

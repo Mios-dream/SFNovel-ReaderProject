@@ -34,7 +34,7 @@
 **软件支持 Windows 平台和 Android 平台。**
 
 > [!IMPORTANT]
-> 当前主要api以网页凭证优先，使用ocr识别正文。规避了风控风险。
+> App 凭证存在时，搜索、详情、文字目录、文字正文和有声地址优先使用 App 接口。缺少 App 会话时，文字正文和音频地址可回退网页接口。漫画目录与图片、网页书架只使用网页会话。两类凭证完全隔离。
 
 > [!WARNING]
 > 使用app凭证登录第三方客户端可能导致账号出现风控提醒，需要手动在手机端验证。使用本项目则表明理解使用风险，使用造成的后果自行承担。
@@ -71,7 +71,9 @@
 
 ### 👤 账号与请求管理
 
+- **双入口登录** - 支持账号密码连接 App，也支持在官方网页窗口完成登录
 - **官方网页登录** - 在原生官方登录窗口中完成登录和滑块验证
+- **统一账户资料** - App 资料优先，网页资料补充月票与 VIP 信息
 - **书架同步** - 查看、刷新已登录 SF 账号的个人书架，并按分类浏览
 - **会话保护** - 密码不会传入前端或写入应用数据；Windows 会话以当前用户 DPAPI 保护后持久化
 - **请求策略** - 自定义请求间隔和最大并发下载数
@@ -160,19 +162,18 @@ Android 开发还需要 Android Studio、Android SDK、JDK 和对应的 Tauri An
 SF Novel Flow/
 ├── docs/
 │   ├── image/                  # README 头图和界面截图
-│   ├── SFACG-APP-API.md        # App API 验证记录
-│   ├── SFACG-AUDIO-API.md      # 有声接口与安全说明
-│   └── SFACG-AUTH-RISK-AUDIT.md # 登录与账号风控审计记录
+│   └── ANDROID-DEVICE-DEBUGGING.md # Android 真机调试记录
 ├── src/                        # Vue 3 渲染层
 │   ├── components/             # 登录、章节选择、队列、导出和设置组件
 │   ├── composables/            # 前端状态与 Tauri 命令调用
 │   └── pages/                  # 搜索、书架、本地书库、阅读器和播放器
 ├── src-tauri/                  # Tauri 原生应用
 │   ├── src/
-│   │   ├── sfacg.rs            # SFACG 请求与原生会话
-│   │   ├── library.rs          # 本地书库、导出、设置与正文恢复
-│   │   ├── downloads.rs        # 下载任务生命周期
-│   │   └── diagnostics.rs      # 原生诊断命令
+│   │   ├── domain/             # 与框架无关的模型、规则和错误
+│   │   ├── application/        # 用例服务、端口与进程状态
+│   │   ├── adapters/           # SFACG、存储、下载、媒体、OCR 和平台实现
+│   │   ├── commands/           # Tauri IPC 参数接收与用例调用
+│   │   └── lib.rs              # 运行时、状态、插件、协议和命令装配
 │   ├── capabilities/           # Tauri 权限配置
 │   ├── icons/                  # 桌面与移动端图标
 │   └── tauri.conf.json         # Tauri 构建与打包配置

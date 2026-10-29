@@ -176,7 +176,11 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
         } else if (onlineMode.value === "audio") {
           const catalog = await invoke<{ chapters: Chapter[] }>(
             "get_audio_chapters",
-            { novelId: book.novelId },
+            {
+              novelId: book.novelId,
+              albumId: book.mediaId,
+              titleHint: book.novelName,
+            },
           );
           if (generation !== cacheGeneration || requestId !== directoryRequestId)
             return;
@@ -370,6 +374,8 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     const generation = cacheGeneration;
     const request = invoke<OnlineAudioTrack>("load_online_audio_track", {
       novelId: book.novelId,
+      albumId: book.mediaId,
+      titleHint: book.novelName,
       chapterId,
     })
       .then((payload) => {

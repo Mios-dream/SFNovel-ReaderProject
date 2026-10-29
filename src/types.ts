@@ -186,8 +186,6 @@ export type UserProfile = {
 export type RequestPolicy = {
   requestIntervalMs: number;
   maxConcurrentDownloads: number;
-  appApiPreferredEnabled: boolean;
-  androidDeviceReportEnabled: boolean;
   ocrProcessFilesEnabled: boolean;
   useExternalStorage: boolean;
 };

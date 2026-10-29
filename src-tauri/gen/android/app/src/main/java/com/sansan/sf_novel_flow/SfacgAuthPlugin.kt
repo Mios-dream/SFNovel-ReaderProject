@@ -91,12 +91,15 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun readOrCreateDeviceToken(invoke: Invoke) {
+    fun readOrCreateDeviceProfile(invoke: Invoke) {
         val prefs = activity.getSharedPreferences(DEVICE_PREFS, Activity.MODE_PRIVATE)
-        val token = prefs.getString(DEVICE_TOKEN_KEY, null) ?: UUID.randomUUID().toString().uppercase().also {
+        val deviceToken = prefs.getString(DEVICE_TOKEN_KEY, null) ?: UUID.randomUUID().toString().uppercase().also {
             prefs.edit().putString(DEVICE_TOKEN_KEY, it).apply()
         }
-        invoke.resolve(JSObject().put("token", token))
+        val deviceId = prefs.getString(DEVICE_ID_KEY, null) ?: UUID.randomUUID().toString().lowercase().also {
+            prefs.edit().putString(DEVICE_ID_KEY, it).apply()
+        }
+        invoke.resolve(JSObject().put("deviceId", deviceId).put("deviceToken", deviceToken.uppercase()))
     }
 
     @Command
@@ -273,6 +276,7 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         val SFACG_COOKIE_URLS = arrayOf("https://book.sfacg.com/", "https://api.sfacg.com/", "https://m.sfacg.com/login")
         const val SESSION_MAX_AGE = 30 * 24 * 60 * 60
         const val DEVICE_PREFS = "sfacg-device"
+        const val DEVICE_ID_KEY = "device-id"
         const val DEVICE_TOKEN_KEY = "device-token"
         const val APP_SESSION_KEY = "app-session"
         const val KEY_ALIAS = "sfacg-auth-key"

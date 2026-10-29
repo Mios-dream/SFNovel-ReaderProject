@@ -3406,6 +3406,7 @@ dependencies = [
 name = "sf-novel-flow"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "md-5",
  "reqwest 0.12.28",
  "serde",

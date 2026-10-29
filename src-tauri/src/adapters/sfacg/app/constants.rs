@@ -1,0 +1,11 @@
+/// SF App API 的主机地址。
+pub(super) const SF_API_HOST: &str = "https://api.sfacg.com";
+/// App API HTTP 基础认证使用的公开客户端标识。
+pub(super) const SF_API_USER: &str = "androiduser";
+/// App API HTTP 基础认证的协议常量。
+pub(super) const SF_API_PASSWORD: &str = "1a#$51-yt69;*Acv@qxq";
+/// 生成 `SFSecurity` 请求头所需的协议盐值。
+pub(super) const SF_SECURITY_SALT: &str = "FN_Q29XHVmfV3mYX";
+/// 有声分卷章节需要展开的媒体与销售字段。
+pub(super) const AUDIO_CHAPTER_EXPAND: &str =
+    "fileName,audioUrl,needFireMoney,originNeedFireMoney,fileSize,duration";

@@ -4,12 +4,10 @@
 //! 细节分别封装在 [`crate::app_client`] 与 [`crate::web_client`]，离线书库和下载
 //! 任务由相邻业务模块负责。
 
-use crate::endpoint_policy::{app_endpoint_client, web_endpoint_client, EndpointCapability};
-use crate::library::{
-    get_request_policy, library_directory, safe_library_name, StoredBookMetadata,
-};
+use crate::library::{library_directory, safe_library_name, StoredBookMetadata};
 #[cfg(target_os = "android")]
 use crate::ocr::format_ocr_novel_text;
+use crate::source::SfSource;
 use crate::utils::json::read_or_default;
 use serde::{Deserialize, Serialize, Serializer};
 #[cfg(target_os = "android")]
@@ -36,18 +34,79 @@ const OFFICIAL_LOGIN_URL: &str = "https://m.sfacg.com/login";
 const OFFICIAL_LOGIN_WINDOW_LABEL: &str = "sfacg-official-login";
 /// 所有平台访问 SF 网页时统一使用的桌面浏览器标识。
 pub(crate) const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
-/// 进程级设备身份令牌，仅在初始化后可供签名客户端读取。
-pub(crate) static SF_DEVICE_TOKEN: OnceLock<String> = OnceLock::new();
+/// 与设备档案固定在一起的官方 App 版本。
+pub(crate) const SF_APP_VERSION: &str = "5.2.84";
+/// 官方 App 请求画像使用的 Android SDK。
+const SF_ANDROID_SDK: u32 = 34;
+/// 官方 App 请求画像使用的 Android 版本。
+const SF_ANDROID_RELEASE: &str = "14";
+/// 官方 App 请求画像使用的机型。
+const SF_DEVICE_MODEL: &str = "Pixel 7";
+/// 官方 App 请求画像使用的系统构建号。
+const SF_DEVICE_BUILD_ID: &str = "UP1A.231005.007";
+/// 官方 App 请求画像使用的 ABI。
+const SF_DEVICE_ABI: &str = "arm64-v8a";
+/// 官方 App 请求画像使用的 WebView 版本。
+const SF_WEBVIEW_VERSION: &str = "120.0.6099.230";
 
-/// 返回已初始化的设备身份令牌。
+/// 一次安装内保持稳定、供所有 App 请求共用的设备身份。
+///
+/// `device_id` 用于 User-Agent 和设备登记；`device_token` 用于请求签名。
+/// 两者是独立协议字段，不能共用同一个值。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DeviceProfile {
+    pub(crate) device_id: String,
+    pub(crate) device_token: String,
+}
+
+impl DeviceProfile {
+    fn generate() -> Self {
+        Self {
+            device_id: Uuid::new_v4().hyphenated().to_string().to_lowercase(),
+            device_token: Uuid::new_v4().hyphenated().to_string().to_uppercase(),
+        }
+    }
+
+    pub(crate) fn user_agent(&self) -> String {
+        format!(
+            "boluobao/{SF_APP_VERSION}(android;{SF_ANDROID_SDK})/H5/{}/H5",
+            self.device_id
+        )
+    }
+
+    pub(crate) fn origin_ua(&self) -> String {
+        format!(
+            "Dalvik/2.1.0 (Linux; U; Android {SF_ANDROID_RELEASE}; {SF_DEVICE_MODEL} Build/{SF_DEVICE_BUILD_ID})"
+        )
+    }
+
+    pub(crate) fn abi(&self) -> &'static str {
+        SF_DEVICE_ABI
+    }
+
+    pub(crate) fn web_view_ua(&self) -> String {
+        format!(
+            "Mozilla/5.0 (Linux; Android {SF_ANDROID_RELEASE}; {SF_DEVICE_MODEL} Build/{SF_DEVICE_BUILD_ID}; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/{SF_WEBVIEW_VERSION} Mobile Safari/537.36"
+        )
+    }
+}
+
+/// 进程级设备档案，仅在初始化后可供签名客户端读取。
+static SF_DEVICE_PROFILE: OnceLock<DeviceProfile> = OnceLock::new();
+
+/// 返回已初始化的设备档案。
 ///
 /// # 错误
 /// 应用尚未完成设备身份初始化时返回错误，调用方不应自行生成替代值。
-pub(crate) fn device_token() -> Result<&'static str, String> {
-    SF_DEVICE_TOKEN
+pub(crate) fn device_profile() -> Result<&'static DeviceProfile, String> {
+    SF_DEVICE_PROFILE
         .get()
-        .map(String::as_str)
         .ok_or_else(|| "设备身份尚未初始化，请重启应用".to_string())
+}
+
+/// 返回已初始化的设备签名令牌。
+pub(crate) fn device_token() -> Result<&'static str, String> {
+    Ok(&device_profile()?.device_token)
 }
 
 /// 搜索命令返回给渲染进程的一条公开作品记录。
@@ -104,6 +163,8 @@ pub(crate) struct NovelDetail {
     pub(crate) latest_chapter_title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) latest_chapter_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) allow_download: Option<bool>,
     #[serde(rename = "sourcePath", skip_serializing_if = "Option::is_none")]
     pub(crate) source_path: Option<String>,
 }
@@ -228,7 +289,6 @@ pub(crate) struct NativeAudioChapter {
     pub(crate) volume: String,
     pub(crate) is_vip: bool,
     pub(crate) is_unlocked: bool,
-    pub(crate) source: String,
 }
 
 /// 单个 SF 作品的渲染进程安全有声目录。
@@ -367,7 +427,8 @@ struct PersistedAuthSession {
 #[derive(Deserialize, Serialize)]
 struct PersistedDeviceIdentity {
     pub(crate) version: u8,
-    pub(crate) token: String,
+    pub(crate) device_id: String,
+    pub(crate) device_token: String,
 }
 
 /// 返回 Windows 端加密 App 会话文件的私有存储路径。
@@ -627,24 +688,32 @@ pub(crate) fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), S
         .app_data_dir()
         .map_err(|error| format!("无法解析设备身份路径：{error}"))?
         .join("device-identity.v1.bin");
-    let token = if path.is_file() {
+    let profile = if path.is_file() {
         let encrypted = fs::read(&path).map_err(|error| format!("无法读取设备身份：{error}"))?;
         let payload = unprotect_auth_data(&encrypted)?;
         serde_json::from_slice::<PersistedDeviceIdentity>(&payload)
             .ok()
-            .filter(|identity| identity.version == 1 && is_valid_device_token(&identity.token))
-            .map(|identity| identity.token)
+            .filter(|identity| {
+                identity.version == 2
+                    && is_valid_uuid(&identity.device_id)
+                    && is_valid_uuid(&identity.device_token)
+            })
+            .map(|identity| DeviceProfile {
+                device_id: identity.device_id.to_lowercase(),
+                device_token: identity.device_token.to_uppercase(),
+            })
     } else {
         None
     }
-    .unwrap_or_else(|| Uuid::new_v4().hyphenated().to_string().to_uppercase());
+    .unwrap_or_else(DeviceProfile::generate);
     let directory = path
         .parent()
         .ok_or_else(|| "设备身份目录无效".to_string())?;
     fs::create_dir_all(directory).map_err(|error| format!("无法创建设备身份目录：{error}"))?;
     let payload = serde_json::to_vec(&PersistedDeviceIdentity {
-        version: 1,
-        token: token.clone(),
+        version: 2,
+        device_id: profile.device_id.clone(),
+        device_token: profile.device_token.clone(),
     })
     .map_err(|error| format!("无法序列化设备身份：{error}"))?;
     let encrypted = protect_auth_data(&payload)?;
@@ -654,7 +723,7 @@ pub(crate) fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), S
         fs::remove_file(&path).map_err(|error| format!("无法替换设备身份：{error}"))?;
     }
     fs::rename(temporary, path).map_err(|error| format!("无法完成设备身份保存：{error}"))?;
-    let _ = SF_DEVICE_TOKEN.set(token);
+    let _ = SF_DEVICE_PROFILE.set(profile);
     Ok(())
 }
 
@@ -663,13 +732,13 @@ pub(crate) fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), S
 /// 此身份不会落盘，应用重启后会重新生成。
 #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
 pub(crate) fn initialize_device_identity(_app: &tauri::AppHandle) -> Result<(), String> {
-    let _ = SF_DEVICE_TOKEN.set(Uuid::new_v4().hyphenated().to_string().to_uppercase());
+    let _ = SF_DEVICE_PROFILE.set(DeviceProfile::generate());
     Ok(())
 }
 
-/// 判断设备身份令牌是否为合法 UUID。
-fn is_valid_device_token(token: &str) -> bool {
-    Uuid::parse_str(token).is_ok()
+/// 判断设备身份字段是否为合法 UUID。
+fn is_valid_uuid(value: &str) -> bool {
+    Uuid::parse_str(value).is_ok()
 }
 
 /// Android 原生插件返回的 WebView Cookie 容器。
@@ -684,8 +753,10 @@ struct AndroidCookieResponse {
 /// Android 原生插件返回的稳定设备身份容器。
 #[cfg(target_os = "android")]
 #[derive(Deserialize)]
-struct AndroidDeviceTokenResponse {
-    pub(crate) token: Option<String>,
+#[serde(rename_all = "camelCase")]
+struct AndroidDeviceProfileResponse {
+    pub(crate) device_id: Option<String>,
+    pub(crate) device_token: Option<String>,
 }
 
 /// Android ONNX OCR 插件返回的正文容器。
@@ -788,16 +859,24 @@ pub(crate) async fn sync_android_auth_session(app: &tauri::AppHandle) -> Result<
 /// 插件调用失败或返回的令牌不是合法 UUID 时返回错误。
 #[cfg(target_os = "android")]
 pub(crate) async fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), String> {
-    let token = app
+    let profile = app
         .state::<AndroidSfacgAuth<tauri::Wry>>()
         .mobile_plugin_handle
-        .run_mobile_plugin_async::<AndroidDeviceTokenResponse>("readOrCreateDeviceToken", ())
+        .run_mobile_plugin_async::<AndroidDeviceProfileResponse>("readOrCreateDeviceProfile", ())
         .await
-        .map_err(|error| format!("无法读取设备身份：{error}"))?
-        .token
-        .filter(|token| is_valid_device_token(token))
-        .ok_or_else(|| "Android 设备身份无效".to_string())?;
-    let _ = SF_DEVICE_TOKEN.set(token.to_uppercase());
+        .map_err(|error| format!("无法读取设备身份：{error}"))?;
+    let device_id = profile
+        .device_id
+        .filter(|value| is_valid_uuid(value))
+        .ok_or_else(|| "Android 设备编号无效".to_string())?;
+    let device_token = profile
+        .device_token
+        .filter(|value| is_valid_uuid(value))
+        .ok_or_else(|| "Android 设备令牌无效".to_string())?;
+    let _ = SF_DEVICE_PROFILE.set(DeviceProfile {
+        device_id: device_id.to_lowercase(),
+        device_token: device_token.to_uppercase(),
+    });
     Ok(())
 }
 
@@ -896,8 +975,7 @@ pub(crate) async fn search_novels(
     if query.chars().count() > 100 {
         return Err("搜索关键词不能超过 100 个字符".to_string());
     }
-    let client = app_endpoint_client(&app, EndpointCapability::Search)?;
-    client.search_novels(&query).await
+    SfSource::connect(&app).await?.search(&query).await
 }
 
 /// 校验渲染进程提供的公开 SF 小说编号。
@@ -927,8 +1005,7 @@ pub(crate) async fn get_novel_details(
     novel_id: i64,
 ) -> Result<NovelDetail, String> {
     validate_novel_id(novel_id)?;
-    let client = app_endpoint_client(&app, EndpointCapability::NovelDetail)?;
-    client.get_novel_details(novel_id).await
+    SfSource::connect(&app).await?.novel_detail(novel_id).await
 }
 
 /// 读取有声专辑的公开元数据，同时保留有声目录所需的来源小说编号。
@@ -948,8 +1025,10 @@ pub(crate) async fn get_audio_details(
 ) -> Result<NovelDetail, String> {
     validate_novel_id(album_id)?;
     validate_novel_id(novel_id)?;
-    let client = app_endpoint_client(&app, EndpointCapability::AudioDetail)?;
-    client.get_audio_details(album_id, novel_id).await
+    SfSource::connect(&app)
+        .await?
+        .audio_detail(album_id, novel_id)
+        .await
 }
 
 /// 通过 App API 列出文字章节，并合并本地完成状态。
@@ -967,10 +1046,8 @@ pub(crate) async fn get_chapter_volumes(
     novel_id: i64,
 ) -> Result<Vec<ChapterVolume>, String> {
     validate_novel_id(novel_id)?;
-    #[cfg(target_os = "android")]
-    sync_android_auth_session(&app).await?;
-    let client = app_endpoint_client(&app, EndpointCapability::TextDirectory)?;
-    let mut result = client.get_chapter_catalog(novel_id).await?;
+    let source = SfSource::connect(&app).await?;
+    let mut result = source.text_volumes(novel_id).await?;
     let book_directory = library_directory(&app)?;
     let mut downloaded_by_title = std::collections::HashSet::new();
     if result.is_empty() {
@@ -997,26 +1074,40 @@ pub(crate) async fn get_chapter_volumes(
     Ok(result)
 }
 
-/// 列出已认证有声章节，并标记已存在于应用自有书库的条目。
+/// 列出有声章节，并标记已存在于应用自有书库的条目。
 ///
 /// # 参数
 /// * `app` - 用于访问原生会话和书库的应用句柄。
-/// * `novel_id` - 正数 SF 作品编号。
+/// * `novel_id` - 正数 SF 来源小说编号。
+/// * `album_id` - 可选的有声专辑编号；缺省时通过公开搜索反查。
+/// * `title_hint` - 可选的作品标题，用于减少反查请求。
 ///
 /// # 错误
-/// 没有原生会话或 SF 拒绝有声请求时返回错误。
+/// 缺少登录凭证或上游拒绝有声请求时返回错误。目录优先使用 App，被拦截时回退
+/// 手机版目录页；手机版目录不含销售标记。
 #[tauri::command]
 pub(crate) async fn get_audio_chapters(
     app: tauri::AppHandle,
     novel_id: i64,
+    album_id: Option<i64>,
+    title_hint: Option<String>,
 ) -> Result<AudioCatalog, String> {
-    #[cfg(target_os = "android")]
-    sync_android_auth_session(&app).await?;
-    let client = web_endpoint_client(&app, EndpointCapability::Audio)?;
-    let (title, chapters) = client
-        .get_audio_catalog(novel_id)
-        .await
-        .map_err(|error| EndpointCapability::Audio.unavailable_message(&error))?;
+    validate_novel_id(novel_id)?;
+    let source = SfSource::connect(&app).await?;
+    let album_id = match album_id {
+        Some(album_id) => {
+            validate_novel_id(album_id)?;
+            album_id
+        }
+        None => {
+            source
+                .audio_album_id(novel_id, title_hint.as_deref())
+                .await?
+        }
+    };
+    let (title, chapters) = source
+        .audio_catalog(album_id, title_hint.as_deref())
+        .await?;
     let book_directory = library_directory(&app)?.join(safe_library_name(&title));
     let metadata = read_or_default::<StoredBookMetadata>(
         &book_directory.join(".novel-flow.json"),
@@ -1054,26 +1145,11 @@ pub(crate) async fn get_comic_chapters(
     title_hint: Option<String>,
 ) -> Result<ComicCatalog, String> {
     validate_novel_id(comic_id)?;
-    #[cfg(target_os = "android")]
-    sync_android_auth_session(&app).await?;
-    let web_client = web_endpoint_client(&app, EndpointCapability::ComicCatalog)?;
-    let (title, folder) = if let Some(folder) = source_path.filter(|value| {
-        !value.is_empty()
-            && value.len() <= 100
-            && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
-    }) {
-        (
-            title_hint.unwrap_or_else(|| format!("漫画 {comic_id}")),
-            folder,
-        )
-    } else {
-        let app_client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
-        app_client.comic_identity(comic_id).await?
-    };
-    let chapters = web_client
-        .get_comic_catalog(&folder)
-        .await
-        .map_err(|error| EndpointCapability::ComicCatalog.unavailable_message(&error))?;
+    let source = SfSource::connect(&app).await?;
+    let (title, folder) = source
+        .comic_source(comic_id, source_path.as_deref(), title_hint.as_deref())
+        .await?;
+    let chapters = source.comic_catalog(&folder).await?;
     let book_directory = library_directory(&app)?.join(safe_library_name(&title));
     let metadata = read_or_default::<StoredBookMetadata>(
         &book_directory.join(".novel-flow.json"),
@@ -1113,8 +1189,7 @@ pub(crate) async fn get_comic_details(
     comic_id: i64,
 ) -> Result<NovelDetail, String> {
     validate_novel_id(comic_id)?;
-    let client = app_endpoint_client(&app, EndpointCapability::ComicIdentity)?;
-    client.get_comic_details(comic_id).await
+    SfSource::connect(&app).await?.comic_detail(comic_id).await
 }
 
 /// 通过原生请求层同步已登录用户的 SF 书架。
@@ -1134,10 +1209,7 @@ pub(crate) async fn get_bookshelf(
     force_refresh: Option<bool>,
 ) -> Result<BookshelfCollection, String> {
     let _ = force_refresh;
-    #[cfg(target_os = "android")]
-    sync_android_auth_session(&app).await?;
-    let client = web_endpoint_client(&app, EndpointCapability::WebBookshelf)?;
-    let public_shelf = client.get_public_bookshelf().await?;
+    let public_shelf = SfSource::connect(&app).await?.bookshelf().await?;
     let categories = public_shelf.categories;
     let mut items = Vec::new();
     for (category, record) in public_shelf.items {
@@ -1201,8 +1273,10 @@ pub(crate) async fn login_with_password(
     if username.chars().count() > 128 || password.chars().count() > 512 {
         return Err("账号或密码长度无效".to_string());
     }
-    let client = app_endpoint_client(&app, EndpointCapability::AppPasswordLogin)?;
-    let cookie = client.login_with_password(username, &password).await?;
+    let cookie = SfSource::connect(&app)
+        .await?
+        .login_app(username, &password)
+        .await?;
     #[cfg(target_os = "android")]
     persist_android_auth_session(&app, &cookie).await?;
     #[cfg(target_os = "windows")]
@@ -1221,24 +1295,12 @@ pub(crate) async fn login_with_password(
         });
     }
 
-    // 设备上报是登录后的可选诊断；端点不存在、受限或与 App API 授权无关时，不能把
-    // 已成功的凭据登录变为失败。
-    let report_enabled = get_request_policy(app.clone())
-        .map(|policy| policy.android_device_report_enabled)
-        .unwrap_or(true);
-    if report_enabled {
-        if let Ok(authenticated_client) =
-            app_endpoint_client(&app, EndpointCapability::AndroidDeviceReport)
-        {
-            if let Err(error) = authenticated_client
-                .report_android_device_info_for_current_account()
-                .await
-            {
-                eprintln!("[sfacg] optional device report skipped: {error}");
-            }
+    // 官方 App 在登录后会登记当前设备；部分接口未登记时返回 401/507。登记失败不能
+    // 撤销已经建立的登录态，后续 App 请求还会在首次 507 时再尝试一次。
+    if let Ok(source) = SfSource::connect(&app).await {
+        if let Err(error) = source.register_device().await {
+            eprintln!("[sfacg] device registration after login failed: {error}");
         }
-    } else {
-        eprintln!("[sfacg] optional device report disabled by request policy");
     }
     current_auth_status(&app)
 }
@@ -1537,51 +1599,17 @@ pub(crate) async fn logout_web_session(app: tauri::AppHandle) -> Result<AuthStat
 pub(crate) async fn verify_authenticated_request(
     app: tauri::AppHandle,
 ) -> Result<AuthStatus, String> {
-    let client = app_endpoint_client(&app, EndpointCapability::AccountProfile)?;
-    client.verify_authenticated_session().await?;
+    SfSource::connect(&app).await?.verify_account().await?;
     current_auth_status(&app)
 }
 
-/// 通过原生请求层读取已认证 SF 账户资料。
-///
-/// # 参数
-/// * `app` - 用于读取仅原生层可见会话的 Tauri 应用句柄。
+/// 读取已认证 SF 账户资料。App 资料优先，网页资料补齐月票和 VIP。
 ///
 /// # 错误
-/// 会话不可用或上游资料数据无效时返回错误。
+/// 没有可用会话或上游资料数据无效时返回错误。
 #[tauri::command]
-pub(crate) async fn get_user_profile(app: tauri::AppHandle) -> Result<UserProfile, String> {
-    #[cfg(target_os = "android")]
-    sync_android_auth_session(&app).await?;
-    let client = app_endpoint_client(&app, EndpointCapability::AccountProfile)?;
-    let profile = client.get_user_profile().await?;
-    let auth_state = app.state::<AuthSessionState>();
-    let mut session = auth_state
-        .session
-        .lock()
-        .map_err(|_| "登录会话状态不可用".to_string())?;
-    if let Some(session) = session.as_mut() {
-        session.user_name = profile.nick_name.clone();
-    }
-    Ok(profile)
-}
-
-/// 通过官方网页登录信息接口验证 Web 会话并读取基础账户资料。
-///
-/// 此命令只使用 `session_PC`，从网页账户中心读取火券、代券和月票，并通过网页 VIP
-/// 接口读取新 VIP 资料。调用方不得将 Web Cookie 用于 App 接口。
-///
-/// # 参数
-/// * `app` - 用于读取仅原生层可见 Web 会话的应用句柄。
-///
-/// # 错误
-/// 未连接 Web 凭证、网页登录会话失效或上游资料格式无效时返回错误。
-#[tauri::command]
-pub(crate) async fn get_web_user_profile(app: tauri::AppHandle) -> Result<UserProfile, String> {
-    #[cfg(target_os = "android")]
-    sync_android_auth_session(&app).await?;
-    let client = web_endpoint_client(&app, EndpointCapability::WebAccountProfile)?;
-    let profile = client.get_user_profile().await?;
+pub(crate) async fn get_account_profile(app: tauri::AppHandle) -> Result<UserProfile, String> {
+    let profile = SfSource::connect(&app).await?.account_profile().await?;
     let auth_state = app.state::<AuthSessionState>();
     let mut session = auth_state
         .session

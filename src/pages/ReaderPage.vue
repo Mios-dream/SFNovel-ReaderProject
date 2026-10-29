@@ -98,7 +98,7 @@ const onlineLoading = computed(
     online.value && (desk.chapterLoading.value || desk.directoryLoading.value),
 );
 const onlineNeedsAuth = computed(
-  () => online.value && !desk.auth.value.webAuthenticated,
+  () => online.value && !desk.auth.value.authenticated,
 );
 const readerStatusTitle = computed(() => {
   if (chapterLoading.value || onlineLoading.value)
@@ -418,7 +418,7 @@ onBeforeUnmount(() => {
         type="button"
         @click="desk.credentialsOpen.value = true"
       >
-        连接网站登录
+        连接登录
       </button>
       <button type="button" @click="retryOnlineLoad">重试</button>
     </div>
@@ -545,7 +545,7 @@ onBeforeUnmount(() => {
         type="button"
         @click="desk.credentialsOpen.value = true"
       >
-        连接网站登录
+        连接登录
       </button>
       <button
         v-if="online && !onlineLoading"

@@ -8,8 +8,6 @@ export function useRequestPolicy(notify: Notify) {
   const requestPolicy = ref<RequestPolicy>({
     requestIntervalMs: 500,
     maxConcurrentDownloads: 1,
-    appApiPreferredEnabled: true,
-    androidDeviceReportEnabled: true,
     ocrProcessFilesEnabled: false,
     useExternalStorage: false,
   });

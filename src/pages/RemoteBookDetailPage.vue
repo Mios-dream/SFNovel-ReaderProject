@@ -110,9 +110,13 @@ function openDownload() {
 function startOnline(chapterId?: number) {
   const work = novel.value;
   if (!work) return;
-  if (mode.value === "audio" && !desk.auth.value.webAuthenticated) {
+  if (
+    mode.value === "audio" &&
+    !desk.auth.value.appAuthenticated &&
+    !desk.auth.value.webAuthenticated
+  ) {
     desk.credentialsOpen.value = true;
-    showToast("请先连接网站登录凭证，再在线收听有声章节", "info");
+    showToast("请先登录 App 或网站凭证，再读取有声目录", "info");
     return;
   }
   desk.startOnlineReading(work, mode.value, chapterId);
@@ -537,10 +541,14 @@ function textChapterBadge(
           <span>{{ directoryError }}</span>
           <div class="directory-error-actions">
             <button
-              v-if="mode === 'audio' && !desk.auth.value.webAuthenticated"
+              v-if="
+                mode === 'audio' &&
+                !desk.auth.value.appAuthenticated &&
+                !desk.auth.value.webAuthenticated
+              "
               @click="desk.credentialsOpen.value = true"
             >
-              连接网站登录
+              去登录
             </button>
             <button @click="ensureDirectory(true)">重试</button>
           </div>
@@ -640,10 +648,14 @@ function textChapterBadge(
           <span>{{ directoryError }}</span>
           <div class="directory-error-actions">
             <button
-              v-if="mode === 'audio' && !desk.auth.value.webAuthenticated"
+              v-if="
+                mode === 'audio' &&
+                !desk.auth.value.appAuthenticated &&
+                !desk.auth.value.webAuthenticated
+              "
               @click="desk.credentialsOpen.value = true"
             >
-              连接网站登录
+              去登录
             </button>
             <button @click="ensureDirectory(true)">重试</button>
           </div>

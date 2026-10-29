@@ -46,20 +46,28 @@ export function useChapterPicker({
           "get_chapter_volumes",
           { novelId: novel.novelId },
         );
-        if (auth.value.webAuthenticated) {
+        if (auth.value.appAuthenticated || auth.value.webAuthenticated) {
           const audio = await invoke<{ chapters: Chapter[] }>(
             "get_audio_chapters",
-            { novelId: novel.novelId },
+            {
+              novelId: novel.novelId,
+              albumId: novel.mediaId,
+              titleHint: novel.novelName,
+            },
           ).catch(() => undefined);
           audioChapters.value = audio?.chapters || [];
         }
       } else if (mode === "audio") {
-        if (!auth.value.webAuthenticated) {
-          throw new Error("请先使用官方网页登录 Web 服务再下载有声内容");
+        if (!auth.value.appAuthenticated && !auth.value.webAuthenticated) {
+          throw new Error("请先登录 App 或网站凭证，再读取有声目录");
         }
         const audio = await invoke<{ chapters: Chapter[] }>(
           "get_audio_chapters",
-          { novelId: novel.novelId },
+          {
+            novelId: novel.novelId,
+            albumId: novel.mediaId,
+            titleHint: novel.novelName,
+          },
         );
         audioChapters.value = audio.chapters;
       } else {
