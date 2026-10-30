@@ -1,6 +1,8 @@
 //! Windows 会话加密、设备身份与官方登录窗口。
 
-use crate::adapters::sfacg::device::{install_device_profile, is_valid_uuid, DeviceProfile};
+use crate::adapters::sfacg::device::{
+    install_device_profile, install_device_state_path, is_valid_uuid, DeviceProfile,
+};
 use crate::domain::auth::AuthSession;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -295,6 +297,7 @@ pub(super) fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), S
             .filter(|identity| identity.version == 2 && is_valid_uuid(&identity.device_id))
             .map(|identity| DeviceProfile {
                 device_id: identity.device_id.to_lowercase(),
+                ..DeviceProfile::generate()
             })
     } else {
         None
@@ -306,6 +309,7 @@ pub(super) fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), S
     })
     .map_err(|error| format!("无法序列化设备身份：{error}"))?;
     write_encrypted(&path, &payload)?;
+    install_device_state_path(path.with_file_name("device-state.json"));
     install_device_profile(profile);
     Ok(())
 }

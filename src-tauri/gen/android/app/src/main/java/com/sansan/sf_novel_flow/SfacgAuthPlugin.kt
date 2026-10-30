@@ -12,6 +12,7 @@ import android.provider.DocumentsContract
 import android.provider.Settings
 import android.util.Base64
 import android.webkit.CookieManager
+import android.webkit.WebSettings
 import androidx.core.content.ContextCompat
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
@@ -24,6 +25,7 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.File
 import java.security.KeyStore
+import java.util.Locale
 import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -96,7 +98,15 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         val deviceId = prefs.getString(DEVICE_ID_KEY, null) ?: UUID.randomUUID().toString().lowercase().also {
             prefs.edit().putString(DEVICE_ID_KEY, it).apply()
         }
-        invoke.resolve(JSObject().put("deviceId", deviceId))
+        invoke.resolve(
+            JSObject()
+                .put("deviceId", deviceId)
+                .put("sdk", Build.VERSION.SDK_INT)
+                .put("abi", Build.SUPPORTED_ABIS.firstOrNull() ?: "")
+                .put("manufacturer", Build.MANUFACTURER.lowercase(Locale.ROOT))
+                .put("originUa", System.getProperty("http.agent") ?: "")
+                .put("webViewUA", WebSettings.getDefaultUserAgent(activity))
+        )
     }
 
     @Command

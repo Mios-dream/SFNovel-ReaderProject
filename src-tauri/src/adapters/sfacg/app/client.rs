@@ -1,12 +1,13 @@
-use super::super::device::DeviceProfile;
+use super::super::device::{replace_device_profile, DeviceProfile};
 use super::constants::{
-    COMIC_ACCEPT, COMIC_ANONYMOUS_DEVICE_ID, SF_API_HOST, SF_API_PASSWORD, SF_API_USER,
+    APP_ACCEPT, COMIC_ANONYMOUS_DEVICE_ID, SF_API_HOST, SF_API_PASSWORD, SF_API_USER,
 };
 use super::error::AppApiError;
-use super::signing::{comic_security_header, security_header};
+use super::signing::security_header;
 use crate::adapters::sfacg::cookie::{filter_cookie_header, has_cookie_name};
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::RwLock;
 use uuid::Uuid;
 
 /// 仅发送已签名的 SF App API 请求，并持有经过过滤的 App 会话快照。
@@ -17,15 +18,15 @@ pub(crate) struct AppClient {
     pub(super) app_cookie: Option<String>,
     /// 当前客户端实例是否已经尝试过自动设备登记。
     pub(super) device_registration_attempted: AtomicBool,
-    /// 本次安装稳定复用的设备身份。
-    pub(super) device: DeviceProfile,
+    /// 本次安装稳定复用的设备身份；登记后会更新渠道和 OAID。
+    pub(super) device: RwLock<DeviceProfile>,
 }
 
 impl AppClient {
     /// 使用设备身份和 App 会话快照创建 API 客户端。
     ///
     /// # 错误
-    /// 当设备身份未初始化或 HTTP 客户端无法创建时返回错误。
+    /// HTTP 客户端无法创建时返回错误。
     pub(crate) fn new(device: DeviceProfile, app_cookie: Option<String>) -> Result<Self, String> {
         let user_agent = device.user_agent();
         let app_cookie = app_cookie
@@ -39,7 +40,7 @@ impl AppClient {
             client,
             app_cookie,
             device_registration_attempted: AtomicBool::new(false),
-            device,
+            device: RwLock::new(device),
         })
     }
 
@@ -48,6 +49,31 @@ impl AppClient {
         self.app_cookie
             .as_deref()
             .is_some_and(|cookie| has_cookie_name(cookie, "session_APP"))
+    }
+
+    /// 读取当前设备身份快照。
+    pub(super) fn device_snapshot(&self) -> Result<DeviceProfile, String> {
+        self.device
+            .read()
+            .map(|guard| guard.clone())
+            .map_err(|_| "设备身份状态不可用".to_string())
+    }
+
+    /// 更新当前设备身份，并同步到进程内其他客户端。
+    pub(super) fn update_device(
+        &self,
+        update: impl FnOnce(&mut DeviceProfile),
+    ) -> Result<(), String> {
+        let snapshot = {
+            let mut guard = self
+                .device
+                .write()
+                .map_err(|_| "设备身份状态不可用".to_string())?;
+            update(&mut guard);
+            guard.clone()
+        };
+        replace_device_profile(snapshot);
+        Ok(())
     }
 
     /// 创建需要 App 会话的资源请求。
@@ -72,30 +98,38 @@ impl AppClient {
 
     /// 按固定请求指纹构建一个已签名的 App API 请求。
     ///
-    /// # 参数
-    /// * `method` - 请求使用的 HTTP 方法。
-    /// * `path` - 相对 SF App API 路径。
-    /// * `include_session` - 是否附带本地 App 会话 Cookie。
-    ///
-    /// 每次请求都会生成新的 UUID nonce。
-    ///
-    /// # 错误
-    /// 当无法生成安全签名头时返回错误。
+    /// 每次请求都会生成新的 UUID nonce，并重新读取当前设备渠道。
     pub(super) fn signed_request(
         &self,
         method: reqwest::Method,
         path: &str,
         include_session: bool,
     ) -> Result<reqwest::RequestBuilder, String> {
+        let device = self.device_snapshot()?;
+        self.signed_request_with_device(method, path, include_session, &device)
+    }
+
+    /// 使用指定设备身份构建签名请求。
+    fn signed_request_with_device(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        include_session: bool,
+        device: &DeviceProfile,
+    ) -> Result<reqwest::RequestBuilder, String> {
         let nonce = Uuid::new_v4().to_string().to_uppercase();
+        let is_post = method == reqwest::Method::POST;
         let mut request = self
             .client
             .request(method, format!("{SF_API_HOST}{path}"))
             .basic_auth(SF_API_USER, Some(SF_API_PASSWORD))
-            .header("Accept", "application/json")
-            .header("Accept-Language", "zh-Hans-CN;q=1")
-            .header("Content-Type", "application/json; charset=UTF-8")
-            .header("SFSecurity", security_header(&self.device, &nonce)?);
+            .header("Accept-Charset", "UTF-8")
+            .header("Accept", APP_ACCEPT)
+            .header(reqwest::header::USER_AGENT, device.user_agent())
+            .header("SFSecurity", security_header(device, &nonce)?);
+        if is_post {
+            request = request.header("Content-Type", "application/json; charset=UTF-8");
+        }
         if include_session {
             if let Some(cookie) = self.app_cookie.as_deref() {
                 request = request.header(reqwest::header::COOKIE, cookie);
@@ -104,29 +138,17 @@ impl AppClient {
         Ok(request)
     }
 
-    /// 构建漫画兼容接口请求。签名和响应类型与普通 App 请求不同。
+    /// 构建漫画兼容接口请求。
+    ///
+    /// 未登录时没有本机设备登记，使用已验证可匿名的设备身份。
     fn comic_signed_request(&self, path: &str) -> Result<reqwest::RequestBuilder, String> {
-        let nonce = Uuid::new_v4().to_string().to_uppercase();
-        // 未登录时没有本机设备登记，使用文档中已验证可匿名的设备身份。
-        let device = if self.has_session() {
-            self.device.clone()
-        } else {
-            DeviceProfile {
-                device_id: COMIC_ANONYMOUS_DEVICE_ID.to_string(),
-            }
-        };
-        let mut request = self
-            .client
-            .get(format!("{SF_API_HOST}{path}"))
-            .basic_auth(SF_API_USER, Some(SF_API_PASSWORD))
-            .header(reqwest::header::USER_AGENT, device.user_agent())
-            .header("Accept", COMIC_ACCEPT)
-            .header("Accept-Language", "zh-Hans-CN;q=1")
-            .header("SFSecurity", comic_security_header(&device, &nonce)?);
-        if let Some(cookie) = self.app_cookie.as_deref() {
-            request = request.header(reqwest::header::COOKIE, cookie);
+        let mut device = self.device_snapshot()?;
+        if !self.has_session() {
+            device.device_id = COMIC_ANONYMOUS_DEVICE_ID.to_string();
+            device.manufacturer = "tencent".to_string();
+            device.init_channel = "TENCENT".to_string();
         }
-        Ok(request)
+        self.signed_request_with_device(reqwest::Method::GET, path, true, &device)
     }
 
     /// 请求漫画兼容接口。`417/782` 可能由 nonce 触发，换新 nonce 最多重试五次。
@@ -249,13 +271,8 @@ impl AppClient {
 
     /// 匿名请求 SF App API 资源，并拆开其 `data` 数据包。
     ///
-    /// 该方法仅用于经实测确认可匿名访问的作品发现与元数据端点。协议 Basic
-    /// Auth、请求签名和安装设备标识仍是 App API 的必要请求字段；“匿名”仅指
-    /// 不附带 `.SFCommunity` 或 `session_APP`。章节正文、书架和账户端点不得
-    /// 使用本方法。
-    ///
-    /// # 错误
-    /// 请求失败、上游拒绝请求或响应不是有效 JSON 时返回错误。
+    /// “匿名”仅指不附带 `.SFCommunity` 或 `session_APP`；协议 Basic Auth、
+    /// 请求签名和安装设备标识仍是 App API 的必要请求字段。
     pub(crate) async fn get_public_data(
         &self,
         path: &str,
@@ -276,8 +293,23 @@ impl AppClient {
     ///
     /// 此方法仅供请求体由 App 协议定义的原生层集成调用，任意渲染进程载荷不能到达此处。
     pub(crate) async fn post_data(&self, path: &str, body: &Value) -> Result<Value, String> {
+        self.post_data_inner(path, body, true).await
+    }
+
+    /// 发送不带 App 会话的 JSON POST 请求，用于冷启动设备登记。
+    pub(crate) async fn post_public_data(&self, path: &str, body: &Value) -> Result<Value, String> {
+        self.post_data_inner(path, body, false).await
+    }
+
+    /// 发送 JSON POST 请求，并按需附带 App 会话。
+    async fn post_data_inner(
+        &self,
+        path: &str,
+        body: &Value,
+        include_session: bool,
+    ) -> Result<Value, String> {
         let response = self
-            .signed_request(reqwest::Method::POST, path, true)?
+            .signed_request(reqwest::Method::POST, path, include_session)?
             .json(body)
             .send()
             .await

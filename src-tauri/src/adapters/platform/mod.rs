@@ -4,6 +4,8 @@ use crate::application::ports::AuthGateway;
 use crate::domain::auth::AuthSession;
 use crate::domain::error::{AppError, AppResult};
 use async_trait::async_trait;
+#[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
+use tauri::Manager;
 
 #[cfg(target_os = "android")]
 pub(crate) mod android;
@@ -30,9 +32,14 @@ pub(crate) async fn initialize_device_identity(app: &tauri::AppHandle) -> AppRes
         .map_err(AppError::storage)
 }
 
-/// 其他桌面平台生成不落盘的临时设备身份。
+/// 其他桌面平台生成临时设备身份，并保存设备登记结果。
 #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
-pub(crate) fn initialize_device_identity(_app: &tauri::AppHandle) -> AppResult<()> {
+pub(crate) fn initialize_device_identity(app: &tauri::AppHandle) -> AppResult<()> {
+    if let Ok(directory) = app.path().app_data_dir() {
+        crate::adapters::sfacg::device::install_device_state_path(
+            directory.join("device-state.json"),
+        );
+    }
     crate::adapters::sfacg::device::install_device_profile(
         crate::adapters::sfacg::device::DeviceProfile::generate(),
     );

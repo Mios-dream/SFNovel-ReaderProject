@@ -35,7 +35,7 @@ impl SfSource {
         let app_cookie = session.as_ref().and_then(|value| value.app_cookie.clone());
         let web_cookie = session.as_ref().and_then(|value| value.web_cookie.clone());
         Ok(Self {
-            app_client: AppClient::new(device_profile()?.clone(), app_cookie)?,
+            app_client: AppClient::new(device_profile()?, app_cookie)?,
             web_client: WebClient::new(web_cookie)?,
         })
     }

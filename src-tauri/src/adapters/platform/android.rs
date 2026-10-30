@@ -1,6 +1,8 @@
 //! Android 认证与 OCR 原生插件。
 
-use crate::adapters::sfacg::device::{install_device_profile, is_valid_uuid, DeviceProfile};
+use crate::adapters::sfacg::device::{
+    install_device_profile, install_device_state_path, is_valid_uuid, DeviceProfile,
+};
 use crate::domain::auth::AuthSession;
 use serde::Deserialize;
 use serde_json::Value;
@@ -16,6 +18,12 @@ struct CookieResponse {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeviceProfileResponse {
     device_id: Option<String>,
+    sdk: Option<u32>,
+    abi: Option<String>,
+    manufacturer: Option<String>,
+    origin_ua: Option<String>,
+    #[serde(rename = "webViewUA")]
+    web_view_ua: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -97,9 +105,35 @@ pub(super) async fn initialize_device_identity(app: &tauri::AppHandle) -> Result
         .device_id
         .filter(|value| is_valid_uuid(value))
         .ok_or_else(|| "Android 设备编号无效".to_string())?;
-    install_device_profile(DeviceProfile {
-        device_id: device_id.to_lowercase(),
-    });
+    let mut device = DeviceProfile::generate();
+    device.device_id = device_id.to_lowercase();
+    if let Some(sdk) = profile.sdk.filter(|value| *value > 0) {
+        device.sdk = sdk;
+    }
+    device.abi = profile
+        .abi
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(device.abi);
+    device.manufacturer = profile
+        .manufacturer
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.to_lowercase())
+        .unwrap_or(device.manufacturer);
+    device.origin_ua = profile
+        .origin_ua
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(device.origin_ua);
+    device.web_view_ua = profile
+        .web_view_ua
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(device.web_view_ua);
+    let state_path = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("无法解析设备登记状态路径：{error}"))?
+        .join("device-state.json");
+    install_device_state_path(state_path);
+    install_device_profile(device);
     Ok(())
 }
 
