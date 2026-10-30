@@ -30,8 +30,6 @@ struct PersistedDeviceIdentity {
     version: u8,
     /// 设备 UUID。
     device_id: String,
-    /// 设备签名令牌。
-    device_token: String,
 }
 
 /// 返回 App 会话加密文件路径。
@@ -294,14 +292,9 @@ pub(super) fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), S
         let payload = unprotect_auth_data(&encrypted)?;
         serde_json::from_slice::<PersistedDeviceIdentity>(&payload)
             .ok()
-            .filter(|identity| {
-                identity.version == 2
-                    && is_valid_uuid(&identity.device_id)
-                    && is_valid_uuid(&identity.device_token)
-            })
+            .filter(|identity| identity.version == 2 && is_valid_uuid(&identity.device_id))
             .map(|identity| DeviceProfile {
                 device_id: identity.device_id.to_lowercase(),
-                device_token: identity.device_token.to_uppercase(),
             })
     } else {
         None
@@ -310,7 +303,6 @@ pub(super) fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), S
     let payload = serde_json::to_vec(&PersistedDeviceIdentity {
         version: 2,
         device_id: profile.device_id.clone(),
-        device_token: profile.device_token.clone(),
     })
     .map_err(|error| format!("无法序列化设备身份：{error}"))?;
     write_encrypted(&path, &payload)?;

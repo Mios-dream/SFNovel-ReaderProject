@@ -6,10 +6,19 @@ use serde_json::Value;
 use std::sync::atomic::Ordering;
 
 impl super::AppClient {
+    /// 使用刚取得的 App 会话登记当前安装。
+    ///
+    /// 登录命令创建 `SfSource` 时，进程内会话仍不包含本次登录的 Cookie。
+    /// 因此显式构建一个仅使用该 Cookie 的客户端，避免拿登录前快照或旧会话上报。
+    pub(crate) async fn register_device_for_session(&self, app_cookie: &str) -> Result<(), String> {
+        let client = Self::new(self.device.clone(), Some(app_cookie.to_string()))?;
+        client.register_device().await
+    }
+
     /// 将当前安装登记到已登录账号。
     ///
     /// 官方 App 在登录后执行同样的登记。部分内容接口在设备未登记时返回
-    /// `401/507`，因此这里必须使用与请求签名相同的 `deviceId/deviceToken`。
+    /// `401/507`，因此这里必须使用与请求签名相同的 `deviceId`。
     pub(crate) async fn register_device(&self) -> Result<(), String> {
         self.device_registration_attempted
             .store(true, Ordering::Release);
@@ -25,21 +34,31 @@ impl super::AppClient {
             return Err("SF 账号编号无效".to_string());
         }
         let profile = &self.device;
-        self.post_data(
-            "/user/androiddeviceinfos",
-            &serde_json::json!({
-                "accountId": account_id,
-                "package": "com.sfacg",
-                "abi": profile.abi(),
-                "deviceId": profile.device_id,
-                "version": SF_APP_VERSION,
-                "deviceToken": profile.device_token,
-                "originUa": profile.origin_ua(),
-                "webViewUA": profile.web_view_ua(),
-            }),
-        )
-        .await
-        .map(|_| ())
+        let query = [
+            ("deviceId", profile.device_id.clone()),
+            ("package", "com.sfacg".to_string()),
+        ];
+        let oa_id = self
+            .send_get("/user/androiddeviceinfos", &query)
+            .await
+            .ok()
+            .and_then(|data| data.get("oaID").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_default();
+        let mut body = serde_json::json!({
+            "accountId": account_id,
+            "package": "com.sfacg",
+            "abi": profile.abi(),
+            "deviceId": profile.device_id,
+            "version": SF_APP_VERSION,
+            "originUa": profile.origin_ua(),
+            "webViewUA": profile.web_view_ua(),
+        });
+        if !oa_id.is_empty() {
+            body["oaID"] = Value::String(oa_id);
+        }
+        self.post_data("/user/androiddeviceinfos", &body)
+            .await
+            .map(|_| ())
     }
 
     /// 通过 App 端点登录，并仅返回App Cookie。

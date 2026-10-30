@@ -17,15 +17,23 @@ type UseOnlineReadingOptions = {
 
 type ChapterIdentity = { id: number };
 
+type DirectorySnapshot = {
+  textVolumes: ChapterVolume[];
+  audioChapters: Chapter[];
+  comicChapters: Chapter[];
+};
+
 /** 内存中保留的在线内容数量，文字章节可用缓存覆盖当前及前后各一章。 */
 const ONLINE_CONTENT_CACHE_LIMIT = 5;
+/** 目录快照上限，覆盖详情页的三种媒体及少量其他作品。 */
+const DIRECTORY_CACHE_LIMIT = 6;
 
 /**
  * 在线浏览的共享状态。
  *
- * 目录与章节内容都按需读取；页面关闭后仍保留当前作品，便于在详情页与阅读器
- * 之间返回。文字章节会保留在内存中，并在打开一章后预取前后相邻章节，减少
- * 连续阅读时的等待；漫画按页懒加载，有声通过原生媒体协议流式播放。
+ * 目录按作品与媒体类型缓存，详情页与阅读器之间往返时复用；退出详情后由上层
+ * 释放。文字章节会保留在内存中，并在打开一章后预取前后相邻章节，减少连续阅读
+ * 时的等待；漫画按页懒加载，有声通过原生媒体协议流式播放。
  */
 export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
   const onlineBook = ref<Novel>();
@@ -51,12 +59,11 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
   const textChapterCache = new Map<number, OnlineTextChapter>();
   const comicChapterCache = new Map<number, OnlineComicChapter>();
   const audioTrackCache = new Map<number, OnlineAudioTrack>();
+  const directoryCache = new Map<string, DirectorySnapshot>();
   const textChapterRequests = new Map<number, Promise<OnlineTextChapter>>();
   const comicChapterRequests = new Map<number, Promise<OnlineComicChapter>>();
   const audioTrackRequests = new Map<number, Promise<OnlineAudioTrack>>();
-  let directoryRequest:
-    | { key: string; promise: Promise<void> }
-    | undefined;
+  const directoryRequests = new Map<string, Promise<DirectorySnapshot>>();
   let directoryRequestId = 0;
 
   const textChapters = computed(() =>
@@ -72,6 +79,91 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
 
   function directoryKey(book: Novel, mode: ChapterMode) {
     return `${mode}:${book.novelId}:${book.mediaId || ""}:${book.sourcePath || ""}`;
+  }
+
+  function restoreDirectorySnapshot(key: string) {
+    const snapshot = directoryCache.get(key);
+    textVolumes.value = snapshot?.textVolumes || [];
+    audioChapters.value = snapshot?.audioChapters || [];
+    comicChapters.value = snapshot?.comicChapters || [];
+    loadedDirectoryKey = snapshot ? key : "";
+  }
+
+  function cacheDirectorySnapshot(key: string, snapshot: DirectorySnapshot) {
+    directoryCache.delete(key);
+    directoryCache.set(key, snapshot);
+    while (directoryCache.size > DIRECTORY_CACHE_LIMIT) {
+      const oldest = directoryCache.keys().next().value;
+      if (oldest === undefined) break;
+      directoryCache.delete(oldest);
+    }
+  }
+
+  async function loadDirectorySnapshot(
+    book: Novel,
+    mode: ChapterMode,
+    force = false,
+    reuseCache = true,
+  ): Promise<DirectorySnapshot> {
+    const key = directoryKey(book, mode);
+    if (reuseCache && !force) {
+      const cached = directoryCache.get(key);
+      if (cached) return cached;
+    }
+    const pending =
+      reuseCache && !force ? directoryRequests.get(key) : undefined;
+    if (pending) return pending;
+    const generation = cacheGeneration;
+    const request = (async () => {
+      if (mode === "text") {
+        const volumes = await invoke<ChapterVolume[]>("get_chapter_volumes", {
+          novelId: book.novelId,
+        });
+        return {
+          textVolumes: volumes,
+          audioChapters: [],
+          comicChapters: [],
+        };
+      }
+      if (mode === "audio") {
+        const catalog = await invoke<{ chapters: Chapter[] }>(
+          "get_audio_chapters",
+          {
+            novelId: book.novelId,
+            albumId: book.mediaId,
+            titleHint: book.novelName,
+          },
+        );
+        return {
+          textVolumes: [],
+          audioChapters: catalog.chapters,
+          comicChapters: [],
+        };
+      }
+      const catalog = await invoke<{ chapters: Chapter[] }>(
+        "get_comic_chapters",
+        {
+          comicId: book.novelId,
+          sourcePath: book.sourcePath,
+          titleHint: book.novelName,
+        },
+      );
+      return {
+        textVolumes: [],
+        audioChapters: [],
+        comicChapters: catalog.chapters,
+      };
+    })();
+    directoryRequests.set(key, request);
+    try {
+      const snapshot = await request;
+      if (reuseCache && generation === cacheGeneration)
+        cacheDirectorySnapshot(key, snapshot);
+      return snapshot;
+    } finally {
+      if (directoryRequests.get(key) === request)
+        directoryRequests.delete(key);
+    }
   }
 
   function rememberChapter<Key, Value>(
@@ -105,17 +197,19 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     chapterId?: number,
   ) {
     const nextDirectoryKey = directoryKey(book, mode);
+    const currentDirectoryKey = onlineBook.value
+      ? directoryKey(onlineBook.value, onlineMode.value)
+      : "";
+    const sameBook = onlineBook.value?.novelId === book.novelId;
     if (
       !onlineBook.value ||
-      directoryKey(onlineBook.value, onlineMode.value) !== nextDirectoryKey
+      !sameBook ||
+      currentDirectoryKey !== nextDirectoryKey
     ) {
-      loadedDirectoryKey = "";
-      textVolumes.value = [];
-      audioChapters.value = [];
-      comicChapters.value = [];
+      restoreDirectorySnapshot(nextDirectoryKey);
       clearChapterCaches();
       directoryLoading.value = false;
-      directoryRequest = undefined;
+      directoryRequestId += 1;
       textOpenRequest += 1;
       comicOpenRequest += 1;
       audioOpenRequest += 1;
@@ -157,66 +251,51 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     if (!book) throw new Error("未选择在线作品");
     const key = directoryKey(book, onlineMode.value);
     if (!force && loadedDirectoryKey === key) return;
-    if (!force && directoryRequest?.key === key)
-      return directoryRequest.promise;
     const generation = cacheGeneration;
     const requestId = ++directoryRequestId;
     directoryLoading.value = true;
     directoryError.value = "";
-    const request = (async () => {
-      try {
-        if (onlineMode.value === "text") {
-          const volumes = await invoke<ChapterVolume[]>(
-            "get_chapter_volumes",
-            { novelId: book.novelId },
-          );
-          if (generation !== cacheGeneration || requestId !== directoryRequestId)
-            return;
-          textVolumes.value = volumes;
-        } else if (onlineMode.value === "audio") {
-          const catalog = await invoke<{ chapters: Chapter[] }>(
-            "get_audio_chapters",
-            {
-              novelId: book.novelId,
-              albumId: book.mediaId,
-              titleHint: book.novelName,
-            },
-          );
-          if (generation !== cacheGeneration || requestId !== directoryRequestId)
-            return;
-          audioChapters.value = catalog.chapters;
-        } else {
-          const catalog = await invoke<{ chapters: Chapter[] }>(
-            "get_comic_chapters",
-            {
-              comicId: book.novelId,
-              sourcePath: book.sourcePath,
-              titleHint: book.novelName,
-            },
-          );
-          if (generation !== cacheGeneration || requestId !== directoryRequestId)
-            return;
-          comicChapters.value = catalog.chapters;
-        }
-        loadedDirectoryKey = key;
-      } catch (error) {
-        if (generation === cacheGeneration && requestId === directoryRequestId)
-          directoryError.value = nativeErrorMessage(
-            error,
-            "读取在线目录失败",
-          );
-        throw error;
-      } finally {
-        if (requestId === directoryRequestId)
-          directoryLoading.value = false;
-      }
-    })();
-    directoryRequest = { key, promise: request };
     try {
-      await request;
+      const snapshot = await loadDirectorySnapshot(book, onlineMode.value, force);
+      if (generation !== cacheGeneration || requestId !== directoryRequestId)
+        return;
+      textVolumes.value = snapshot.textVolumes;
+      audioChapters.value = snapshot.audioChapters;
+      comicChapters.value = snapshot.comicChapters;
+      loadedDirectoryKey = key;
+    } catch (error) {
+      if (generation === cacheGeneration && requestId === directoryRequestId)
+        directoryError.value = nativeErrorMessage(error, "读取在线目录失败");
+      throw error;
     } finally {
-      if (directoryRequest?.promise === request) directoryRequest = undefined;
+      if (requestId === directoryRequestId) directoryLoading.value = false;
     }
+  }
+
+  /** 离开作品详情时丢弃该次浏览产生的目录和章节缓存。 */
+  function resetOnlineReadingSession() {
+    cacheGeneration += 1;
+    directoryRequestId += 1;
+    textOpenRequest += 1;
+    comicOpenRequest += 1;
+    audioOpenRequest += 1;
+    directoryCache.clear();
+    directoryRequests.clear();
+    loadedDirectoryKey = "";
+    textVolumes.value = [];
+    audioChapters.value = [];
+    comicChapters.value = [];
+    directoryLoading.value = false;
+    directoryError.value = "";
+    chapterLoading.value = false;
+    chapterError.value = "";
+    textChapter.value = undefined;
+    comicChapter.value = undefined;
+    audioTrack.value = undefined;
+    audioTrackLoading.value = false;
+    onlineBook.value = undefined;
+    pendingChapterId.value = undefined;
+    clearChapterCaches();
   }
 
   function surroundingChapterIds(
@@ -369,14 +448,14 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     }
     const pending = audioTrackRequests.get(chapterId);
     if (pending) return pending;
-    const book = onlineBook.value;
-    if (!book) return Promise.reject(new Error("未选择在线作品"));
+    if (!onlineBook.value)
+      return Promise.reject(new Error("未选择在线作品"));
+    const chapter = audioChapters.value.find((item) => item.id === chapterId);
     const generation = cacheGeneration;
     const request = invoke<OnlineAudioTrack>("load_online_audio_track", {
-      novelId: book.novelId,
-      albumId: book.mediaId,
-      titleHint: book.novelName,
       chapterId,
+      chapterTitle: chapter?.title || `章节 ${chapterId}`,
+      chapterVolume: chapter?.volume || "",
     })
       .then((payload) => {
         if (generation === cacheGeneration)
@@ -438,9 +517,11 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     prepareOnlineReading,
     primeOnlineDirectory,
     loadDirectory,
+    loadDirectorySnapshot,
     openOnlineTextChapter,
     peekOnlineTextChapter,
     openOnlineComicChapter,
     loadOnlineAudioTrack,
+    resetOnlineReadingSession,
   };
 }

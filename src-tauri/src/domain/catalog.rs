@@ -186,6 +186,7 @@ pub(crate) struct AudioCatalog {
 
 /// 不含受保护上游音频地址的有声章节行。
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AudioChapterSummary {
     /// 有声章节编号。
     pub(crate) id: i64,

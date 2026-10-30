@@ -220,7 +220,7 @@ async fn serve_audio_stream<R: Runtime>(
         .saturating_add(limit - 1)
         .min(requested_end.unwrap_or(u64::MAX));
     let response = match client
-        .asset_request(source, referer, "audio/mpeg,audio/*,*/*;q=0.8")
+        .audio_asset_request(source, referer, "audio/mpeg,audio/*,*/*;q=0.8")
         .header(RANGE, format!("bytes={start}-{end}"))
         .timeout(ONLINE_MEDIA_REQUEST_TIMEOUT)
         .send()

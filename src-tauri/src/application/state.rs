@@ -1,16 +1,60 @@
 //! 应用进程级会话状态。
 
-use crate::domain::auth::{AuthSession, AuthStatus};
+use crate::domain::auth::{AuthSession, AuthStatus, UserProfile};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// 账户资料在进程内的复用时间，避免多个界面重复读取 `/user`。
+const PROFILE_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// 带过期时间的账户资料快照。
+struct CachedProfile {
+    profile: UserProfile,
+    cached_at: Instant,
+}
 
 /// 在原生内存中保存相互隔离的 App 与 Web 会话。
 #[derive(Default)]
 pub(crate) struct AuthSessionState {
     /// 受互斥锁保护的当前会话。
     pub(crate) session: Mutex<Option<AuthSession>>,
+    /// 登录会话内复用的账户资料。
+    profile: Mutex<Option<CachedProfile>>,
 }
 
 impl AuthSessionState {
+    /// 读取仍在有效期内的账户资料。
+    pub(crate) fn cached_profile(&self) -> Option<UserProfile> {
+        let mut cache = self.profile.lock().ok()?;
+        if cache
+            .as_ref()
+            .is_some_and(|entry| entry.cached_at.elapsed() >= PROFILE_CACHE_TTL)
+        {
+            *cache = None;
+        }
+        cache.as_ref().map(|entry| entry.profile.clone())
+    }
+
+    /// 缓存本次登录会话的账户资料。
+    ///
+    /// # 参数
+    /// - `profile`：刚从上游取得的账户资料。
+    pub(crate) fn store_profile(&self, profile: &UserProfile) {
+        if let Ok(mut cache) = self.profile.lock() {
+            *cache = Some(CachedProfile {
+                profile: profile.clone(),
+                cached_at: Instant::now(),
+            });
+        }
+    }
+
+    /// 清除账户资料，避免登录状态变化后返回旧账号数据。
+    pub(crate) fn clear_profile_cache(&self) {
+        if let Ok(mut cache) = self.profile.lock() {
+            *cache = None;
+        }
+    }
+
     /// 返回当前认证状态快照。
     ///
     /// # 错误

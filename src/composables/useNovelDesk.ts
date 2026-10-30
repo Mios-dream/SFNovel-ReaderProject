@@ -1,7 +1,7 @@
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import type { Novel, ReaderSource, ViewName } from "../types";
+import type { ChapterMode, Novel, ReaderSource, ViewName } from "../types";
 import { useChapterPicker } from "./useChapterPicker";
 import { useDeskAuth } from "./useDeskAuth";
 import { useDeskBookshelf } from "./useDeskBookshelf";
@@ -52,15 +52,27 @@ export function useNovelDesk() {
   const remoteBookLoading = ref(false);
   const remoteMedia = ref<RemoteMedia>({});
   const remoteMediaDetecting = ref(false);
+  const remoteDetailCache = new Map<string, Novel>();
+  const remoteDetailRequests = new Map<string, Promise<Novel>>();
   let stopBackListener: { unregister: () => Promise<void> } | undefined;
   let disposed = false;
   let remoteBookRequest = 0;
+  let remoteDetailSessionActive = false;
+  let remoteDetailGeneration = 0;
 
   function notify(message: string, type: ToastType = "info") {
     showToast(message, type);
   }
 
   const auth = useDeskAuth(notify);
+
+  function requireAudioAccess() {
+    if (auth.auth.value.appAuthenticated) return true;
+    auth.openAppCredentials();
+    notify("有声内容需要连接 App 凭证");
+    return false;
+  }
+
   const requestPolicy = useRequestPolicy(notify);
   const library = useDeskLibrary({
     libraryDetailReturnView,
@@ -79,25 +91,125 @@ export function useNovelDesk() {
     auth: auth.auth,
     refreshAuthStatus: auth.refreshAuthStatus,
     requestCredentials: () => {
-      auth.credentialsOpen.value = true;
+      auth.openCredentials();
     },
     notify,
   });
+  const online = useOnlineReading({ notify });
   const chapterPicker = useChapterPicker({
     auth: auth.auth,
     notify,
     addJob: jobs.upsertJob,
     refreshJobs: jobs.refreshJobs,
+    loadCatalog: async (novel, mode) => {
+      const snapshot = await online.loadDirectorySnapshot(
+        novel,
+        mode,
+        false,
+        remoteDetailSessionActive,
+      );
+      return mode === "text"
+        ? { volumes: snapshot.textVolumes }
+        : {
+            chapters:
+              mode === "audio"
+                ? snapshot.audioChapters
+                : snapshot.comicChapters,
+          };
+    },
+    loadDetail: async (novel, kind) => {
+      if (
+        remoteDetailSessionActive &&
+        remoteBook.value &&
+        remoteDetailKey(remoteBook.value) === remoteDetailKey(novel)
+      ) {
+        return remoteBook.value;
+      }
+      const details = await requestRemoteDetail(
+        novel,
+        kind === "comic" ? "comic" : "novel",
+      );
+      return details ? { ...novel, ...details } : novel;
+    },
   });
-  const online = useOnlineReading({ notify });
+
+  function remoteDetailKey(novel: Novel) {
+    return `${remoteMediaType(novel)}:${novel.novelId}:${novel.mediaId || ""}:${novel.sourcePath || ""}`;
+  }
+
+  function requestRemoteDetail(
+    novel: Novel,
+    kind: RemoteMediaType = remoteMediaType(novel),
+  ): Promise<Partial<Novel> | undefined> {
+    if (kind === "comic") {
+      return invoke<Partial<Novel>>("get_comic_details", {
+        comicId: novel.novelId,
+      });
+    }
+    if (kind === "audio") {
+      return novel.mediaId
+        ? invoke<Partial<Novel>>("get_audio_details", {
+            albumId: novel.mediaId,
+            novelId: novel.novelId,
+          })
+        : Promise.resolve(undefined);
+    }
+    return invoke<Partial<Novel>>("get_novel_details", {
+      novelId: novel.novelId,
+    });
+  }
+
+  function fetchRemoteDetail(novel: Novel, generation: number) {
+    const key = remoteDetailKey(novel);
+    const cached = remoteDetailCache.get(key);
+    if (cached) return Promise.resolve(cached);
+    const pending = remoteDetailRequests.get(key);
+    if (pending) return pending;
+    const request = (async () => {
+      const details = await requestRemoteDetail(novel);
+      const hydrated = details ? { ...novel, ...details } : novel;
+      if (generation === remoteDetailGeneration)
+        remoteDetailCache.set(key, hydrated);
+      return hydrated;
+    })();
+    remoteDetailRequests.set(key, request);
+    request.then(
+      () => {
+        if (remoteDetailRequests.get(key) === request)
+          remoteDetailRequests.delete(key);
+      },
+      () => {
+        if (remoteDetailRequests.get(key) === request)
+          remoteDetailRequests.delete(key);
+      },
+    );
+    return request;
+  }
+
+  function clearRemoteDetailSession() {
+    remoteDetailSessionActive = false;
+    remoteBookRequest += 1;
+    remoteDetailGeneration += 1;
+    remoteBookLoading.value = false;
+    remoteDetailCache.clear();
+    remoteDetailRequests.clear();
+    online.resetOnlineReadingSession();
+  }
 
   async function openRemoteBookDetail(novel: Novel, preserveMedia = false) {
+    if (remoteMediaType(novel) === "audio" && !requireAudioAccess()) return;
     if (!preserveMedia && active.value !== "remoteDetail") {
       remoteDetailReturnView.value = active.value;
     }
+    if (!preserveMedia) {
+      clearRemoteDetailSession();
+      remoteDetailSessionActive = true;
+    }
+    const generation = preserveMedia
+      ? remoteDetailGeneration
+      : ++remoteDetailGeneration;
     const request = ++remoteBookRequest;
     remoteBook.value = novel;
-    remoteBookLoading.value = true;
     active.value = "remoteDetail";
     if (!preserveMedia) {
       remoteMedia.value = { [remoteMediaType(novel)]: novel };
@@ -105,23 +217,12 @@ export function useNovelDesk() {
     } else {
       remoteMediaDetecting.value = false;
     }
+    const cached = remoteDetailCache.get(remoteDetailKey(novel));
+    remoteBookLoading.value = !cached;
     try {
-      const details = novel.bookshelfType === "comic"
-        ? await invoke<Partial<Novel>>("get_comic_details", {
-            comicId: novel.novelId,
-          })
-        : novel.bookshelfType === "audio"
-          ? novel.mediaId
-            ? await invoke<Partial<Novel>>("get_audio_details", {
-                albumId: novel.mediaId,
-                novelId: novel.novelId,
-              })
-            : undefined
-          : await invoke<Partial<Novel>>("get_novel_details", {
-              novelId: novel.novelId,
-            });
-      if (details && request === remoteBookRequest) {
-        remoteBook.value = { ...novel, ...details };
+      const hydrated = await fetchRemoteDetail(novel, generation);
+      if (request === remoteBookRequest) {
+        remoteBook.value = hydrated;
         remoteMedia.value = {
           ...remoteMedia.value,
           [remoteMediaType(novel)]: remoteBook.value,
@@ -160,14 +261,16 @@ export function useNovelDesk() {
   }
 
   function closeRemoteBookDetail() {
+    clearRemoteDetailSession();
     active.value = remoteDetailReturnView.value;
   }
 
   function startOnlineReading(
     novel: Novel,
-    mode: "text" | "audio" | "comic",
+    mode: ChapterMode,
     chapterId?: number,
   ) {
+    if (mode === "audio" && !requireAudioAccess()) return;
     if (
       active.value !== "reader" &&
       active.value !== "comicReader" &&
@@ -189,15 +292,6 @@ export function useNovelDesk() {
     const book = library.localBook.value;
     const work = book?.[mode];
     if (!work?.id) return;
-    if (
-      mode === "audio" &&
-      !auth.auth.value.appAuthenticated &&
-      !auth.auth.value.webAuthenticated
-    ) {
-      auth.credentialsOpen.value = true;
-      notify("请先登录 App 或网站凭证，再读取有声目录");
-      return;
-    }
     startOnlineReading(
       {
         novelId:
@@ -219,6 +313,8 @@ export function useNovelDesk() {
   }
 
   function navigate(view: ViewName) {
+    if (remoteDetailSessionActive && view !== "remoteDetail")
+      clearRemoteDetailSession();
     if (
       view === "reader" ||
       view === "comicReader" ||
@@ -236,6 +332,7 @@ export function useNovelDesk() {
   }
 
   function continueDownload(mode: "novel" | "audio" | "comic") {
+    if (mode === "audio" && !requireAudioAccess()) return;
     const book = library.localBook.value;
     const work = book?.[mode];
     if (!work) return;
@@ -250,6 +347,11 @@ export function useNovelDesk() {
       },
       mode === "novel" ? "text" : mode,
     );
+  }
+
+  function openChapterPicker(novel: Novel, mode: ChapterMode) {
+    if (mode === "audio" && !requireAudioAccess()) return;
+    return chapterPicker.openChapterPicker(novel, mode);
   }
 
   function formatDate(value?: string) {
@@ -358,6 +460,8 @@ export function useNovelDesk() {
     startOnlineFromLibrary,
     backFromOnlineReading,
     continueDownload,
+    openChapterPicker,
+    requireAudioAccess,
     navigate,
     formatDate,
     ...online,

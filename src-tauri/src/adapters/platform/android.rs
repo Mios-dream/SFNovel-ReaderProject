@@ -16,7 +16,6 @@ struct CookieResponse {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeviceProfileResponse {
     device_id: Option<String>,
-    device_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -98,13 +97,8 @@ pub(super) async fn initialize_device_identity(app: &tauri::AppHandle) -> Result
         .device_id
         .filter(|value| is_valid_uuid(value))
         .ok_or_else(|| "Android 设备编号无效".to_string())?;
-    let device_token = profile
-        .device_token
-        .filter(|value| is_valid_uuid(value))
-        .ok_or_else(|| "Android 设备令牌无效".to_string())?;
     install_device_profile(DeviceProfile {
         device_id: device_id.to_lowercase(),
-        device_token: device_token.to_uppercase(),
     });
     Ok(())
 }

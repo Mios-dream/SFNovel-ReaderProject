@@ -11,7 +11,12 @@ import {
 import { ref, watch } from "vue";
 import type { AuthStatus } from "../types";
 
-const props = defineProps<{ open: boolean; auth: AuthStatus; busy: boolean }>();
+const props = defineProps<{
+  open: boolean;
+  auth: AuthStatus;
+  initialTab: "official" | "password";
+  busy: boolean;
+}>();
 const emit = defineEmits<{
   close: [];
   login: [username: string, password: string];
@@ -26,7 +31,7 @@ const activeTab = ref<"password" | "official">("official");
 watch(
   () => props.open,
   (open) => {
-    if (open) activeTab.value = "official";
+    if (open) activeTab.value = props.initialTab;
   },
 );
 
@@ -72,7 +77,7 @@ function submit() {
           <span class="connection-icon app"><Smartphone :size="21" /></span>
           <div class="connection-copy">
             <strong>App 登录已连接</strong>
-            <small>完整目录与受限章节可用</small>
+            <small>完整目录、受限章节与有声下载可用</small>
           </div>
           <CircleCheck class="connection-check" :size="20" />
           <button
@@ -84,7 +89,7 @@ function submit() {
           </button>
         </div>
         <template v-else>
-          <p>App 登录可获得完整权限，但可能触发风控。</p>
+          <p>有声下载与受限章节需要 App 凭证，登录可能触发风控。</p>
           <form class="login-form" @submit.prevent="submit">
             <input
               v-model="username"
@@ -112,7 +117,7 @@ function submit() {
           <span class="connection-icon web"><Globe2 :size="21" /></span>
           <div class="connection-copy">
             <strong>网站登录已连接</strong>
-            <small>漫画、网页书架与网页资源可用</small>
+            <small>漫画、网页书架与 VIP 图片正文可用</small>
           </div>
           <CircleCheck class="connection-check" :size="20" />
           <button
@@ -124,7 +129,7 @@ function submit() {
           </button>
         </div>
         <template v-else>
-          <p>可使用绝大部分功能，更安全。</p>
+          <p>用于阅读漫画、同步网页书架与读取 VIP 图片正文。</p>
           <button
             class="primary-button full"
             :disabled="busy"

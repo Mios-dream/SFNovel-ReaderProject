@@ -55,8 +55,8 @@ pub(crate) trait RemoteGateway: Send + Sync {
     async fn verify_account(&self) -> AppResult<()>;
     /// 使用账号密码换取 App Cookie。
     async fn login_app(&self, username: &str, password: &str) -> AppResult<String>;
-    /// 注册当前设备。
-    async fn register_device(&self) -> AppResult<()>;
+    /// 使用指定 App 会话注册当前设备。
+    async fn register_device(&self, app_cookie: &str) -> AppResult<()>;
     /// 读取 App 章节正文及对齐所需标识。
     async fn app_chapter_content(&self, chapter_id: i64) -> AppResult<ApiChapterContent>;
     /// 读取网页章节正文。
@@ -179,9 +179,8 @@ pub(crate) trait OnlineReader: Send + Sync {
     /// 读取在线音频流地址。
     async fn load_audio(
         &self,
-        novel_id: i64,
-        album_id: Option<i64>,
-        title_hint: Option<&str>,
         chapter_id: i64,
+        chapter_title: &str,
+        chapter_volume: &str,
     ) -> AppResult<OnlineAudioTrack>;
 }

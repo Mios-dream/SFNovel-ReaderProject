@@ -1,6 +1,6 @@
 //! 有声章节下载流程。
 
-use super::assets::{enrich_audio_metadata, fetch_asset};
+use super::assets::enrich_audio_metadata;
 use super::JobContext;
 use crate::adapters::downloads::registry;
 use crate::adapters::downloads::DownloadState;
@@ -24,6 +24,21 @@ use tauri::Manager;
 /// - `value`：上游章节标题。
 fn safe_audio_name(value: &str) -> String {
     safe_library_name(value).chars().take(100).collect()
+}
+
+/// 使用 App 凭证下载有声章节。
+async fn fetch_audio(source: &SfSource, url: &str, referer: &str) -> Result<Vec<u8>, String> {
+    source
+        .audio_asset_request(url, referer, "audio/mpeg,*/*;q=0.8")
+        .send()
+        .await
+        .map_err(|error| format!("无法下载有声章节：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("有声章节下载被拒绝：{error}"))?
+        .bytes()
+        .await
+        .map(|bytes| bytes.to_vec())
+        .map_err(|error| format!("无法读取有声章节：{error}"))
 }
 
 /// 根据已存在的音频文件生成 M3U 播放列表。
@@ -239,12 +254,10 @@ async fn run_inner(
                     continue 'chapters;
                 }
             };
-            let payload = fetch_asset(
+            let payload = fetch_audio(
                 &source,
                 &audio_url,
                 &format!("https://m.sfacg.com/a/{}/", chapter.id),
-                "audio/mpeg,*/*;q=0.8",
-                "有声章节",
             )
             .await;
             let payload = match payload {

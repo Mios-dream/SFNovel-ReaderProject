@@ -13,13 +13,14 @@ import {
   LibraryBig,
   LoaderCircle,
   ListTree,
+  LockKeyholeOpen,
   Play,
   Star,
   Ticket,
   X,
 } from "lucide-vue-next";
 import { deskInjectionKey } from "../deskContext";
-import { reportError, showToast } from "../composables/useToast";
+import { reportError } from "../composables/useToast";
 import type { Chapter, ChapterMode, ChapterVolume } from "../types";
 
 function requireDesk() {
@@ -110,15 +111,6 @@ function openDownload() {
 function startOnline(chapterId?: number) {
   const work = novel.value;
   if (!work) return;
-  if (
-    mode.value === "audio" &&
-    !desk.auth.value.appAuthenticated &&
-    !desk.auth.value.webAuthenticated
-  ) {
-    desk.credentialsOpen.value = true;
-    showToast("请先登录 App 或网站凭证，再读取有声目录", "info");
-    return;
-  }
   desk.startOnlineReading(work, mode.value, chapterId);
 }
 
@@ -543,12 +535,11 @@ function textChapterBadge(
             <button
               v-if="
                 mode === 'audio' &&
-                !desk.auth.value.appAuthenticated &&
-                !desk.auth.value.webAuthenticated
+                !desk.auth.value.appAuthenticated
               "
-              @click="desk.credentialsOpen.value = true"
+              @click="desk.openAppCredentials()"
             >
-              去登录
+              连接 App
             </button>
             <button @click="ensureDirectory(true)">重试</button>
           </div>
@@ -592,8 +583,18 @@ function textChapterBadge(
                   @click="startOnline(chapter.id)"
                 >
                   <strong>{{ chapter.title }}</strong>
-                  <span v-if="chapter.isVip" class="chapter-badge vip"
-                    >VIP</span
+                  <span
+                    v-if="chapter.isVip"
+                    class="chapter-badge vip"
+                    :class="{ unlocked: chapter.isUnlocked === true }"
+                    :title="
+                      chapter.isUnlocked === true ? '已解锁' : 'VIP 章节'
+                    "
+                    ><LockKeyholeOpen
+                      v-if="chapter.isUnlocked === true"
+                      :size="12"
+                      aria-label="已解锁"
+                    />VIP</span
                   >
                   <Play :size="13" />
                 </button>
@@ -650,12 +651,11 @@ function textChapterBadge(
             <button
               v-if="
                 mode === 'audio' &&
-                !desk.auth.value.appAuthenticated &&
-                !desk.auth.value.webAuthenticated
+                !desk.auth.value.appAuthenticated
               "
-              @click="desk.credentialsOpen.value = true"
+              @click="desk.openAppCredentials()"
             >
-              去登录
+              连接 App
             </button>
             <button @click="ensureDirectory(true)">重试</button>
           </div>
@@ -697,7 +697,17 @@ function textChapterBadge(
               String(index + 1).padStart(3, "0")
             }}</span>
             <strong>{{ chapter.title }}</strong>
-            <span v-if="chapter.isVip" class="chapter-badge vip">VIP</span>
+            <span
+              v-if="chapter.isVip"
+              class="chapter-badge vip"
+              :class="{ unlocked: chapter.isUnlocked === true }"
+              :title="chapter.isUnlocked === true ? '已解锁' : 'VIP 章节'"
+              ><LockKeyholeOpen
+                v-if="chapter.isUnlocked === true"
+                :size="12"
+                aria-label="已解锁"
+              />VIP</span
+            >
             <Play :size="16" />
           </button>
         </div>
@@ -935,19 +945,24 @@ function textChapterBadge(
 }
 .chapter-badge {
   display: inline-flex;
-  min-height: 18px;
+  min-height: 20px;
   align-items: center;
   flex: 0 0 auto;
+  gap: 3px;
   padding: 0 5px;
   border-radius: 4px;
   color: #887d70;
   background: #f2eee7;
-  font-size: 9px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .chapter-badge.vip {
   color: #a45b3f;
   background: #fbe2d4;
+}
+.chapter-badge.vip.unlocked {
+  color: #4f8068;
+  background: #e7f1ea;
 }
 .remote-directory-empty {
   display: flex;

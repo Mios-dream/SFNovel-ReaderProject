@@ -8,6 +8,14 @@ type UseChapterPickerOptions = {
   notify: Notify;
   addJob: (job: Job) => void;
   refreshJobs: () => Promise<void>;
+  loadCatalog?: (
+    novel: Novel,
+    mode: ChapterMode,
+  ) => Promise<{ volumes?: ChapterVolume[]; chapters?: Chapter[] }>;
+  loadDetail?: (
+    novel: Novel,
+    kind: "text" | "comic",
+  ) => Promise<Partial<Novel> | undefined>;
 };
 
 export function useChapterPicker({
@@ -15,6 +23,8 @@ export function useChapterPicker({
   notify,
   addJob,
   refreshJobs,
+  loadCatalog,
+  loadDetail,
 }: UseChapterPickerOptions) {
   const chapterModalOpen = ref(false);
   const chapterLoading = ref(false);
@@ -24,6 +34,43 @@ export function useChapterPicker({
   const audioChapters = ref<Chapter[]>([]);
   const comicChapters = ref<Chapter[]>([]);
   const selectedChapterIds = ref<number[]>([]);
+
+  async function loadCatalogFor(novel: Novel, mode: ChapterMode) {
+    if (loadCatalog) return loadCatalog(novel, mode);
+    if (mode === "text") {
+      return {
+        volumes: await invoke<ChapterVolume[]>("get_chapter_volumes", {
+          novelId: novel.novelId,
+        }),
+      };
+    }
+    const catalog = await invoke<{ chapters: Chapter[] }>(
+      mode === "audio" ? "get_audio_chapters" : "get_comic_chapters",
+      mode === "audio"
+        ? {
+            novelId: novel.novelId,
+            albumId: novel.mediaId,
+            titleHint: novel.novelName,
+          }
+        : {
+            comicId: novel.novelId,
+            sourcePath: novel.sourcePath,
+            titleHint: novel.novelName,
+          },
+    );
+    return { chapters: catalog.chapters };
+  }
+
+  async function loadDetailFor(novel: Novel, kind: "text" | "comic") {
+    if (loadDetail) return loadDetail(novel, kind);
+    return kind === "comic"
+      ? invoke<Partial<Novel>>("get_comic_details", {
+          comicId: novel.novelId,
+        })
+      : invoke<Partial<Novel>>("get_novel_details", {
+          novelId: novel.novelId,
+        });
+  }
 
   async function openChapterPicker(novel: Novel, mode: ChapterMode) {
     chapterNovel.value = novel;
@@ -36,56 +83,31 @@ export function useChapterPicker({
     selectedChapterIds.value = [];
     try {
       if (mode === "text") {
+        const details = await loadDetailFor(novel, "text").catch(() => ({}));
         chapterNovel.value = {
           ...novel,
-          ...(await invoke<Partial<Novel>>("get_novel_details", {
-            novelId: novel.novelId,
-          }).catch(() => ({}))),
+          ...(details || {}),
         };
-        chapterVolumes.value = await invoke<ChapterVolume[]>(
-          "get_chapter_volumes",
-          { novelId: novel.novelId },
-        );
-        if (auth.value.appAuthenticated || auth.value.webAuthenticated) {
-          const audio = await invoke<{ chapters: Chapter[] }>(
-            "get_audio_chapters",
-            {
-              novelId: novel.novelId,
-              albumId: novel.mediaId,
-              titleHint: novel.novelName,
-            },
-          ).catch(() => undefined);
+        chapterVolumes.value =
+          (await loadCatalogFor(novel, "text")).volumes || [];
+        if (auth.value.appAuthenticated) {
+          const audio = await loadCatalogFor(novel, "audio").catch(
+            () => undefined,
+          );
           audioChapters.value = audio?.chapters || [];
         }
       } else if (mode === "audio") {
-        if (!auth.value.appAuthenticated && !auth.value.webAuthenticated) {
-          throw new Error("请先登录 App 或网站凭证，再读取有声目录");
-        }
-        const audio = await invoke<{ chapters: Chapter[] }>(
-          "get_audio_chapters",
-          {
-            novelId: novel.novelId,
-            albumId: novel.mediaId,
-            titleHint: novel.novelName,
-          },
-        );
-        audioChapters.value = audio.chapters;
+        audioChapters.value =
+          (await loadCatalogFor(novel, "audio")).chapters || [];
       } else {
-        const details = await invoke<Partial<Novel>>("get_comic_details", {
-          comicId: novel.novelId,
-        }).catch(() => undefined);
+        const details = await loadDetailFor(novel, "comic").catch(
+          () => undefined,
+        );
         if (details) {
           chapterNovel.value = { ...novel, ...details };
         }
-        const comic = await invoke<{ chapters: Chapter[] }>(
-          "get_comic_chapters",
-          {
-            comicId: novel.novelId,
-            sourcePath: novel.sourcePath,
-            titleHint: novel.novelName,
-          },
-        );
-        comicChapters.value = comic.chapters;
+        comicChapters.value =
+          (await loadCatalogFor(novel, "comic")).chapters || [];
       }
       selectDownloadableChapters();
     } catch (error) {

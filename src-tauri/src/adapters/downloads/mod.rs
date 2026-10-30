@@ -129,7 +129,7 @@ impl DownloadGateway for NativeDownloadGateway {
             .await
             .map_err(AppError::upstream)?;
         source
-            .ensure_audio_catalog()
+            .ensure_audio_access()
             .map_err(AppError::unauthenticated)?;
         let album_id = match album_id {
             Some(album_id) => album_id,

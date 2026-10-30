@@ -48,6 +48,26 @@ impl AppClient {
             .is_some_and(|cookie| has_cookie_name(cookie, "session_APP"))
     }
 
+    /// 创建需要 App 会话的资源请求。
+    ///
+    /// App API 返回的媒体地址与 App Cookie 绑定，不能复用网页静态资源请求。
+    pub(crate) fn asset_request(
+        &self,
+        url: &str,
+        referer: &str,
+        accept: &str,
+    ) -> reqwest::RequestBuilder {
+        let mut request = self
+            .client
+            .get(url)
+            .header(reqwest::header::ACCEPT, accept)
+            .header(reqwest::header::REFERER, referer);
+        if let Some(cookie) = self.app_cookie.as_deref() {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        request
+    }
+
     /// 按固定请求指纹构建一个已签名的 App API 请求。
     ///
     /// # 参数
@@ -85,7 +105,7 @@ impl AppClient {
     /// 请求一个已签名的 SF App API 资源，并拆开其 `data` 数据包。
     ///
     /// 首次遇到 `401/507` 时会登记当前设备并重试一次。登记必须使用同一次安装的
-    /// `deviceId` 和 `deviceToken`，否则会形成新的设备身份。
+    /// `deviceId`，否则会形成新的设备身份。
     ///
     /// # 错误
     /// 请求失败、上游拒绝请求、设备登记失败或响应不是有效 JSON 时返回错误。

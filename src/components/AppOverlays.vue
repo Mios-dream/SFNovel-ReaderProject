@@ -40,6 +40,7 @@ if (!desk) throw new Error("Desk context is unavailable");
   <AuthModal
     :open="desk.credentialsOpen.value"
     :auth="desk.auth.value"
+    :initial-tab="desk.credentialsTab.value"
     :busy="desk.loginBusy.value"
     @close="desk.credentialsOpen.value = false"
     @login="desk.login"

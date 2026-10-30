@@ -2,7 +2,7 @@
 //!
 //! 业务层只调用本模块的业务方法，不直接选择 App 或网页客户端。
 //! App 凭证与网页凭证只由底层客户端读取，不能互相转换。
-//! 共用能力优先使用 App。App 未返回结果时，文字正文、有声目录和音频地址回退网页。
+//! 文字正文可由网页补充；有声内容只接受 App。
 //! 设备登记和 App 余额只接受 App；漫画、网页书架和 VIP 图片正文只接受网页。
 
 use super::app::AppClient;
@@ -116,7 +116,9 @@ impl SfSource {
         album_id: i64,
         novel_id: i64,
     ) -> Result<NovelDetail, String> {
-        self.app_client.get_audio_details(album_id, novel_id).await
+        self.require_app("有声作品详情")?
+            .get_audio_details(album_id, novel_id)
+            .await
     }
 
     /// 读取漫画详情。
@@ -135,62 +137,35 @@ impl SfSource {
         novel_id: i64,
         title_hint: Option<&str>,
     ) -> Result<i64, String> {
-        self.app_client
+        self.require_app("有声专辑")?
             .find_audio_album_id(novel_id, title_hint)
             .await
     }
 
-    /// 读取有声目录，优先使用 App，失败后回退网页目录页。
-    ///
-    /// App 分卷目录可匿名读取；有 App 会话时同时返回该账号的解锁状态。
-    /// 网页目录页没有这些标记，只能在取音频地址时确认章节是否可播放。
+    /// 读取有声目录。目录和账号解锁状态都来自 App。
     pub(crate) async fn audio_catalog(
         &self,
         album_id: i64,
         title_hint: Option<&str>,
     ) -> Result<(String, Vec<AudioChapter>), String> {
-        let app_error = match self
-            .app_client
+        self.require_app("有声目录")?
             .get_audio_catalog(album_id, title_hint)
             .await
-        {
-            Ok(catalog) => return Ok(catalog),
-            Err(error) => error,
-        };
-        self.web_client
-            .get_audio_catalog(album_id, title_hint)
-            .await
-            .map_err(|web_error| {
-                format!("App 有声目录不可用：{app_error}；网页目录不可用：{web_error}")
-            })
     }
 
-    /// 检查当前会话是否具备读取有声内容的条件。
-    pub(crate) fn ensure_audio_catalog(&self) -> Result<(), String> {
-        if self.has_app_session() || self.has_web_session() {
-            Ok(())
-        } else {
-            Err("有声内容需要连接 App 或网站凭证，请先登录。".to_string())
-        }
-    }
-
-    /// 读取单章音频地址，优先使用 App，失败后回退网页。
-    ///
-    /// App 章节详情可匿名请求；未购章节不会返回 `fileName`，此时再回退网页。
+    /// 读取单章音频地址。地址由 App 返回，并需要 App 凭证播放。
     pub(crate) async fn audio_source(&self, chapter_id: i64) -> Result<String, String> {
         validate_novel_id(chapter_id)?;
-        let app_error = match self.app_client.find_audio_chapter_source(chapter_id).await {
-            Ok(Some(source)) => return Ok(source),
-            Ok(None) => "App 未返回音频地址".to_string(),
-            Err(error) => error,
-        };
-        match self.require_web("网页有声地址") {
-            Ok(client) => client
-                .get_audio_chapter_source(chapter_id)
-                .await
-                .map_err(|web_error| format!("{app_error}；网页回退失败：{web_error}")),
-            Err(web_error) => Err(format!("{app_error}；{web_error}")),
-        }
+        self.require_app("有声章节")?
+            .find_audio_chapter_source(chapter_id)
+            .await
+            .map_err(|error| format!("读取 App 音频地址失败：{error}"))?
+            .ok_or_else(|| "App 未返回该章节的音频地址，请确认章节已解锁或重新登录 App".to_string())
+    }
+
+    /// 检查当前会话是否可以使用有声内容。
+    pub(crate) fn ensure_audio_access(&self) -> Result<(), String> {
+        self.require_app("有声内容").map(|_| ())
     }
 
     /// 解析漫画标题和网页目录标识。
@@ -282,9 +257,14 @@ impl SfSource {
             .await
     }
 
-    /// 登记当前安装，取得 App API 的设备权限。
-    pub(crate) async fn register_device(&self) -> Result<(), String> {
-        self.require_app("设备登记")?.register_device().await
+    /// 使用指定 App 会话登记当前安装。
+    ///
+    /// # 参数
+    /// - `app_cookie`：本次登录返回的 App Cookie。
+    pub(crate) async fn register_device(&self, app_cookie: &str) -> Result<(), String> {
+        self.app_client
+            .register_device_for_session(app_cookie)
+            .await
     }
 
     /// 有直接正文可用时尝试读取；否则返回 `None`。
@@ -364,14 +344,24 @@ impl SfSource {
         })
     }
 
-    /// 创建网页资源请求。所有静态资源和媒体只使用网页凭证。
+    /// 创建网页静态资源请求。
     pub(crate) fn asset_request(
         &self,
-        url: impl reqwest::IntoUrl,
+        url: &str,
         referer: &str,
         accept: &str,
     ) -> reqwest::RequestBuilder {
         self.web_client.asset_request(url, referer, accept)
+    }
+
+    /// 创建 App 音频资源请求。
+    pub(crate) fn audio_asset_request(
+        &self,
+        url: &str,
+        referer: &str,
+        accept: &str,
+    ) -> reqwest::RequestBuilder {
+        self.app_client.asset_request(url, referer, accept)
     }
 }
 
@@ -505,8 +495,10 @@ impl RemoteGateway for SfSource {
             .map_err(remote_error)
     }
 
-    async fn register_device(&self) -> AppResult<()> {
-        SfSource::register_device(self).await.map_err(remote_error)
+    async fn register_device(&self, app_cookie: &str) -> AppResult<()> {
+        SfSource::register_device(self, app_cookie)
+            .await
+            .map_err(remote_error)
     }
 
     async fn app_chapter_content(&self, chapter_id: i64) -> AppResult<ApiChapterContent> {

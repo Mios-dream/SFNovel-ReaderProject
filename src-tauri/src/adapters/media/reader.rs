@@ -72,21 +72,19 @@ impl OnlineReader for OnlineReaderAdapter {
     /// 读取在线音频并登记本地流式播放令牌。
     ///
     /// # 参数
-    /// - `novel_id`：小说编号。
-    /// - `album_id`：可选的有声专辑编号。
-    /// - `title_hint`：用于解析专辑的标题提示。
     /// - `chapter_id`：音频章节编号。
+    /// - `chapter_title`：前端缓存目录中的章节标题。
+    /// - `chapter_volume`：前端缓存目录中的分卷名称。
     ///
     /// # 错误
-    /// 专辑、章节或音频地址无法解析时返回上游错误。
+    /// 章节或音频地址无法解析时返回上游错误。
     async fn load_audio(
         &self,
-        novel_id: i64,
-        album_id: Option<i64>,
-        title_hint: Option<&str>,
         chapter_id: i64,
+        chapter_title: &str,
+        chapter_volume: &str,
     ) -> AppResult<OnlineAudioTrack> {
-        load_audio(&self.app, novel_id, album_id, title_hint, chapter_id)
+        load_audio(&self.app, chapter_id, chapter_title, chapter_volume)
             .await
             .map_err(AppError::upstream)
     }
@@ -228,41 +226,30 @@ async fn load_comic(
 ///
 /// # 参数
 /// - `app`：应用句柄。
-/// - `novel_id`：小说编号。
-/// - `album_id`：可选的有声专辑编号。
-/// - `title_hint`：用于解析专辑的标题提示。
 /// - `chapter_id`：音频章节编号。
+/// - `chapter_title`：前端缓存目录中的章节标题。
+/// - `chapter_volume`：前端缓存目录中的分卷名称。
 ///
 /// # 错误
-/// 专辑或章节不存在、音频地址非法或媒体状态不可用时返回错误消息。
+/// 音频地址非法或媒体状态不可用时返回错误消息。
 async fn load_audio(
     app: &tauri::AppHandle,
-    novel_id: i64,
-    album_id: Option<i64>,
-    title_hint: Option<&str>,
     chapter_id: i64,
+    chapter_title: &str,
+    chapter_volume: &str,
 ) -> Result<OnlineAudioTrack, String> {
     let client = SfSource::connect(app).await?;
-    let album_id = match album_id {
-        Some(album_id) => album_id,
-        None => client.audio_album_id(novel_id, title_hint).await?,
-    };
-    let (_title, chapters) = client.audio_catalog(album_id, title_hint).await?;
-    let chapter = chapters
-        .iter()
-        .find(|chapter| chapter.id == chapter_id)
-        .ok_or_else(|| "该有声章节不在当前目录中".to_string())?;
-    let source = client.audio_source(chapter.id).await?;
+    let source = client.audio_source(chapter_id).await?;
     let source = validate_sfacg_asset_url(&source)?;
     let media = app.state::<OnlineMediaState>();
     let token = media.register(OnlineMediaResource::Audio {
         source: source.to_string(),
-        referer: format!("https://m.sfacg.com/a/{}/", chapter.id),
+        referer: format!("https://m.sfacg.com/a/{chapter_id}/"),
     })?;
     Ok(OnlineAudioTrack {
-        id: chapter.id,
-        title: chapter.title.clone(),
-        volume: chapter.volume.clone(),
+        id: chapter_id,
+        title: chapter_title.to_string(),
+        volume: chapter_volume.to_string(),
         url: online_media_url("audio", &token),
     })
 }
@@ -332,7 +319,7 @@ async fn cache_remote_image(
     let url = validate_sfacg_asset_url(url)?;
     let response = client
         .asset_request(
-            url,
+            url.as_str(),
             referer,
             "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
         )

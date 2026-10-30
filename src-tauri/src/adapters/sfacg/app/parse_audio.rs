@@ -137,15 +137,17 @@ pub(super) fn walk_audio_catalog(
                         "isPurchased",
                     ],
                 )
-                .unwrap_or(false)
-                    || need_fire_money == Some(0);
+                .unwrap_or(false);
+                // 登录目录只对当前账户可访问的章节返回 fileName。价格为零
+                // 不能单独证明已购，未购的限免章节也可能返回零价。
+                let has_audio_source = json_text_field(value, &["fileName", "audioUrl"]).is_some();
                 chapters.push(AudioChapter {
                     id: chapter_id,
                     title: json_text_field(value, &["title", "ntitle", "chapterTitle"])
                         .unwrap_or_else(|| format!("章节 {chapter_id}")),
                     volume: volume_title,
                     is_vip,
-                    is_unlocked: !is_vip || explicitly_unlocked,
+                    is_unlocked: !is_vip || explicitly_unlocked || has_audio_source,
                 });
                 return;
             }
@@ -189,8 +191,7 @@ pub(super) fn walk_audio_catalog(
 
 /// 读取有声章节编号。专辑章节编号优先于来源小说章节编号。
 pub(super) fn audio_source_from_payload(value: &Value) -> Option<String> {
-    let album_id = json_i64_field(value, &["albumId"]);
-    walk_audio_source(value, 0, album_id)
+    walk_audio_source(value, 0)
 }
 
 /// 在音频详情中递归查找第一个可规范化的音频地址。
@@ -198,97 +199,49 @@ pub(super) fn audio_source_from_payload(value: &Value) -> Option<String> {
 /// # 参数
 /// - `value`：当前遍历的 JSON 节点。
 /// - `depth`：当前递归深度，用于限制异常嵌套。
-/// - `album_id`：用于补全相对音频路径的专辑编号。
-///
 /// # 返回
-/// 找到符合 SF 音频资源规则的 HTTPS 地址时返回该地址。
-fn walk_audio_source(value: &Value, depth: usize, album_id: Option<i64>) -> Option<String> {
+/// 在音频字段或嵌套对象中找到 HTTP(S) 地址时返回该地址。
+fn walk_audio_source(value: &Value, depth: usize) -> Option<String> {
     if depth > 8 {
         return None;
     }
     match value {
         Value::Array(items) => items
             .iter()
-            .find_map(|item| walk_audio_source(item, depth + 1, album_id)),
+            .find_map(|item| walk_audio_source(item, depth + 1)),
         Value::Object(object) => {
+            for key in ["fileName", "audioUrl"] {
+                if let Some(source) = object
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .and_then(normalize_audio_source)
+                {
+                    return Some(source);
+                }
+            }
             for (key, item) in object {
                 let normalized_key = key.to_ascii_lowercase();
                 if normalized_key.contains("audio") || normalized_key.contains("mp3") {
-                    if let Some(source) = item
-                        .as_str()
-                        .and_then(|value| normalize_audio_source(value, album_id))
-                    {
+                    if let Some(source) = item.as_str().and_then(normalize_audio_source) {
                         return Some(source);
                     }
                 }
             }
             object
                 .values()
-                .find_map(|item| walk_audio_source(item, depth + 1, album_id))
+                .find_map(|item| walk_audio_source(item, depth + 1))
         }
-        Value::String(text) => normalize_audio_source(text, album_id),
         _ => None,
     }
 }
 
-/// 只接受 SF 音频文件地址，避免把页面或封面图片当成媒体地址。
-fn normalize_audio_source(value: &str, album_id: Option<i64>) -> Option<String> {
-    let mut source = value.trim().replace("\\/", "/");
-    if source.is_empty() {
-        return None;
-    }
-    let lower = source.to_ascii_lowercase();
-    let path = lower.split(['?', '#']).next().unwrap_or(&lower);
-    let is_audio_path = path.ends_with(".mp3")
-        || path.ends_with(".m4a")
-        || path.ends_with(".aac")
-        || path.contains("/audio/files/");
-    if !source.contains("://") && !source.starts_with('/') && is_audio_path {
-        let album_id = album_id?;
-        source = format!(
-            "https://rss.sfacg.com/web/audio/files/{album_id}/{}",
-            source.trim_start_matches('/')
-        );
-    }
+/// 规范化音频字段中的绝对地址。
+fn normalize_audio_source(value: &str) -> Option<String> {
+    let source = value.trim().replace("\\/", "/");
     let source = if let Some(relative) = source.strip_prefix("//") {
         format!("https://{relative}")
-    } else if source.starts_with('/') {
-        format!("https://rss.sfacg.com{source}")
     } else {
         source
     };
-    let lower = source.to_ascii_lowercase();
-    let path = lower.split(['?', '#']).next().unwrap_or(&lower);
-    let is_audio = lower.starts_with("https://")
-        && (path.contains("/audio/files/")
-            || path.ends_with(".mp3")
-            || path.ends_with(".m4a")
-            || path.ends_with(".aac"));
-    is_audio.then_some(source)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::normalize_audio_source;
-
-    #[test]
-    fn resolves_relative_audio_paths_against_the_album() {
-        assert_eq!(
-            normalize_audio_source("chapter-01.mp3", Some(42)).as_deref(),
-            Some("https://rss.sfacg.com/web/audio/files/42/chapter-01.mp3")
-        );
-        assert_eq!(
-            normalize_audio_source("//rss.sfacg.com/web/audio/files/42/a.mp3", Some(7)).as_deref(),
-            Some("https://rss.sfacg.com/web/audio/files/42/a.mp3")
-        );
-    }
-
-    #[test]
-    fn rejects_non_audio_or_albumless_relative_sources() {
-        assert_eq!(
-            normalize_audio_source("https://rss.sfacg.com/cover.jpg", Some(42)),
-            None
-        );
-        assert_eq!(normalize_audio_source("chapter-01.mp3", None), None);
-    }
+    (source.starts_with("https://") || source.starts_with("http://")).then_some(source)
 }

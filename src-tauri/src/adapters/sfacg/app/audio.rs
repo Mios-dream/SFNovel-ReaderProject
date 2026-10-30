@@ -88,7 +88,7 @@ impl AppClient {
     /// 从 App 有声章节详情查找音频地址。
     ///
     /// `autoOrder=false` 禁止上游自动购买。不同客户端版本可能使用不同字段名，
-    /// 因此只接受明确指向 SF 音频文件的 URL；找不到时由调用方回退到手机版页面。
+    /// 因此只接受明确指向 SF 音频文件的 URL。
     pub(crate) async fn find_audio_chapter_source(
         &self,
         chapter_id: i64,

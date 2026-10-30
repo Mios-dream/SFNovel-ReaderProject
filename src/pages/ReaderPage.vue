@@ -416,7 +416,7 @@ onBeforeUnmount(() => {
       <button
         v-if="onlineNeedsAuth"
         type="button"
-        @click="desk.credentialsOpen.value = true"
+        @click="desk.openCredentials('official')"
       >
         连接登录
       </button>
@@ -543,7 +543,7 @@ onBeforeUnmount(() => {
       <button
         v-if="onlineNeedsAuth"
         type="button"
-        @click="desk.credentialsOpen.value = true"
+        @click="desk.openCredentials('official')"
       >
         连接登录
       </button>

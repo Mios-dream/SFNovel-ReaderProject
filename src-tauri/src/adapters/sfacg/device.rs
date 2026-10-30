@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use uuid::Uuid;
 
 /// 模拟的官方 App 版本号，参与请求头和签名生成。
-pub(crate) const SF_APP_VERSION: &str = "5.2.36";
+pub(crate) const SF_APP_VERSION: &str = "5.2.84";
 /// 网页请求使用的桌面浏览器 User-Agent。
 pub(crate) const SF_WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 
@@ -26,8 +26,6 @@ const SF_WEBVIEW_VERSION: &str = "120.0.6099.230";
 pub(crate) struct DeviceProfile {
     /// 固定的小写 UUID 设备编号。
     pub(crate) device_id: String,
-    /// 固定的大写 UUID 设备令牌。
-    pub(crate) device_token: String,
 }
 
 impl DeviceProfile {
@@ -39,7 +37,6 @@ impl DeviceProfile {
     pub(crate) fn generate() -> Self {
         Self {
             device_id: Uuid::new_v4().hyphenated().to_string().to_lowercase(),
-            device_token: Uuid::new_v4().hyphenated().to_string().to_uppercase(),
         }
     }
 

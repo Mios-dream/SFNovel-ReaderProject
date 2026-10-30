@@ -16,6 +16,8 @@ import {
   Headphones,
   ListMusic,
   LoaderCircle,
+  LockKeyhole,
+  LockKeyholeOpen,
   Pause,
   Play,
   SkipBack,
@@ -113,6 +115,8 @@ type ReaderAudioTrack = {
   title: string;
   href?: string;
   volume?: string;
+  isVip?: boolean;
+  isUnlocked?: boolean;
 };
 const tracks = computed<ReaderAudioTrack[]>(() => {
   if (online.value)
@@ -121,6 +125,8 @@ const tracks = computed<ReaderAudioTrack[]>(() => {
       id: chapter.id,
       title: chapter.title,
       volume: chapter.volume,
+      isVip: chapter.isVip === true,
+      isUnlocked: chapter.isUnlocked === true,
     }));
   return (desk.localBook.value?.audioTracks || []).map((track, index) => ({
     key: `local-${index}-${track.href}`,
@@ -133,11 +139,8 @@ const onlineError = computed(() =>
     ? desk.chapterError.value || desk.directoryError.value
     : "",
 );
-const onlineNeedsAuth = computed(
-  () =>
-    online.value &&
-    !desk.auth.value.appAuthenticated &&
-    !desk.auth.value.webAuthenticated,
+const onlineNeedsApp = computed(
+  () => online.value && !desk.auth.value.appAuthenticated,
 );
 const initialTrackIndex = computed(() => desk.localAudioTrackIndex.value);
 const onlineDirectoryReady = ref(false);
@@ -152,9 +155,7 @@ watch(
     if (!online.value || !ready || loading) return;
     if (error) {
       showToast(
-        onlineNeedsAuth.value
-          ? "请先登录 App 或网站凭证，再读取有声目录"
-          : error,
+        onlineNeedsApp.value ? "有声内容需要连接 App 凭证" : error,
         "error",
       );
       return;
@@ -646,11 +647,7 @@ function goBack() {
 
 async function retryOnlineAudio(shouldPlay = true) {
   if (!online.value || playbackLoading.value) return;
-  if (onlineNeedsAuth.value) {
-    desk.credentialsOpen.value = true;
-    showToast("请先登录 App 或网站凭证，再读取有声目录", "info");
-    return;
-  }
+  if (!desk.requireAudioAccess()) return;
   try {
     if (!tracks.value.length || desk.directoryError.value) {
       await desk.loadDirectory(true);
@@ -1093,6 +1090,25 @@ async function retryOnlineAudio(shouldPlay = true) {
           >
             <span>{{ String(index + 1).padStart(3, "0") }}</span
             ><strong>{{ track.title }}</strong
+            ><span
+              class="track-access"
+              :class="{ unlocked: track.isUnlocked === true }"
+              :title="
+                track.isVip
+                  ? track.isUnlocked === true
+                    ? '已解锁'
+                    : 'VIP 章节'
+                  : undefined
+              "
+              ><LockKeyholeOpen
+                v-if="track.isVip && track.isUnlocked === true"
+                :size="14"
+                aria-label="已解锁"
+              /><LockKeyhole
+                v-else-if="track.isVip"
+                :size="14"
+                aria-label="VIP 章节"
+              /><small v-if="track.isVip">VIP</small></span
             ><Play v-if="index === trackIndex && !playing" :size="16" /><Pause
               v-else-if="index === trackIndex"
               :size="16"
@@ -1392,7 +1408,7 @@ async function retryOnlineAudio(shouldPlay = true) {
 }
 .track-list button {
   display: grid;
-  grid-template-columns: 37px minmax(0, 1fr) 20px;
+  grid-template-columns: 37px minmax(0, 1fr) auto 20px;
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -1421,6 +1437,20 @@ async function retryOnlineAudio(shouldPlay = true) {
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.track-list .track-access {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #a3654c;
+  font: 12px/1 "Microsoft YaHei", sans-serif;
+}
+.track-list .track-access.unlocked {
+  color: #5f9079;
+}
+.track-list .track-access small {
+  font-size: 12px;
+  font-weight: 500;
 }
 .desktop-timer-action,
 .desktop-settings-action,

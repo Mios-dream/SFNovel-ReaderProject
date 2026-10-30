@@ -69,27 +69,25 @@ impl<'a, R: OnlineReader> ReadingService<'a, R> {
     /// 读取在线音频流地址。
     ///
     /// # 参数
-    /// - `novel_id`：小说编号。
-    /// - `album_id`：可选的有声专辑编号。
-    /// - `title_hint`：用于解析专辑的标题提示。
     /// - `chapter_id`：音频章节编号。
+    /// - `chapter_title`：前端缓存目录中的章节标题。
+    /// - `chapter_volume`：前端缓存目录中的分卷名称。
     ///
     /// # 错误
-    /// 任一编号非法或上游读取失败时返回错误。
+    /// 章节编号或标题非法，或上游读取失败时返回错误。
     pub(crate) async fn audio(
         &self,
-        novel_id: i64,
-        album_id: Option<i64>,
-        title_hint: Option<String>,
         chapter_id: i64,
+        chapter_title: String,
+        chapter_volume: String,
     ) -> AppResult<OnlineAudioTrack> {
-        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
         validate_novel_id(chapter_id).map_err(AppError::invalid_input)?;
-        if let Some(album_id) = album_id {
-            validate_novel_id(album_id).map_err(AppError::invalid_input)?;
+        let chapter_title = chapter_title.trim();
+        if chapter_title.is_empty() || chapter_title.chars().count() > 300 {
+            return Err(AppError::invalid_input("有声章节标题无效"));
         }
         self.reader
-            .load_audio(novel_id, album_id, title_hint.as_deref(), chapter_id)
+            .load_audio(chapter_id, chapter_title, chapter_volume.trim())
             .await
     }
 }

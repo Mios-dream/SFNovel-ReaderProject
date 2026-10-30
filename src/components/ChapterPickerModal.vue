@@ -146,6 +146,20 @@
                   v-if="chapter.downloaded"
                   class="chapter-state downloaded"
                   ><CheckCircle2 :size="15" />已下载</span
+                ><span
+                  v-else-if="chapter.isVip"
+                  class="chapter-state vip"
+                  :class="{ unlocked: chapter.isUnlocked === true }"
+                  :title="chapter.isUnlocked === true ? '已解锁' : 'VIP 章节'"
+                  ><LockKeyholeOpen
+                    v-if="chapter.isUnlocked === true"
+                    :size="15"
+                    aria-label="已解锁"
+                  /><LockKeyhole
+                    v-else
+                    :size="15"
+                    aria-label="VIP 章节"
+                  />VIP</span
                 ></label
               >
             </div></template
@@ -644,7 +658,7 @@ function toggleChapter(id: number, checked: boolean) {
   flex: 0 0 auto;
   align-items: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .chapter-state.downloaded {

@@ -93,13 +93,10 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun readOrCreateDeviceProfile(invoke: Invoke) {
         val prefs = activity.getSharedPreferences(DEVICE_PREFS, Activity.MODE_PRIVATE)
-        val deviceToken = prefs.getString(DEVICE_TOKEN_KEY, null) ?: UUID.randomUUID().toString().uppercase().also {
-            prefs.edit().putString(DEVICE_TOKEN_KEY, it).apply()
-        }
         val deviceId = prefs.getString(DEVICE_ID_KEY, null) ?: UUID.randomUUID().toString().lowercase().also {
             prefs.edit().putString(DEVICE_ID_KEY, it).apply()
         }
-        invoke.resolve(JSObject().put("deviceId", deviceId).put("deviceToken", deviceToken.uppercase()))
+        invoke.resolve(JSObject().put("deviceId", deviceId))
     }
 
     @Command
@@ -277,7 +274,6 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         const val SESSION_MAX_AGE = 30 * 24 * 60 * 60
         const val DEVICE_PREFS = "sfacg-device"
         const val DEVICE_ID_KEY = "device-id"
-        const val DEVICE_TOKEN_KEY = "device-token"
         const val APP_SESSION_KEY = "app-session"
         const val KEY_ALIAS = "sfacg-auth-key"
         const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"

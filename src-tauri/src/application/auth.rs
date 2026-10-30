@@ -73,12 +73,13 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
                 .map_err(|_| AppError::internal("登录会话状态不可用"))?;
             let web_cookie = current.as_ref().and_then(|value| value.web_cookie.clone());
             *current = Some(AuthSession {
-                app_cookie: Some(cookie),
+                app_cookie: Some(cookie.clone()),
                 web_cookie,
                 user_name: username.to_string(),
             });
         }
-        if let Err(error) = self.remote.register_device().await {
+        self.state.clear_profile_cache();
+        if let Err(error) = self.remote.register_device(&cookie).await {
             eprintln!("[sfacg] device registration after login failed: {error}");
         }
         self.status_snapshot()
@@ -97,6 +98,7 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
         };
         self.gateway.persist_web_session(web_cookie).await?;
         self.merge_web_session(incoming)?;
+        self.state.clear_profile_cache();
         Ok(())
     }
 
@@ -106,6 +108,7 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
     /// 平台清理失败或进程内会话状态不可用时返回错误。
     pub(crate) async fn logout(&self) -> AppResult<()> {
         self.gateway.clear_all().await?;
+        self.state.clear_profile_cache();
         self.replace_session(None)
     }
 
@@ -115,6 +118,7 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
     /// App 会话清理失败或状态同步失败时返回错误。
     pub(crate) async fn logout_app(&self) -> AppResult<AuthStatus> {
         self.gateway.clear_app().await?;
+        self.state.clear_profile_cache();
         {
             let mut current = self
                 .state
@@ -143,6 +147,7 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
     /// Web 会话清理失败或状态同步失败时返回错误。
     pub(crate) async fn logout_web(&self) -> AppResult<AuthStatus> {
         self.gateway.clear_web().await?;
+        self.state.clear_profile_cache();
         {
             let mut current = self
                 .state
@@ -176,7 +181,12 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
     /// # 错误
     /// 未登录或上游资料接口失败时返回错误。
     pub(crate) async fn profile(&self) -> AppResult<UserProfile> {
+        if let Some(profile) = self.state.cached_profile() {
+            self.remember_profile_name(&profile);
+            return Ok(profile);
+        }
         let profile = self.remote.account_profile().await?;
+        self.state.store_profile(&profile);
         self.remember_profile_name(&profile);
         Ok(profile)
     }

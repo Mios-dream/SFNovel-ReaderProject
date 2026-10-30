@@ -58,23 +58,21 @@ pub(crate) async fn load_online_comic_chapter(
 ///
 /// # 参数
 /// - `app`：Tauri 应用句柄。
-/// - `novel_id`：小说编号。
-/// - `album_id`：可选的有声专辑编号。
-/// - `title_hint`：用于解析专辑的标题提示。
 /// - `chapter_id`：音频章节编号。
+/// - `chapter_title`：前端已缓存目录中的章节标题。
+/// - `chapter_volume`：前端已缓存目录中的分卷名称。
 ///
 /// # 错误
-/// 编号非法、专辑无法解析或上游拒绝请求时返回错误消息。
+/// 章节编号或标题非法，或上游拒绝请求时返回错误消息。
 pub(crate) async fn load_online_audio_track(
     app: tauri::AppHandle,
-    novel_id: i64,
-    album_id: Option<i64>,
-    title_hint: Option<String>,
     chapter_id: i64,
+    chapter_title: String,
+    chapter_volume: String,
 ) -> Result<OnlineAudioTrack, String> {
     let reader = OnlineReaderAdapter::new(app);
     ReadingService::new(&reader)
-        .audio(novel_id, album_id, title_hint, chapter_id)
+        .audio(chapter_id, chapter_title, chapter_volume)
         .await
         .map_err(AppError::into_message)
 }

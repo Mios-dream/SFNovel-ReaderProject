@@ -11,10 +11,9 @@ pub(super) fn security_header(device: &DeviceProfile, nonce: &str) -> Result<Str
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "系统时间无效".to_string())?
         .as_millis();
-    let device_token = device.device_token.to_uppercase();
-    let digest =
-        Md5::digest(format!("{nonce}{timestamp}{device_token}{SF_SECURITY_SALT}").as_bytes());
+    let device_id = device.device_id.to_uppercase();
+    let digest = Md5::digest(format!("{nonce}{timestamp}{device_id}{SF_SECURITY_SALT}").as_bytes());
     Ok(format!(
-        "nonce={nonce}&timestamp={timestamp}&devicetoken={device_token}&sign={digest:X}"
+        "nonce={nonce}&timestamp={timestamp}&devicetoken={device_id}&sign={digest:X}"
     ))
 }
