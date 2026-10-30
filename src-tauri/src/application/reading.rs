@@ -44,7 +44,7 @@ impl<'a, R: OnlineReader> ReadingService<'a, R> {
     /// - `comic_id`：漫画编号。
     /// - `chapter_id`：章节编号。
     /// - `chapter_title`：章节标题，长度必须为 1 到 300 个字符。
-    /// - `source_path`：可选的网页来源路径。
+    /// - `source_path`：保留的来源路径。
     ///
     /// # 错误
     /// 编号或标题非法、上游读取失败时返回错误。

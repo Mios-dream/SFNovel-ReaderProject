@@ -53,18 +53,18 @@ impl OnlineReader for OnlineReaderAdapter {
     /// - `comic_id`：漫画编号。
     /// - `chapter_id`：章节编号。
     /// - `chapter_title`：渲染进程展示的章节标题。
-    /// - `source_path`：可选的网页来源路径。
+    /// - `_source_path`：保留的来源路径，漫画已改用 App API 读取。
     ///
     /// # 错误
-    /// 来源目录或页面列表无法读取时返回上游错误。
+    /// 目录或页面列表无法读取时返回上游错误。
     async fn load_comic(
         &self,
         comic_id: i64,
         chapter_id: i64,
         chapter_title: &str,
-        source_path: Option<&str>,
+        _source_path: Option<&str>,
     ) -> AppResult<OnlineComicChapter> {
-        load_comic(&self.app, comic_id, chapter_id, chapter_title, source_path)
+        load_comic(&self.app, comic_id, chapter_id, chapter_title)
             .await
             .map_err(AppError::upstream)
     }
@@ -181,16 +181,13 @@ async fn load_text(
 /// - `comic_id`：漫画编号。
 /// - `chapter_id`：章节编号。
 /// - `chapter_title`：章节标题。
-/// - `source_path`：可选的网页来源路径。
-///
 /// # 错误
-/// 缓存目录创建、来源解析或页面地址读取失败时返回错误消息。
+/// 缓存目录创建、目录查找或页面地址读取失败时返回错误消息。
 async fn load_comic(
     app: &tauri::AppHandle,
     comic_id: i64,
     chapter_id: i64,
     chapter_title: &str,
-    source_path: Option<&str>,
 ) -> Result<OnlineComicChapter, String> {
     let directory = online_cache_directory(app)?
         .join("comics")
@@ -198,9 +195,14 @@ async fn load_comic(
         .join(chapter_id.to_string());
     fs::create_dir_all(&directory).map_err(|error| format!("无法创建漫画在线缓存目录：{error}"))?;
     let client = SfSource::connect(app).await?;
-    let (_, folder) = client.comic_source(comic_id, source_path, None).await?;
-    let referer = format!("https://manhua.sfacg.com/mh/{folder}/{chapter_id}/");
-    let image_urls = client.comic_images(comic_id, chapter_id).await?;
+    let catalog = client.comic_catalog(comic_id).await?;
+    let path_name = catalog
+        .iter()
+        .find(|chapter| chapter.id == chapter_id)
+        .map(|chapter| chapter.path_name.as_str())
+        .ok_or_else(|| "该章节不在当前漫画目录中".to_string())?;
+    let referer = format!("https://m.sfacg.com/comic/{comic_id}/");
+    let image_urls = client.comic_images(comic_id, path_name).await?;
     if image_urls.is_empty() {
         return Err("该漫画章节没有可读取的页面".to_string());
     }

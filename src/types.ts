@@ -21,7 +21,7 @@ export type Novel = {
   lastUpdateTime: string;
   bookshelfName?: string;
   bookshelfType?: "novel" | "audio" | "comic";
-  /** Public web path used to open a comic without App identity lookup. */
+  /** Source path retained for library identity and metadata. */
   sourcePath?: string;
   categoryName?: string;
   typeId?: number;

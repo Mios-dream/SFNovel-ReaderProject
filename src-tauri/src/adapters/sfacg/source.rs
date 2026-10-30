@@ -2,8 +2,8 @@
 //!
 //! 业务层只调用本模块的业务方法，不直接选择 App 或网页客户端。
 //! App 凭证与网页凭证只由底层客户端读取，不能互相转换。
-//! 文字正文可由网页补充；有声内容只接受 App。
-//! 设备登记和 App 余额只接受 App；漫画、网页书架和 VIP 图片正文只接受网页。
+//! 文字正文可由网页补充；有声播放地址只接受 App。
+//! 设备登记和 App 余额只接受 App；网页书架和 VIP 图片正文只接受网页。
 
 use super::app::AppClient;
 use super::device::device_profile;
@@ -116,9 +116,7 @@ impl SfSource {
         album_id: i64,
         novel_id: i64,
     ) -> Result<NovelDetail, String> {
-        self.require_app("有声作品详情")?
-            .get_audio_details(album_id, novel_id)
-            .await
+        self.app_client.get_audio_details(album_id, novel_id).await
     }
 
     /// 读取漫画详情。
@@ -137,18 +135,18 @@ impl SfSource {
         novel_id: i64,
         title_hint: Option<&str>,
     ) -> Result<i64, String> {
-        self.require_app("有声专辑")?
+        self.app_client
             .find_audio_album_id(novel_id, title_hint)
             .await
     }
 
-    /// 读取有声目录。目录和账号解锁状态都来自 App。
+    /// 读取有声目录。目录接口允许匿名访问。
     pub(crate) async fn audio_catalog(
         &self,
         album_id: i64,
         title_hint: Option<&str>,
     ) -> Result<(String, Vec<AudioChapter>), String> {
-        self.require_app("有声目录")?
+        self.app_client
             .get_audio_catalog(album_id, title_hint)
             .await
     }
@@ -156,11 +154,14 @@ impl SfSource {
     /// 读取单章音频地址。地址由 App 返回，并需要 App 凭证播放。
     pub(crate) async fn audio_source(&self, chapter_id: i64) -> Result<String, String> {
         validate_novel_id(chapter_id)?;
-        self.require_app("有声章节")?
+        if !self.has_app_session() {
+            return Err("音频地址为空，请登录 App 凭证后播放".to_string());
+        }
+        self.app_client
             .find_audio_chapter_source(chapter_id)
             .await
             .map_err(|error| format!("读取 App 音频地址失败：{error}"))?
-            .ok_or_else(|| "App 未返回该章节的音频地址，请确认章节已解锁或重新登录 App".to_string())
+            .ok_or_else(|| "音频地址为空，请确认章节已解锁或重新登录 App 凭证".to_string())
     }
 
     /// 检查当前会话是否可以使用有声内容。
@@ -168,7 +169,7 @@ impl SfSource {
         self.require_app("有声内容").map(|_| ())
     }
 
-    /// 解析漫画标题和网页目录标识。
+    /// 解析漫画标题和来源目录标识。
     pub(crate) async fn comic_source(
         &self,
         comic_id: i64,
@@ -189,19 +190,19 @@ impl SfSource {
         self.app_client.comic_identity(comic_id).await
     }
 
-    /// 读取漫画网页目录。
-    pub(crate) async fn comic_catalog(&self, folder: &str) -> Result<Vec<ComicChapter>, String> {
-        self.web_client.get_comic_catalog(folder).await
+    /// 读取漫画 App 目录。
+    pub(crate) async fn comic_catalog(&self, comic_id: i64) -> Result<Vec<ComicChapter>, String> {
+        self.app_client.get_comic_catalog(comic_id).await
     }
 
     /// 读取漫画章节图片地址。
     pub(crate) async fn comic_images(
         &self,
         comic_id: i64,
-        chapter_id: i64,
+        path_name: &str,
     ) -> Result<Vec<String>, String> {
-        self.web_client
-            .comic_chapter_images(comic_id, chapter_id)
+        self.app_client
+            .get_comic_chapter_images(comic_id, path_name)
             .await
     }
 
@@ -471,8 +472,8 @@ impl RemoteGateway for SfSource {
             .map_err(remote_error)
     }
 
-    async fn comic_catalog(&self, folder: &str) -> AppResult<Vec<ComicChapter>> {
-        SfSource::comic_catalog(self, folder)
+    async fn comic_catalog(&self, comic_id: i64) -> AppResult<Vec<ComicChapter>> {
+        SfSource::comic_catalog(self, comic_id)
             .await
             .map_err(remote_error)
     }

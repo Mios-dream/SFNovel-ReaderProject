@@ -532,15 +532,6 @@ function textChapterBadge(
         <div v-else-if="directoryError" class="remote-directory-empty error">
           <span>{{ directoryError }}</span>
           <div class="directory-error-actions">
-            <button
-              v-if="
-                mode === 'audio' &&
-                !desk.auth.value.appAuthenticated
-              "
-              @click="desk.openAppCredentials()"
-            >
-              连接 App
-            </button>
             <button @click="ensureDirectory(true)">重试</button>
           </div>
         </div>
@@ -648,15 +639,6 @@ function textChapterBadge(
         <div v-else-if="directoryError" class="drawer-empty error">
           <span>{{ directoryError }}</span>
           <div class="directory-error-actions">
-            <button
-              v-if="
-                mode === 'audio' &&
-                !desk.auth.value.appAuthenticated
-              "
-              @click="desk.openAppCredentials()"
-            >
-              连接 App
-            </button>
             <button @click="ensureDirectory(true)">重试</button>
           </div>
         </div>

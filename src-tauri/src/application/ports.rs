@@ -38,15 +38,15 @@ pub(crate) trait RemoteGateway: Send + Sync {
         album_id: i64,
         title_hint: Option<&str>,
     ) -> AppResult<(String, Vec<AudioChapter>)>;
-    /// 解析漫画来源目录。
+    /// 解析漫画标题和来源标识。
     async fn comic_source(
         &self,
         comic_id: i64,
         source_path: Option<&str>,
         title_hint: Option<&str>,
     ) -> AppResult<(String, String)>;
-    /// 读取指定来源目录下的漫画章节。
-    async fn comic_catalog(&self, folder: &str) -> AppResult<Vec<ComicChapter>>;
+    /// 读取漫画 App 章节。
+    async fn comic_catalog(&self, comic_id: i64) -> AppResult<Vec<ComicChapter>>;
     /// 读取当前账号的公开书架。
     async fn bookshelf(&self) -> AppResult<PublicShelf>;
     /// 读取当前账号资料。

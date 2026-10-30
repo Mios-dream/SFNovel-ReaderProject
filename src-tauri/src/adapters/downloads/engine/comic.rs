@@ -168,7 +168,7 @@ async fn run_inner(
     registry::emit_job(app, state, job_id);
     registry::emit_library(app, state, job_id);
 
-    let catalog = source.comic_catalog(&folder).await?;
+    let catalog = source.comic_catalog(comic_id).await?;
     let requested = chapter_ids.iter().copied().collect::<HashSet<_>>();
     let chapters = catalog
         .into_iter()
@@ -202,7 +202,7 @@ async fn run_inner(
         let chapter_directory = comic_directory.join(format!("{:06}", chapter.id));
         let marker = chapter_directory.join(".complete");
         if !marker.is_file() {
-            let images = match source.comic_images(comic_id, chapter.id).await {
+            let images = match source.comic_images(comic_id, &chapter.path_name).await {
                 Ok(images) => images,
                 Err(error) => {
                     if !chapter.is_vip {
@@ -243,7 +243,7 @@ async fn run_inner(
                 let payload = match fetch_asset(
                     &source,
                     image,
-                    "https://manhua.sfacg.com/",
+                    "https://m.sfacg.com/",
                     "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
                     "漫画图片",
                 )

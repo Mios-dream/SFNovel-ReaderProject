@@ -132,11 +132,11 @@ pub(crate) async fn get_audio_chapters(
 /// # 参数
 /// - `app`：Tauri 应用句柄。
 /// - `comic_id`：漫画编号。
-/// - `source_path`：可选的网页来源路径。
-/// - `title_hint`：用于解析漫画来源目录的标题提示。
+/// - `source_path`：可选的来源路径，用于读取作品标题。
+/// - `title_hint`：用于生成标题回退值的提示。
 ///
 /// # 错误
-/// 编号非法、来源目录无法解析或上游请求失败时返回错误消息。
+/// 编号非法或上游请求失败时返回错误消息。
 pub(crate) async fn get_comic_chapters(
     app: tauri::AppHandle,
     comic_id: i64,

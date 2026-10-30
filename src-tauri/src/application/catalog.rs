@@ -160,11 +160,11 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
     ///
     /// # 参数
     /// - `comic_id`：漫画编号。
-    /// - `source_path`：可选的网页来源路径。
-    /// - `title_hint`：用于解析来源目录的标题提示。
+    /// - `source_path`：可选的来源路径，用于读取作品标题。
+    /// - `title_hint`：用于生成标题回退值的提示。
     ///
     /// # 错误
-    /// 编号非法、来源目录无法解析、上游请求失败或本地书库读取失败时返回错误。
+    /// 编号非法、上游请求失败或本地书库读取失败时返回错误。
     pub(crate) async fn comic_catalog(
         &self,
         comic_id: i64,
@@ -172,11 +172,11 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
         title_hint: Option<String>,
     ) -> AppResult<ComicCatalog> {
         validate_novel_id(comic_id).map_err(AppError::invalid_input)?;
-        let (title, folder) = self
+        let (title, _) = self
             .remote
             .comic_source(comic_id, source_path.as_deref(), title_hint.as_deref())
             .await?;
-        let chapters = self.remote.comic_catalog(&folder).await?;
+        let chapters = self.remote.comic_catalog(comic_id).await?;
         let downloaded = self.store.downloaded_ids("comic", Some(&title))?;
         Ok(ComicCatalog {
             title,

@@ -134,30 +134,19 @@ const tracks = computed<ReaderAudioTrack[]>(() => {
     href: track.href,
   }));
 });
-const onlineError = computed(() =>
-  online.value
-    ? desk.chapterError.value || desk.directoryError.value
-    : "",
-);
-const onlineNeedsApp = computed(
-  () => online.value && !desk.auth.value.appAuthenticated,
-);
 const initialTrackIndex = computed(() => desk.localAudioTrackIndex.value);
 const onlineDirectoryReady = ref(false);
 watch(
   () => ({
     ready: onlineDirectoryReady.value,
     loading: desk.directoryLoading.value,
-    error: onlineError.value,
+    error: desk.directoryError.value,
     count: tracks.value.length,
   }),
   ({ ready, loading, error, count }) => {
     if (!online.value || !ready || loading) return;
     if (error) {
-      showToast(
-        onlineNeedsApp.value ? "有声内容需要连接 App 凭证" : error,
-        "error",
-      );
+      showToast(error, "error");
       return;
     }
     if (!count) showToast("暂时没有可播放的章节", "warning");
@@ -215,11 +204,7 @@ const currentTrackHref = computed(() => {
 const onlineLoading = computed(
   () =>
     online.value &&
-    (desk.directoryLoading.value ||
-      desk.audioTrackLoading.value ||
-      (!currentTrackHref.value &&
-        tracks.value.length > 0 &&
-        !onlineError.value)),
+    (desk.directoryLoading.value || desk.audioTrackLoading.value),
 );
 const playbackLoading = computed(
   () => onlineLoading.value || startingPlayback.value,
@@ -525,8 +510,7 @@ function togglePlayback() {
 
 async function selectTrack(index: number, shouldPlay = playing.value) {
   if (!tracks.value.length) return;
-  // 音轨尚未载入完成时避免重复发起请求。不能使用 onlineLoading：
-  // 首次选择音轨时 currentTrackHref 尚不存在，同样会使该状态为 true。
+  // 音轨尚未载入完成时避免重复发起请求。
   if (online.value && (desk.audioTrackLoading.value || startingPlayback.value))
     return;
   const target = Math.min(Math.max(0, index), tracks.value.length - 1);
@@ -534,8 +518,10 @@ async function selectTrack(index: number, shouldPlay = playing.value) {
   if (online.value) {
     if (!track?.id) return;
     if (playing.value) pause();
-    const payload = await desk.loadOnlineAudioTrack(track.id);
-    if (!payload) return;
+    if (shouldPlay) {
+      const payload = await desk.loadOnlineAudioTrack(track.id, true);
+      if (!payload) return;
+    }
   }
   trackIndex.value = target;
   currentTime.value = 0;
@@ -647,15 +633,15 @@ function goBack() {
 
 async function retryOnlineAudio(shouldPlay = true) {
   if (!online.value || playbackLoading.value) return;
-  if (!desk.requireAudioAccess()) return;
   try {
     if (!tracks.value.length || desk.directoryError.value) {
       await desk.loadDirectory(true);
     }
     if (!tracks.value.length) return;
+    if (!desk.requireAudioPlaybackAccess()) return;
     const targetId =
-      desk.pendingChapterId.value ||
       currentTrack.value?.id ||
+      desk.pendingChapterId.value ||
       tracks.value[0]?.id;
     const index = tracks.value.findIndex((track) => track.id === targetId);
     await selectTrack(index >= 0 ? index : 0, shouldPlay);
@@ -775,7 +761,7 @@ async function retryOnlineAudio(shouldPlay = true) {
                 playbackLoading
                   ? '正在加载音频'
                   : online && !currentTrackHref
-                    ? '重试加载音频'
+                    ? '播放'
                     : !currentTrackHref
                       ? '音频尚未就绪'
                       : playing

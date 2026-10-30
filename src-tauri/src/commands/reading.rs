@@ -35,7 +35,7 @@ pub(crate) async fn load_online_text_chapter(
 /// - `comic_id`：漫画编号。
 /// - `chapter_id`：章节编号。
 /// - `chapter_title`：章节标题，最长 300 个字符。
-/// - `source_path`：可选的网页来源路径。
+/// - `source_path`：保留的来源路径。
 ///
 /// # 错误
 /// 编号或标题非法、未登录或页面读取失败时返回错误消息。

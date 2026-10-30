@@ -6,6 +6,14 @@ pub(super) const SF_API_USER: &str = "androiduser";
 pub(super) const SF_API_PASSWORD: &str = "1a#$51-yt69;*Acv@qxq";
 /// 生成 `SFSecurity` 请求头所需的协议盐值。
 pub(super) const SF_SECURITY_SALT: &str = "FN_Q29XHVmfV3mYX";
+/// 漫画兼容接口使用的旧客户端签名盐值。
+pub(super) const SF_SECURITY_SALT_V2: &str = "lPQDb9AKO7$LjkPG";
+/// 漫画兼容接口要求的响应类型。
+pub(super) const COMIC_ACCEPT: &str = "application/vnd.sfacg.api+json;version=1";
+/// 漫画兼容接口在未登录时使用的已登记设备身份。
+pub(super) const COMIC_ANONYMOUS_DEVICE_ID: &str = "910d166a-736e-3231-8b21-8d12dfd75f16";
+/// 漫画目录需要展开的付费与封面字段。
+pub(super) const COMIC_CHAPTER_EXPAND: &str = "needFireMoney,originNeedFireMoney,chapcover";
 /// 有声分卷章节需要展开的媒体与销售字段。
 pub(super) const AUDIO_CHAPTER_EXPAND: &str =
     "fileName,audioUrl,needFireMoney,originNeedFireMoney,fileSize,duration";

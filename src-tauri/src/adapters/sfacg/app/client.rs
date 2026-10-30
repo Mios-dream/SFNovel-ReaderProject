@@ -1,7 +1,9 @@
 use super::super::device::DeviceProfile;
-use super::constants::{SF_API_HOST, SF_API_PASSWORD, SF_API_USER};
+use super::constants::{
+    COMIC_ACCEPT, COMIC_ANONYMOUS_DEVICE_ID, SF_API_HOST, SF_API_PASSWORD, SF_API_USER,
+};
 use super::error::AppApiError;
-use super::signing::security_header;
+use super::signing::{comic_security_header, security_header};
 use crate::adapters::sfacg::cookie::{filter_cookie_header, has_cookie_name};
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -100,6 +102,56 @@ impl AppClient {
             }
         }
         Ok(request)
+    }
+
+    /// 构建漫画兼容接口请求。签名和响应类型与普通 App 请求不同。
+    fn comic_signed_request(&self, path: &str) -> Result<reqwest::RequestBuilder, String> {
+        let nonce = Uuid::new_v4().to_string().to_uppercase();
+        // 未登录时没有本机设备登记，使用文档中已验证可匿名的设备身份。
+        let device = if self.has_session() {
+            self.device.clone()
+        } else {
+            DeviceProfile {
+                device_id: COMIC_ANONYMOUS_DEVICE_ID.to_string(),
+            }
+        };
+        let mut request = self
+            .client
+            .get(format!("{SF_API_HOST}{path}"))
+            .basic_auth(SF_API_USER, Some(SF_API_PASSWORD))
+            .header(reqwest::header::USER_AGENT, device.user_agent())
+            .header("Accept", COMIC_ACCEPT)
+            .header("Accept-Language", "zh-Hans-CN;q=1")
+            .header("SFSecurity", comic_security_header(&device, &nonce)?);
+        if let Some(cookie) = self.app_cookie.as_deref() {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        Ok(request)
+    }
+
+    /// 请求漫画兼容接口。`417/782` 可能由 nonce 触发，换新 nonce 最多重试五次。
+    pub(crate) async fn get_comic_data(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<Value, String> {
+        let mut last_error = None;
+        for _ in 0..5 {
+            let response = self
+                .comic_signed_request(path)?
+                .query(query)
+                .send()
+                .await
+                .map_err(|error| format!("SF 漫画接口请求失败：{error}"))?;
+            match Self::parse_response(response, path).await {
+                Ok(data) => return Ok(data),
+                Err(error) if error.is_client_version_gated() => last_error = Some(error),
+                Err(error) => return Err(error.describe(path)),
+            }
+        }
+        Err(last_error
+            .map(|error| error.describe(path))
+            .unwrap_or_else(|| "SF 漫画接口请求失败".to_string()))
     }
 
     /// 请求一个已签名的 SF App API 资源，并拆开其 `data` 数据包。

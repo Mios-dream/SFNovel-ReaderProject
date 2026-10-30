@@ -30,11 +30,13 @@ function isSameRemoteWork(candidate: Novel, source: Novel) {
   ) {
     return false;
   }
-  return !source.authorName ||
+  return (
+    !source.authorName ||
     source.authorName === "未知作者" ||
     !candidate.authorName ||
     candidate.authorName === "未知作者" ||
-    candidate.authorName === source.authorName;
+    candidate.authorName === source.authorName
+  );
 }
 
 /**
@@ -66,10 +68,9 @@ export function useNovelDesk() {
 
   const auth = useDeskAuth(notify);
 
-  function requireAudioAccess() {
+  function requireAudioPlaybackAccess() {
     if (auth.auth.value.appAuthenticated) return true;
-    auth.openAppCredentials();
-    notify("有声内容需要连接 App 凭证");
+    notify("音频地址为空，请登录 App 凭证后播放", "warning");
     return false;
   }
 
@@ -197,7 +198,6 @@ export function useNovelDesk() {
   }
 
   async function openRemoteBookDetail(novel: Novel, preserveMedia = false) {
-    if (remoteMediaType(novel) === "audio" && !requireAudioAccess()) return;
     if (!preserveMedia && active.value !== "remoteDetail") {
       remoteDetailReturnView.value = active.value;
     }
@@ -230,7 +230,10 @@ export function useNovelDesk() {
       }
     } catch (error) {
       if (request === remoteBookRequest)
-        notify(error instanceof Error ? error.message : "读取作品详情失败", "error");
+        notify(
+          error instanceof Error ? error.message : "读取作品详情失败",
+          "error",
+        );
     } finally {
       if (request === remoteBookRequest) remoteBookLoading.value = false;
     }
@@ -270,7 +273,6 @@ export function useNovelDesk() {
     mode: ChapterMode,
     chapterId?: number,
   ) {
-    if (mode === "audio" && !requireAudioAccess()) return;
     if (
       active.value !== "reader" &&
       active.value !== "comicReader" &&
@@ -294,8 +296,7 @@ export function useNovelDesk() {
     if (!work?.id) return;
     startOnlineReading(
       {
-        novelId:
-          mode === "audio" ? work.catalogId || work.id : work.id,
+        novelId: mode === "audio" ? work.catalogId || work.id : work.id,
         mediaId: mode === "audio" ? work.id : undefined,
         novelName: work.title,
         authorName: work.author,
@@ -315,11 +316,7 @@ export function useNovelDesk() {
   function navigate(view: ViewName) {
     if (remoteDetailSessionActive && view !== "remoteDetail")
       clearRemoteDetailSession();
-    if (
-      view === "reader" ||
-      view === "comicReader" ||
-      view === "audioPlayer"
-    ) {
+    if (view === "reader" || view === "comicReader" || view === "audioPlayer") {
       readerSource.value = "local";
     }
     active.value = view;
@@ -332,7 +329,6 @@ export function useNovelDesk() {
   }
 
   function continueDownload(mode: "novel" | "audio" | "comic") {
-    if (mode === "audio" && !requireAudioAccess()) return;
     const book = library.localBook.value;
     const work = book?.[mode];
     if (!work) return;
@@ -350,7 +346,6 @@ export function useNovelDesk() {
   }
 
   function openChapterPicker(novel: Novel, mode: ChapterMode) {
-    if (mode === "audio" && !requireAudioAccess()) return;
     return chapterPicker.openChapterPicker(novel, mode);
   }
 
@@ -424,7 +419,10 @@ export function useNovelDesk() {
       });
     void auth.refreshAuthStatus().then(() => auth.loadAccountProfile());
     document.addEventListener("copy", blockCopy);
-    document.addEventListener("visibilitychange", refreshLibraryAfterReturningToApp);
+    document.addEventListener(
+      "visibilitychange",
+      refreshLibraryAfterReturningToApp,
+    );
   });
   onBeforeUnmount(() => {
     disposed = true;
@@ -461,7 +459,7 @@ export function useNovelDesk() {
     backFromOnlineReading,
     continueDownload,
     openChapterPicker,
-    requireAudioAccess,
+    requireAudioPlaybackAccess,
     navigate,
     formatDate,
     ...online,

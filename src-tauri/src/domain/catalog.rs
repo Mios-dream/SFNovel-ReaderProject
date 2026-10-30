@@ -87,7 +87,7 @@ pub(crate) struct NovelDetail {
     /// 上游是否允许下载。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) allow_download: Option<bool>,
-    /// 网页来源路径；存在时表示该作品需通过网页客户端读取。
+    /// 来源路径；用于作品识别和本地记录。
     #[serde(rename = "sourcePath", skip_serializing_if = "Option::is_none")]
     pub(crate) source_path: Option<String>,
 }
@@ -242,6 +242,8 @@ pub(crate) struct ComicChapter {
     pub(crate) id: i64,
     /// 章节标题。
     pub(crate) title: String,
+    /// App 图片接口使用的章节路径。
+    pub(crate) path_name: String,
     /// 章节是否为 VIP 内容。
     pub(crate) is_vip: bool,
     /// 当前账号的解锁状态。
