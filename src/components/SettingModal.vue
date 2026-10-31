@@ -480,8 +480,8 @@ input[type="checkbox"] {
   }
   .settings-modal {
     width: 100%;
-    height: min(88dvh, 760px);
-    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 10px);
+    height: auto;
+    max-height: calc(75dvh - env(safe-area-inset-top, 0px) - 10px);
     padding: 17px 16px calc(12px + env(safe-area-inset-bottom, 0px));
     border-right: 0;
     border-bottom: 0;

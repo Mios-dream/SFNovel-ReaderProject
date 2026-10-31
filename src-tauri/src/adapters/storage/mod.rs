@@ -64,8 +64,12 @@ impl NativeStorage {
     ///
     /// # 错误
     /// 字典无法读取时返回错误消息。
-    pub(crate) fn decode_api_content(&self, content: &str) -> Result<String, String> {
-        settings::decode_api_content(&self.app, content)
+    pub(crate) fn decode_api_content(
+        &self,
+        content: &str,
+        is_content_encrypted: bool,
+    ) -> Result<String, String> {
+        settings::decode_api_content(&self.app, content, is_content_encrypted)
     }
 
     /// 读取持久化请求策略。

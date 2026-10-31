@@ -129,7 +129,9 @@ async fn load_text(
     let mut content = match chapter.content_kind {
         TextContentKind::ImageVip | TextContentKind::EncryptedVip => {
             match source
-                .try_direct_text_chapter(chapter_id, |raw| storage.decode_api_content(raw))
+                .try_direct_text_chapter(chapter_id, |raw, encrypted| {
+                    storage.decode_api_content(raw, encrypted)
+                })
                 .await
             {
                 Some(Ok(content)) => content,
@@ -148,8 +150,8 @@ async fn load_text(
         }
         TextContentKind::Text | TextContentKind::Unknown => {
             match source
-                .read_chapter_text(novel_id, volume.volume_id, chapter_id, |raw| {
-                    storage.decode_api_content(raw)
+                .read_chapter_text(novel_id, volume.volume_id, chapter_id, |raw, encrypted| {
+                    storage.decode_api_content(raw, encrypted)
                 })
                 .await
             {

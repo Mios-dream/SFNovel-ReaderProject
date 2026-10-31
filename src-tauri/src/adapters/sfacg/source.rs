@@ -274,7 +274,7 @@ impl SfSource {
         decode: F,
     ) -> Option<Result<String, String>>
     where
-        F: FnOnce(&str) -> Result<String, String>,
+        F: FnOnce(&str, bool) -> Result<String, String>,
     {
         if !self.has_app_session() {
             return None;
@@ -285,7 +285,7 @@ impl SfSource {
                 .get_chapter_content_and_metadata(chapter_id)
                 .await
             {
-                Ok(api) => decode(&api.content),
+                Ok(api) => decode(&api.content, api.is_content_encrypted),
                 Err(error) => Err(error),
             },
         )
@@ -300,7 +300,7 @@ impl SfSource {
         decode: F,
     ) -> Result<TextChapter, String>
     where
-        F: FnOnce(&str) -> Result<String, String>,
+        F: FnOnce(&str, bool) -> Result<String, String>,
     {
         if let Some(result) = self.try_direct_text_chapter(chapter_id, decode).await {
             return result.map(|content| TextChapter {

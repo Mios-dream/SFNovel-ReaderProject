@@ -33,6 +33,8 @@ pub(crate) struct TextChapter {
 pub(crate) struct ApiChapterContent {
     /// API 返回的正文。
     pub(crate) content: String,
+    /// 正文是否仍为单字替换密文。
+    pub(crate) is_content_encrypted: bool,
     /// 正文所属作品编号。
     pub(crate) novel_id: i64,
     /// 正文所属分卷编号。

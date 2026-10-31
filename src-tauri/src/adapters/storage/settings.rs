@@ -113,10 +113,18 @@ pub(crate) fn dictionary_size(app: &tauri::AppHandle) -> Result<ContentDictionar
 /// # 参数
 /// - `app`：Tauri 应用句柄。
 /// - `content`：待解码的正文。
+/// - `is_content_encrypted`：上游是否仍将正文标记为密文。
 ///
 /// # 错误
 /// 恢复字典无法读取时返回错误消息。
-pub(crate) fn decode_api_content(app: &tauri::AppHandle, content: &str) -> Result<String, String> {
+pub(crate) fn decode_api_content(
+    app: &tauri::AppHandle,
+    content: &str,
+    is_content_encrypted: bool,
+) -> Result<String, String> {
+    if !is_content_encrypted {
+        return Ok(content.to_string());
+    }
     let dictionary = load_content_dictionary(app)?;
     Ok(content
         .chars()

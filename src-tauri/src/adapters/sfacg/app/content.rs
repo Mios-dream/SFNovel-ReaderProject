@@ -1,4 +1,5 @@
 use super::parse_catalog::parse_chapter_catalog;
+use super::parsing::json_bool_field;
 use super::AppClient;
 use crate::domain::catalog::ChapterVolume;
 use crate::domain::content::ApiChapterContent;
@@ -26,16 +27,19 @@ impl AppClient {
         let response = self
             .get_data(
                 &format!("/Chaps/{chapter_id}"),
-                &[("expand", "content,expand.content".to_string())],
+                &[("expand", "content,isContentEncrypted".to_string())],
             )
             .await?;
-        let content = response
-            .get("expand")
+        let expand = response.get("expand");
+        let content = expand
             .and_then(|value| value.get("content"))
             .and_then(Value::as_str)
             .or_else(|| response.get("content").and_then(Value::as_str))
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| "SF App API 未返回章节正文".to_string())?;
+        let is_content_encrypted = expand
+            .and_then(|value| json_bool_field(value, &["isContentEncrypted"]))
+            .unwrap_or(false);
         let novel_id = response
             .get("novelId")
             .and_then(Value::as_i64)
@@ -46,6 +50,7 @@ impl AppClient {
             .ok_or_else(|| "SF App API 未返回章节所属卷信息".to_string())?;
         Ok(ApiChapterContent {
             content: content.to_string(),
+            is_content_encrypted,
             novel_id,
             volume_id,
         })

@@ -358,7 +358,9 @@ async fn run_inner(
             let (content, content_source, ocr_source_path) = match content_kind {
                 TextContentKind::ImageVip | TextContentKind::EncryptedVip => {
                     let app_result = source
-                        .try_direct_text_chapter(chapter_id, |raw| storage.decode_api_content(raw))
+                        .try_direct_text_chapter(chapter_id, |raw, encrypted| {
+                            storage.decode_api_content(raw, encrypted)
+                        })
                         .await;
                     match app_result {
                         Some(Ok(content)) => (content, Some("app".to_string()), None),
@@ -409,8 +411,8 @@ async fn run_inner(
                 }
                 TextContentKind::Text | TextContentKind::Unknown => {
                     let result = source
-                        .read_chapter_text(novel_id, volume_id, chapter_id, |raw| {
-                            storage.decode_api_content(raw)
+                        .read_chapter_text(novel_id, volume_id, chapter_id, |raw, encrypted| {
+                            storage.decode_api_content(raw, encrypted)
                         })
                         .await?;
                     let content = materialize_chapter_images(
