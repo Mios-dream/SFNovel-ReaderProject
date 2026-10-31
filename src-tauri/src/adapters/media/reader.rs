@@ -3,6 +3,7 @@
 use super::protocol::validate_sfacg_asset_url;
 use super::{online_media_url, OnlineMediaResource, OnlineMediaState};
 use crate::adapters::ocr::recognize_image;
+use crate::adapters::sfacg::app::is_risk_control_failure;
 use crate::adapters::sfacg::source::SfSource;
 use crate::adapters::storage::paths::online_cache_directory;
 use crate::adapters::storage::NativeStorage;
@@ -138,6 +139,7 @@ async fn load_text(
                 .await
             {
                 Ok(result) => result.content,
+                Err(error) if is_risk_control_failure(&error) => return Err(error),
                 Err(error) => load_vip_text_content(
                     app,
                     &source,
@@ -397,6 +399,9 @@ async fn cache_text_images(
                 images.push(path);
             }
             Err(error) => {
+                if is_risk_control_failure(&error) {
+                    return Err(error);
+                }
                 eprintln!(
                     "[sfacg] online text image skipped: novel_id={novel_id}, chapter_id={chapter_id}, error={error}"
                 );

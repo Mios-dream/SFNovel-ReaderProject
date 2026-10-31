@@ -43,6 +43,17 @@ pub fn run() {
             #[cfg(not(target_os = "android"))]
             initialize_device_identity(&handle)?;
 
+            if let Ok(directory) = adapters::storage::paths::app_data_directory(&handle) {
+                application::state::install_profile_cache_path(
+                    directory.join("profile-cache.json"),
+                );
+            }
+
+            let policy = adapters::storage::NativeStorage::new(handle.clone())
+                .policy()
+                .unwrap_or_default();
+            adapters::downloads::configure_concurrency(policy.max_concurrent_downloads);
+
             let _ = NativeDownloadGateway::new(handle.clone()).restore();
 
             #[cfg(target_os = "windows")]

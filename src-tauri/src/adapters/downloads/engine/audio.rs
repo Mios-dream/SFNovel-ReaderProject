@@ -4,6 +4,7 @@ use super::assets::enrich_audio_metadata;
 use super::JobContext;
 use crate::adapters::downloads::registry;
 use crate::adapters::downloads::DownloadState;
+use crate::adapters::sfacg::app::is_risk_control_failure;
 use crate::adapters::sfacg::source::SfSource;
 use crate::adapters::storage::{
     read_book_manifest, safe_library_name, write_book_manifest, write_bytes_atomically,
@@ -179,7 +180,7 @@ async fn run_inner(
             .get_or_insert_with(|| "暂无简介".to_string());
     }
     write_book_manifest(&directory, &manifest)?;
-    let _ = enrich_audio_metadata(
+    if let Err(error) = enrich_audio_metadata(
         &source,
         &directory,
         manifest
@@ -189,7 +190,12 @@ async fn run_inner(
         novel_id,
         album_id,
     )
-    .await;
+    .await
+    {
+        if is_risk_control_failure(&error) {
+            return Err(error);
+        }
+    }
     write_book_manifest(&directory, &manifest)?;
     registry::update(state, job_id, |job| {
         job.status = "downloading".to_string();
@@ -241,6 +247,7 @@ async fn run_inner(
         if !target.is_file() {
             let audio_url = match source.audio_source(chapter.id).await {
                 Ok(url) => url,
+                Err(error) if is_risk_control_failure(&error) => return Err(error),
                 Err(error) => {
                     eprintln!(
                         "[sfacg] audio chapter skipped: chapter_id={}, title={}, error={error}",
@@ -262,6 +269,7 @@ async fn run_inner(
             .await;
             let payload = match payload {
                 Ok(payload) => payload,
+                Err(error) if is_risk_control_failure(&error) => return Err(error),
                 Err(error) => {
                     eprintln!(
                         "[sfacg] audio chapter skipped: chapter_id={}, title={}, error={error}",

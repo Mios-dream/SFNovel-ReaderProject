@@ -1,6 +1,6 @@
 //! 认证状态与面向渲染进程的账户模型。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// 当前活动会话的安全快照。
 #[derive(Clone, Debug, Serialize)]
@@ -18,7 +18,7 @@ pub(crate) struct AuthStatus {
 }
 
 /// 已登录 SF 账户资料的安全快照。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct UserProfile {
     /// SF 账号编号。

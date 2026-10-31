@@ -3,7 +3,6 @@ use crate::adapters::sfacg::cookie::filter_cookie_header;
 use crate::adapters::sfacg::device::{DeviceProfile, SF_APP_VERSION, SF_PACKAGE};
 use crate::domain::auth::UserProfile;
 use serde_json::Value;
-use std::sync::atomic::Ordering;
 
 /// 登录后读取账号资料时请求的扩展字段。
 const SF_USER_EXPAND: &str = "vipInfo,welfareCoin,isRealNameAuth,realnameinfo,changeNickNameInfo,welfareMoney,redpacketCode,useWelfaresys,usedRedpacketCode,hasOrderChapWithFireMoney,hasUnlockChapWithAd,hasActiveUnlockChapWithAd,hasOrderedVipChaps,hasPaidFirstTime,growup,newVip,sex,member,dianyamember,birthday,teenager,accountException,optionCard";
@@ -152,8 +151,6 @@ impl super::AppClient {
     /// 部分内容接口在设备未登记时返回 `401/507`，因此这里必须使用与请求签名
     /// 相同的 `deviceId`。
     pub(crate) async fn register_device(&self) -> Result<(), String> {
-        self.device_registration_attempted
-            .store(true, Ordering::Release);
         let user = self
             .send_get("/user", &[("expand", SF_USER_EXPAND.to_string())])
             .await
@@ -240,6 +237,16 @@ impl super::AppClient {
     /// # 错误
     /// 章节编号无效、上游未返回正文或缺少作品、分卷标识时返回错误。
     pub(crate) async fn get_user_profile(&self) -> Result<UserProfile, AppApiError> {
+        if self
+            .device_snapshot()
+            .map_err(AppApiError::local)?
+            .init_channel
+            .is_empty()
+        {
+            if let Err(error) = self.refresh_device_info().await {
+                eprintln!("[sfacg] App device channel refresh failed: {error}");
+            }
+        }
         let user = self
             .get_data_typed("/user", &[("expand", "welfareCoin".to_string())])
             .await?;
@@ -247,6 +254,7 @@ impl super::AppClient {
         let monthly_ticket = match self.get_user_ticket_count().await {
             Ok(count) => count,
             Err(error) if error.is_session_expired() => return Err(error),
+            Err(error) if error.is_account_risk_controlled() => return Err(error),
             Err(error) => {
                 eprintln!(
                     "[sfacg] App ticket count unavailable: {}",

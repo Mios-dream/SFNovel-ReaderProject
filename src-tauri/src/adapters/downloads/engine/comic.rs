@@ -4,6 +4,7 @@ use super::assets::{enrich_comic_metadata, fetch_asset};
 use super::JobContext;
 use crate::adapters::downloads::registry;
 use crate::adapters::downloads::DownloadState;
+use crate::adapters::sfacg::app::is_risk_control_failure;
 use crate::adapters::sfacg::source::SfSource;
 use crate::adapters::storage::{
     read_book_manifest, write_book_manifest, write_bytes_atomically, NativeStorage,
@@ -149,7 +150,7 @@ async fn run_inner(
         comic_metadata.online_path.get_or_insert(folder.clone());
     }
     write_book_manifest(&directory, &manifest)?;
-    let _ = enrich_comic_metadata(
+    if let Err(error) = enrich_comic_metadata(
         &source,
         &directory,
         manifest
@@ -158,7 +159,12 @@ async fn run_inner(
             .ok_or_else(|| "漫画元数据初始化失败".to_string())?,
         comic_id,
     )
-    .await;
+    .await
+    {
+        if is_risk_control_failure(&error) {
+            return Err(error);
+        }
+    }
     write_book_manifest(&directory, &manifest)?;
     registry::update(state, job_id, |job| {
         job.status = "downloading".to_string();
@@ -204,6 +210,7 @@ async fn run_inner(
         if !marker.is_file() {
             let images = match source.comic_images(comic_id, &chapter.path_name).await {
                 Ok(images) => images,
+                Err(error) if is_risk_control_failure(&error) => return Err(error),
                 Err(error) => {
                     if !chapter.is_vip {
                         return Err(error);
@@ -250,6 +257,7 @@ async fn run_inner(
                 .await
                 {
                     Ok(payload) => payload,
+                    Err(error) if is_risk_control_failure(&error) => return Err(error),
                     Err(error) => {
                         if !chapter.is_vip {
                             return Err(error);

@@ -289,20 +289,23 @@ pub(super) fn initialize_device_identity(app: &tauri::AppHandle) -> Result<(), S
         .app_data_dir()
         .map_err(|error| format!("无法解析设备身份路径：{error}"))?
         .join("device-identity.v1.bin");
-    let profile = if path.is_file() {
-        let encrypted = fs::read(&path).map_err(|error| format!("无法读取设备身份：{error}"))?;
-        let payload = unprotect_auth_data(&encrypted)?;
-        serde_json::from_slice::<PersistedDeviceIdentity>(&payload)
-            .ok()
-            .filter(|identity| identity.version == 2 && is_valid_uuid(&identity.device_id))
-            .map(|identity| DeviceProfile {
-                device_id: identity.device_id.to_lowercase(),
-                ..DeviceProfile::generate()
-            })
-    } else {
-        None
-    }
-    .unwrap_or_else(DeviceProfile::generate);
+    let stored = fs::read(&path)
+        .ok()
+        .and_then(|encrypted| unprotect_auth_data(&encrypted).ok())
+        .and_then(|payload| serde_json::from_slice::<PersistedDeviceIdentity>(&payload).ok())
+        .filter(|identity| identity.version == 2 && is_valid_uuid(&identity.device_id));
+    let profile = match stored {
+        Some(identity) => DeviceProfile {
+            device_id: identity.device_id.to_lowercase(),
+            ..DeviceProfile::generate()
+        },
+        None => {
+            if path.is_file() {
+                let _ = fs::remove_file(&path);
+            }
+            DeviceProfile::generate()
+        }
+    };
     let payload = serde_json::to_vec(&PersistedDeviceIdentity {
         version: 2,
         device_id: profile.device_id.clone(),

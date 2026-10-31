@@ -84,7 +84,7 @@ impl AppApiError {
     }
 
     /// 判断失败是否表示账号触发了风控，需要人工完成验证码。
-    pub(super) fn is_account_risk_controlled(&self) -> bool {
+    pub(crate) fn is_account_risk_controlled(&self) -> bool {
         if self.api_error_code == Some(1146) {
             return true;
         }
@@ -137,4 +137,12 @@ impl AppApiError {
             _ => message,
         }
     }
+}
+
+/// 判断任意错误文本是否表示账号触发了 SF 风控。
+///
+/// 下载层会将 `AppApiError` 转换为字符串，此函数用于在继续请求剩余章节前
+/// 识别这些已经失去结构化类型的错误。
+pub(crate) fn is_risk_control_failure(message: &str) -> bool {
+    message.contains("风控") || message.contains("1146") || message.contains("422")
 }

@@ -10,14 +10,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 use uuid::Uuid;
 
+/// 自动设备登记在整个进程内最多尝试一次，避免多个下载客户端重复登记。
+static AUTO_DEVICE_REGISTRATION_ATTEMPTED: AtomicBool = AtomicBool::new(false);
+
 /// 仅发送已签名的 SF App API 请求，并持有经过过滤的 App 会话快照。
 pub(crate) struct AppClient {
     /// 使用官方 App 请求画像的 HTTP 客户端。
     pub(super) client: reqwest::Client,
     /// 仅保留 SF App 会话所需 Cookie 的请求头值。
     pub(super) app_cookie: Option<String>,
-    /// 当前客户端实例是否已经尝试过自动设备登记。
-    pub(super) device_registration_attempted: AtomicBool,
     /// 本次安装稳定复用的设备身份；登记后会更新渠道和 OAID。
     pub(super) device: RwLock<DeviceProfile>,
 }
@@ -39,7 +40,6 @@ impl AppClient {
         Ok(Self {
             client,
             app_cookie,
-            device_registration_attempted: AtomicBool::new(false),
             device: RwLock::new(device),
         })
     }
@@ -151,14 +151,14 @@ impl AppClient {
         self.signed_request_with_device(reqwest::Method::GET, path, true, &device)
     }
 
-    /// 请求漫画兼容接口。`417/782` 可能由 nonce 触发，换新 nonce 最多重试五次。
+    /// 请求漫画兼容接口。`417/782` 可能由 nonce 触发，换新 nonce 最多重试一次。
     pub(crate) async fn get_comic_data(
         &self,
         path: &str,
         query: &[(&str, String)],
     ) -> Result<Value, String> {
         let mut last_error = None;
-        for _ in 0..5 {
+        for _ in 0..3 {
             let response = self
                 .comic_signed_request(path)?
                 .query(query)
@@ -214,10 +214,7 @@ impl AppClient {
             Err(error)
                 if allow_registration && error.is_device_unregistered() && self.has_session() =>
             {
-                if self
-                    .device_registration_attempted
-                    .swap(true, Ordering::AcqRel)
-                {
+                if AUTO_DEVICE_REGISTRATION_ATTEMPTED.swap(true, Ordering::AcqRel) {
                     return Err(error);
                 }
                 match self.register_device().await {

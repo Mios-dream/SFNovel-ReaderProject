@@ -14,6 +14,11 @@ use tauri::Manager;
 
 pub(crate) use registry::DownloadState;
 
+/// 同步下载最多同时运行的任务数。
+pub(crate) fn configure_concurrency(max_concurrent: u8) {
+    engine::configure_concurrency(max_concurrent);
+}
+
 /// 无状态网关；实际任务保存在 Tauri 管理的 `DownloadState` 中。
 pub(crate) struct NativeDownloadGateway {
     /// 访问下载状态、存储目录和事件系统的应用句柄。

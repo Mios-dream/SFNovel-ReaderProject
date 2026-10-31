@@ -127,6 +127,8 @@ static DEVICE_STATE_PATH: OnceLock<PathBuf> = OnceLock::new();
 #[derive(Default, Deserialize, Serialize)]
 struct PersistedDeviceState {
     #[serde(default)]
+    device_id: String,
+    #[serde(default)]
     oa_id: String,
     #[serde(default)]
     init_channel: String,
@@ -157,6 +159,7 @@ fn save_device_state(profile: &DeviceProfile) {
         let _ = fs::create_dir_all(parent);
     }
     let state = PersistedDeviceState {
+        device_id: profile.device_id.clone(),
         oa_id: profile.oa_id.clone(),
         init_channel: profile.init_channel.clone(),
     };
@@ -172,11 +175,13 @@ fn save_device_state(profile: &DeviceProfile) {
 pub(crate) fn install_device_profile(profile: DeviceProfile) {
     let state = load_device_state();
     let mut profile = profile;
-    if profile.oa_id.is_empty() {
-        profile.oa_id = state.oa_id;
-    }
-    if profile.init_channel.is_empty() {
-        profile.init_channel = state.init_channel;
+    if state.device_id == profile.device_id {
+        if profile.oa_id.is_empty() {
+            profile.oa_id = state.oa_id;
+        }
+        if profile.init_channel.is_empty() {
+            profile.init_channel = state.init_channel;
+        }
     }
     set_device_profile(profile);
 }

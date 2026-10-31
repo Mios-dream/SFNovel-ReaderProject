@@ -5,6 +5,7 @@ use super::JobContext;
 use crate::adapters::downloads::registry;
 use crate::adapters::downloads::DownloadState;
 use crate::adapters::ocr::{recognize_image, relative_book_path};
+use crate::adapters::sfacg::app::is_risk_control_failure;
 use crate::adapters::sfacg::source::SfSource;
 use crate::adapters::storage::{
     downloaded_text_chapter_ids, read_book_manifest, read_chapter_store, write_book_manifest,
@@ -266,7 +267,7 @@ async fn run_inner(
         .description
         .get_or_insert_with(|| "暂无简介".to_string());
     persist_manifest(&directory, &manifest)?;
-    let _ = enrich_novel_metadata(
+    if let Err(error) = enrich_novel_metadata(
         &source,
         &directory,
         manifest
@@ -275,7 +276,12 @@ async fn run_inner(
             .ok_or_else(|| "小说元数据初始化失败".to_string())?,
         novel_id,
     )
-    .await;
+    .await
+    {
+        if is_risk_control_failure(&error) {
+            return Err(error);
+        }
+    }
     persist_manifest(&directory, &manifest)?;
     registry::update(state, job_id, |job| {
         job.status = "downloading".to_string();
@@ -356,6 +362,7 @@ async fn run_inner(
                         .await;
                     match app_result {
                         Some(Ok(content)) => (content, Some("app".to_string()), None),
+                        Some(Err(error)) if is_risk_control_failure(&error) => return Err(error),
                         app_result => {
                             let app_error = app_result.and_then(Result::err);
                             registry::update(state, job_id, |job| {
@@ -380,6 +387,9 @@ async fn run_inner(
                             let (content, source_path) = match vip_result {
                                 Ok(value) => value,
                                 Err(vip_error) => {
+                                    if is_risk_control_failure(&vip_error) {
+                                        return Err(vip_error);
+                                    }
                                     let error = match app_error {
                                         Some(app_error) => format!(
                                             "App 正文不可用：{app_error}；网页 VIP 图片正文不可用：{vip_error}"

@@ -28,3 +28,4 @@ mod parsing;
 mod signing;
 
 pub(crate) use client::AppClient;
+pub(crate) use error::is_risk_control_failure;

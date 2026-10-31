@@ -1,16 +1,61 @@
 //! 应用进程级会话状态。
 
 use crate::domain::auth::{AuthSession, AuthStatus, UserProfile};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::fs;
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// 账户资料在进程内的复用时间，避免多个界面重复读取 `/user`。
+/// 账户资料复用时间，避免重复读取 `/user`、`/user/money` 等账号接口。
 const PROFILE_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+/// 账户资料落盘缓存格式版本。
+const PROFILE_CACHE_VERSION: u8 = 1;
+
+/// 账户资料落盘缓存路径；未安装时只使用进程内缓存。
+static PROFILE_CACHE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 /// 带过期时间的账户资料快照。
 struct CachedProfile {
     profile: UserProfile,
     cached_at: Instant,
+    session_hash: u64,
+}
+
+/// 跨进程复用的账户资料快照。
+#[derive(Deserialize, Serialize)]
+struct PersistedProfile {
+    version: u8,
+    session_hash: u64,
+    cached_at_ms: u64,
+    profile: UserProfile,
+}
+
+/// 安装账户资料落盘缓存路径。
+pub(crate) fn install_profile_cache_path(path: PathBuf) {
+    let _ = PROFILE_CACHE_PATH.set(path);
+}
+
+/// 返回当前分钟级时间戳。
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// 计算当前会话 Cookie 的缓存键。
+fn session_hash(session: Option<&AuthSession>) -> Option<u64> {
+    let session = session?;
+    let cookie = session
+        .app_cookie
+        .as_deref()
+        .or(session.web_cookie.as_deref())?;
+    let mut hasher = DefaultHasher::new();
+    cookie.hash(&mut hasher);
+    Some(hasher.finish())
 }
 
 /// 在原生内存中保存相互隔离的 App 与 Web 会话。
@@ -23,16 +68,46 @@ pub(crate) struct AuthSessionState {
 }
 
 impl AuthSessionState {
+    /// 返回当前会话的缓存键。
+    fn current_session_hash(&self) -> Option<u64> {
+        let session = self.session.lock().ok()?;
+        session_hash(session.as_ref())
+    }
+
     /// 读取仍在有效期内的账户资料。
     pub(crate) fn cached_profile(&self) -> Option<UserProfile> {
+        let session_hash = self.current_session_hash()?;
         let mut cache = self.profile.lock().ok()?;
-        if cache
-            .as_ref()
-            .is_some_and(|entry| entry.cached_at.elapsed() >= PROFILE_CACHE_TTL)
-        {
+        if cache.as_ref().is_some_and(|entry| {
+            entry.cached_at.elapsed() >= PROFILE_CACHE_TTL || entry.session_hash != session_hash
+        }) {
             *cache = None;
         }
-        cache.as_ref().map(|entry| entry.profile.clone())
+        if let Some(entry) = cache.as_ref() {
+            return Some(entry.profile.clone());
+        }
+        let path = PROFILE_CACHE_PATH.get()?;
+        let persisted = fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<PersistedProfile>(&text).ok())?;
+        let age_ms = now_ms().saturating_sub(persisted.cached_at_ms);
+        if persisted.version != PROFILE_CACHE_VERSION
+            || persisted.session_hash != session_hash
+            || age_ms >= PROFILE_CACHE_TTL.as_millis() as u64
+        {
+            let _ = fs::remove_file(path);
+            return None;
+        }
+        let cached_at = Instant::now()
+            .checked_sub(Duration::from_millis(age_ms))
+            .unwrap_or_else(Instant::now);
+        let profile = persisted.profile;
+        *cache = Some(CachedProfile {
+            profile: profile.clone(),
+            cached_at,
+            session_hash,
+        });
+        Some(profile)
     }
 
     /// 缓存本次登录会话的账户资料。
@@ -40,11 +115,30 @@ impl AuthSessionState {
     /// # 参数
     /// - `profile`：刚从上游取得的账户资料。
     pub(crate) fn store_profile(&self, profile: &UserProfile) {
+        let Some(session_hash) = self.current_session_hash() else {
+            return;
+        };
         if let Ok(mut cache) = self.profile.lock() {
             *cache = Some(CachedProfile {
                 profile: profile.clone(),
                 cached_at: Instant::now(),
+                session_hash,
             });
+        }
+        let Some(path) = PROFILE_CACHE_PATH.get() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let persisted = PersistedProfile {
+            version: PROFILE_CACHE_VERSION,
+            session_hash,
+            cached_at_ms: now_ms(),
+            profile: profile.clone(),
+        };
+        if let Ok(payload) = serde_json::to_vec(&persisted) {
+            let _ = fs::write(path, payload);
         }
     }
 
@@ -52,6 +146,9 @@ impl AuthSessionState {
     pub(crate) fn clear_profile_cache(&self) {
         if let Ok(mut cache) = self.profile.lock() {
             *cache = None;
+        }
+        if let Some(path) = PROFILE_CACHE_PATH.get() {
+            let _ = fs::remove_file(path);
         }
     }
 

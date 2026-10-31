@@ -34,7 +34,9 @@ pub(crate) fn save_request_policy(
     policy: RequestPolicy,
 ) -> Result<RequestPolicy, String> {
     let storage = NativeStorage::new(app);
-    SettingsService::new(&storage)
+    let saved = SettingsService::new(&storage)
         .save_policy(policy)
-        .map_err(AppError::into_message)
+        .map_err(AppError::into_message)?;
+    crate::adapters::downloads::configure_concurrency(saved.max_concurrent_downloads);
+    Ok(saved)
 }

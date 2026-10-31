@@ -10,8 +10,50 @@ mod text;
 
 use crate::adapters::downloads::DownloadState;
 use crate::domain::download::DownloadSpec;
+use std::future::Future;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::Semaphore;
+
+/// 全进程共享的下载并发槽位。
+static DOWNLOAD_SLOTS: OnceLock<Mutex<Arc<Semaphore>>> = OnceLock::new();
+
+/// 更新下载任务并发上限。
+pub(crate) fn configure_concurrency(max_concurrent: u8) {
+    let permits = usize::from(max_concurrent.clamp(1, 4));
+    let slots = Arc::new(Semaphore::new(permits));
+    match DOWNLOAD_SLOTS.get() {
+        Some(current) => {
+            if let Ok(mut guard) = current.lock() {
+                *guard = slots;
+            }
+        }
+        None => {
+            let _ = DOWNLOAD_SLOTS.set(Mutex::new(slots));
+        }
+    }
+}
+
+/// 等待并取得一个下载并发槽位。
+async fn acquire_slot() -> tokio::sync::OwnedSemaphorePermit {
+    let slots = DOWNLOAD_SLOTS
+        .get_or_init(|| Mutex::new(Arc::new(Semaphore::new(1))))
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_else(|_| Arc::new(Semaphore::new(1)));
+    slots.acquire_owned().await.expect("下载并发槽位不应关闭")
+}
+
+/// 在取得并发槽位后执行单个下载任务。
+fn spawn_with_slot<F>(future: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    tauri::async_runtime::spawn(async move {
+        let _slot = acquire_slot().await;
+        future.await;
+    });
+}
 
 /// 单个后台下载任务共享的运行时句柄。
 #[derive(Clone, Copy)]
@@ -43,7 +85,7 @@ pub(super) fn spawn_text(
     chapter_ids: Vec<i64>,
     cancelled: Arc<AtomicBool>,
 ) {
-    tauri::async_runtime::spawn(text::run(
+    spawn_with_slot(text::run(
         app,
         job_id,
         novel_id,
@@ -72,7 +114,7 @@ pub(super) fn spawn_audio(
     chapter_ids: Vec<i64>,
     cancelled: Arc<AtomicBool>,
 ) {
-    tauri::async_runtime::spawn(audio::run(
+    spawn_with_slot(audio::run(
         app,
         job_id,
         novel_id,
@@ -102,7 +144,7 @@ pub(super) fn spawn_comic(
     chapter_ids: Vec<i64>,
     cancelled: Arc<AtomicBool>,
 ) {
-    tauri::async_runtime::spawn(comic::run(
+    spawn_with_slot(comic::run(
         app,
         job_id,
         comic_id,

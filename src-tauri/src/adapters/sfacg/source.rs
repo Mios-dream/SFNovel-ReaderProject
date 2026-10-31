@@ -5,7 +5,7 @@
 //! 文字正文可由网页补充；有声播放地址只接受 App。
 //! 设备登记和 App 余额只接受 App；网页书架和 VIP 图片正文只接受网页。
 
-use super::app::AppClient;
+use super::app::{is_risk_control_failure, AppClient};
 use super::device::device_profile;
 use super::web::WebClient;
 use crate::application::ports::RemoteGateway;
@@ -306,6 +306,7 @@ impl SfSource {
                     origin: TextOrigin::App,
                 })
             }
+            Some(Err(error)) if is_risk_control_failure(&error) => return Err(error),
             Some(Err(error)) => Some(error),
             None => None,
         };
@@ -318,6 +319,7 @@ impl SfSource {
                 content,
                 origin: TextOrigin::Web,
             }),
+            Err(web_error) if is_risk_control_failure(&web_error) => Err(web_error),
             Err(web_error) => Err(match app_error {
                 Some(app_error) => {
                     format!("App 正文不可用：{app_error}；网页正文不可用：{web_error}")
