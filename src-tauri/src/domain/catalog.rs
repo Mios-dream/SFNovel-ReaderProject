@@ -25,7 +25,7 @@ pub(crate) struct SearchNovel {
     /// 条目所在书架的原始分类标识。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) bookshelf_type: Option<String>,
-    /// 网页来源路径；仅公开书架条目需要携带。
+    /// 漫画来源目录标识。
     #[serde(rename = "sourcePath", skip_serializing_if = "Option::is_none")]
     pub(crate) source_path: Option<String>,
 }
@@ -275,19 +275,21 @@ pub(crate) struct ComicChapterSummary {
     pub(crate) downloaded: bool,
 }
 
-/// 从公开网页书架解析出的一条小说或漫画记录。
+/// 书架中的一条小说、有声或漫画记录。
 pub(crate) struct PublicShelfItem {
-    /// 条目类型，取值为 `novel` 或 `comic`。
+    /// 条目类型，取值为 `novel`、`audio` 或 `comic`。
     pub(crate) kind: &'static str,
     /// 条目对应的作品编号。
     pub(crate) id: i64,
+    /// 有声条目的专辑编号；其他条目为 `None`。
+    pub(crate) media_id: Option<i64>,
     /// 作品标题。
     pub(crate) title: String,
     /// 作者名称。
     pub(crate) author: String,
     /// 封面地址。
     pub(crate) cover: String,
-    /// 网页来源路径。
+    /// 漫画来源目录标识。
     pub(crate) source_path: Option<String>,
 }
 

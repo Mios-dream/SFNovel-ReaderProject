@@ -77,7 +77,7 @@ function submit() {
           <span class="connection-icon app"><Smartphone :size="21" /></span>
           <div class="connection-copy">
             <strong>App 登录已连接</strong>
-            <small>完整目录、受限章节与有声下载可用</small>
+            <small>完整功能可用</small>
           </div>
           <CircleCheck class="connection-check" :size="20" />
           <button
@@ -89,7 +89,7 @@ function submit() {
           </button>
         </div>
         <template v-else>
-          <p>有声下载与受限章节需要 App 凭证，登录可能触发风控。</p>
+          <p>用于连接 App 凭证获取完整功能，但可能触发风控。</p>
           <form class="login-form" @submit.prevent="submit">
             <input
               v-model="username"
@@ -117,7 +117,7 @@ function submit() {
           <span class="connection-icon web"><Globe2 :size="21" /></span>
           <div class="connection-copy">
             <strong>网站登录已连接</strong>
-            <small>漫画、网页书架与 VIP 图片正文可用</small>
+            <small>小说，书架等基础功能可用</small>
           </div>
           <CircleCheck class="connection-check" :size="20" />
           <button
@@ -129,7 +129,7 @@ function submit() {
           </button>
         </div>
         <template v-else>
-          <p>用于阅读漫画、同步网页书架与读取 VIP 图片正文。</p>
+          <p>用于小说，书架等基础功能的访问。</p>
           <button
             class="primary-button full"
             :disabled="busy"

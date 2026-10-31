@@ -2,10 +2,10 @@
 //!
 //! 业务层只调用本模块的业务方法，不直接选择 App 或网页客户端。
 //! App 凭证与网页凭证只由底层客户端读取，不能互相转换。
-//! 文字正文可由网页补充；有声播放地址只接受 App。
-//! 设备登记和 App 余额只接受 App；网页书架和 VIP 图片正文只接受网页。
+//! 已登录 App 时书架、文字正文与媒体资源只使用 App；仅在没有 App 凭证时回退网页。
+//! 有声播放地址、设备登记和 App 余额只接受 App。
 
-use super::app::{is_risk_control_failure, AppClient};
+use super::app::AppClient;
 use super::device::device_profile;
 use super::web::WebClient;
 use crate::application::ports::RemoteGateway;
@@ -55,7 +55,7 @@ impl SfSource {
     }
 
     /// 当前快照是否包含 App 会话。
-    fn has_app_session(&self) -> bool {
+    pub(crate) fn has_app_session(&self) -> bool {
         self.app_client.has_session()
     }
 
@@ -206,8 +206,11 @@ impl SfSource {
             .await
     }
 
-    /// 读取网页书架。
-    pub(crate) async fn bookshelf(&self) -> Result<PublicShelf, String> {
+    /// 读取书架。App 优先，未登录 App 时回退网页。
+    pub(crate) async fn bookshelf(&self, force_refresh: bool) -> Result<PublicShelf, String> {
+        if self.has_app_session() {
+            return self.app_client.get_bookshelf(force_refresh).await;
+        }
         let client = self.require_web("网页书架")?;
         client.get_public_bookshelf().await
     }
@@ -288,7 +291,7 @@ impl SfSource {
         )
     }
 
-    /// 读取普通文字正文。App 优先，失败后回退网页。
+    /// 读取普通文字正文。有 App 凭证时只使用 App，否则回退网页。
     pub(crate) async fn read_chapter_text<F>(
         &self,
         novel_id: i64,
@@ -299,34 +302,19 @@ impl SfSource {
     where
         F: FnOnce(&str) -> Result<String, String>,
     {
-        let app_error = match self.try_direct_text_chapter(chapter_id, decode).await {
-            Some(Ok(content)) => {
-                return Ok(TextChapter {
-                    content,
-                    origin: TextOrigin::App,
-                })
-            }
-            Some(Err(error)) if is_risk_control_failure(&error) => return Err(error),
-            Some(Err(error)) => Some(error),
-            None => None,
-        };
-        match self
-            .web_client
+        if let Some(result) = self.try_direct_text_chapter(chapter_id, decode).await {
+            return result.map(|content| TextChapter {
+                content,
+                origin: TextOrigin::App,
+            });
+        }
+        self.web_client
             .chapter_content(novel_id, volume_id, chapter_id)
             .await
-        {
-            Ok(content) => Ok(TextChapter {
+            .map(|content| TextChapter {
                 content,
                 origin: TextOrigin::Web,
-            }),
-            Err(web_error) if is_risk_control_failure(&web_error) => Err(web_error),
-            Err(web_error) => Err(match app_error {
-                Some(app_error) => {
-                    format!("App 正文不可用：{app_error}；网页正文不可用：{web_error}")
-                }
-                None => web_error,
-            }),
-        }
+            })
     }
 
     /// 读取 VIP 图片正文。
@@ -335,6 +323,9 @@ impl SfSource {
         novel_id: i64,
         chapter_id: i64,
     ) -> Result<ImageAsset, String> {
+        if self.has_app_session() {
+            return Err("已连接 App 凭证，VIP 图片正文不再回退网页".to_string());
+        }
         let client = self.require_web("网页 VIP 图片正文")?;
         let image = client.vip_chapter_image(novel_id, chapter_id).await?;
         Ok(ImageAsset {
@@ -343,14 +334,18 @@ impl SfSource {
         })
     }
 
-    /// 创建网页静态资源请求。
+    /// 创建封面或正文插图请求。有 App 凭证时使用 App，否则使用网页。
     pub(crate) fn asset_request(
         &self,
         url: &str,
         referer: &str,
         accept: &str,
     ) -> reqwest::RequestBuilder {
-        self.web_client.asset_request(url, referer, accept)
+        if self.has_app_session() {
+            self.app_client.asset_request(url, referer, accept)
+        } else {
+            self.web_client.asset_request(url, referer, accept)
+        }
     }
 
     /// 创建 App 音频资源请求。
@@ -445,8 +440,10 @@ impl RemoteGateway for SfSource {
             .map_err(remote_error)
     }
 
-    async fn bookshelf(&self) -> AppResult<PublicShelf> {
-        SfSource::bookshelf(self).await.map_err(remote_error)
+    async fn bookshelf(&self, force_refresh: bool) -> AppResult<PublicShelf> {
+        SfSource::bookshelf(self, force_refresh)
+            .await
+            .map_err(remote_error)
     }
 
     async fn account_profile(&self) -> AppResult<UserProfile> {

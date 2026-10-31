@@ -363,16 +363,18 @@ async fn run_inner(
                     match app_result {
                         Some(Ok(content)) => (content, Some("app".to_string()), None),
                         Some(Err(error)) if is_risk_control_failure(&error) => return Err(error),
-                        app_result => {
-                            let app_error = app_result.and_then(Result::err);
+                        Some(Err(error)) => {
+                            failed_vip_chapters.push((chapter_title.clone(), error.clone()));
                             registry::update(state, job_id, |job| {
-                                job.message = if app_error.is_some() {
-                                    format!(
-                                        "App 正文不可用，正在保存并识别图片正文：{chapter_title}"
-                                    )
-                                } else {
-                                    format!("正在保存并识别图片正文：{chapter_title}")
-                                };
+                                job.message =
+                                    format!("App 正文不可用，已跳过：{chapter_title}（{error}）");
+                            });
+                            registry::emit_job(app, state, job_id);
+                            continue;
+                        }
+                        None => {
+                            registry::update(state, job_id, |job| {
+                                job.message = format!("正在保存并识别图片正文：{chapter_title}");
                             });
                             registry::emit_job(app, state, job_id);
                             let vip_result = resolve_vip_image_content(
@@ -390,17 +392,11 @@ async fn run_inner(
                                     if is_risk_control_failure(&vip_error) {
                                         return Err(vip_error);
                                     }
-                                    let error = match app_error {
-                                        Some(app_error) => format!(
-                                            "App 正文不可用：{app_error}；网页 VIP 图片正文不可用：{vip_error}"
-                                        ),
-                                        None => vip_error,
-                                    };
                                     failed_vip_chapters
-                                        .push((chapter_title.clone(), error.clone()));
+                                        .push((chapter_title.clone(), vip_error.clone()));
                                     registry::update(state, job_id, |job| {
                                         job.message = format!(
-                                            "VIP 章节处理失败，已跳过：{chapter_title}（{error}）"
+                                            "VIP 章节处理失败，已跳过：{chapter_title}（{vip_error}）"
                                         );
                                     });
                                     registry::emit_job(app, state, job_id);

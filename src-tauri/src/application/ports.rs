@@ -48,7 +48,7 @@ pub(crate) trait RemoteGateway: Send + Sync {
     /// 读取漫画 App 章节。
     async fn comic_catalog(&self, comic_id: i64) -> AppResult<Vec<ComicChapter>>;
     /// 读取当前账号的公开书架。
-    async fn bookshelf(&self) -> AppResult<PublicShelf>;
+    async fn bookshelf(&self, force_refresh: bool) -> AppResult<PublicShelf>;
     /// 读取当前账号资料。
     async fn account_profile(&self) -> AppResult<UserProfile>;
     /// 通过上游请求验证当前账号会话。

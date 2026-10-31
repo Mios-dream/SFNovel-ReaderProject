@@ -4,6 +4,8 @@
 mod audio;
 /// App 登录、会话校验与设备登记接口。
 mod auth;
+/// App API 成功响应的进程内缓存。
+mod cache;
 /// 小说、有声和漫画的搜索与详情接口。
 mod catalog;
 /// App HTTP 客户端、会话快照与请求重试策略。

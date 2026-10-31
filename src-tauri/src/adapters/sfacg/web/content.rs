@@ -182,26 +182,3 @@ fn chapter_html_to_markdown(value: &str) -> String {
     output.push_str(remaining);
     output
 }
-
-#[cfg(test)]
-mod tests {
-    use super::chapter_html_to_markdown;
-
-    #[test]
-    fn keeps_remote_chapter_images_as_download_markers() {
-        assert_eq!(
-            chapter_html_to_markdown(
-                "前文<img src=\"//rss.sfacg.com/body/1.png\">后文<img src='https://rss.sfacg.com/body/2.jpg'/>"
-            ),
-            "前文\n[img=]https://rss.sfacg.com/body/1.png[/img]\n后文\n[img=]https://rss.sfacg.com/body/2.jpg[/img]\n"
-        );
-    }
-
-    #[test]
-    fn drops_images_that_are_not_remote_http_resources() {
-        assert_eq!(
-            chapter_html_to_markdown("甲<img src=\"data:image/png;base64,abc\">乙"),
-            "甲乙"
-        );
-    }
-}

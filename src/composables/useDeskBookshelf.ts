@@ -64,9 +64,9 @@ export function useDeskBookshelf({
 
   async function requestBookshelf(forceRefresh: boolean) {
     await refreshAuthStatus();
-    if (!auth.value.webAuthenticated) {
+    if (!auth.value.appAuthenticated && !auth.value.webAuthenticated) {
       requestCredentials();
-      notify("登录网站后即可读取公开书架");
+      notify("登录 App 或网站后即可读取书架");
       return;
     }
     bookshelfLoading.value = true;
@@ -105,9 +105,13 @@ export function useDeskBookshelf({
   }
 
   watch(
-    () => auth.value.webAuthenticated,
-    (webAuthenticated, previousWebAuthenticated) => {
-      if (!webAuthenticated && previousWebAuthenticated) clearBookshelfCache();
+    [
+      () => auth.value.appAuthenticated,
+      () => auth.value.webAuthenticated,
+    ],
+    ([appAuthenticated, webAuthenticated], [previousApp, previousWeb]) => {
+      if (appAuthenticated !== previousApp || webAuthenticated !== previousWeb)
+        clearBookshelfCache();
     },
   );
 

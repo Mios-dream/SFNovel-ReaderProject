@@ -1,4 +1,5 @@
 use super::super::device::{replace_device_profile, DeviceProfile};
+use super::cache;
 use super::constants::{
     APP_ACCEPT, COMIC_ANONYMOUS_DEVICE_ID, SF_API_HOST, SF_API_PASSWORD, SF_API_USER,
 };
@@ -151,12 +152,26 @@ impl AppClient {
         self.signed_request_with_device(reqwest::Method::GET, path, true, &device)
     }
 
+    /// 生成当前凭证和请求参数对应的缓存键。
+    fn cache_key(&self, path: &str, query: &[(&str, String)], include_session: bool) -> String {
+        let cookie = if include_session {
+            self.app_cookie.as_deref()
+        } else {
+            None
+        };
+        cache::key(include_session, cookie, path, query)
+    }
+
     /// 请求漫画兼容接口。`417/782` 可能由 nonce 触发，换新 nonce 最多重试一次。
     pub(crate) async fn get_comic_data(
         &self,
         path: &str,
         query: &[(&str, String)],
     ) -> Result<Value, String> {
+        let key = self.cache_key(path, query, true);
+        if let Some(data) = cache::get(&key) {
+            return Ok(data);
+        }
         let mut last_error = None;
         for _ in 0..3 {
             let response = self
@@ -166,7 +181,10 @@ impl AppClient {
                 .await
                 .map_err(|error| format!("SF 漫画接口请求失败：{error}"))?;
             match Self::parse_response(response, path).await {
-                Ok(data) => return Ok(data),
+                Ok(data) => {
+                    cache::insert(key, data.clone());
+                    return Ok(data);
+                }
                 Err(error) if error.is_client_version_gated() => last_error = Some(error),
                 Err(error) => return Err(error.describe(path)),
             }
@@ -188,9 +206,32 @@ impl AppClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<Value, String> {
-        self.get_data_inner(path, query, true)
+        let key = self.cache_key(path, query, true);
+        if let Some(data) = cache::get(&key) {
+            return Ok(data);
+        }
+        let data = self
+            .get_data_inner(path, query, true)
             .await
-            .map_err(|error| error.describe(path))
+            .map_err(|error| error.describe(path))?;
+        cache::insert(key, data.clone());
+        Ok(data)
+    }
+
+    /// 忽略缓存请求 App API 资源，并刷新对应缓存。
+    pub(crate) async fn get_data_uncached(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<Value, String> {
+        let key = self.cache_key(path, query, true);
+        cache::remove(&key);
+        let data = self
+            .get_data_inner(path, query, true)
+            .await
+            .map_err(|error| error.describe(path))?;
+        cache::insert(key, data.clone());
+        Ok(data)
     }
 
     /// 请求 App API 资源，并保留可分类的上游失败信息。
@@ -311,15 +352,21 @@ impl AppClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<Value, String> {
+        let key = self.cache_key(path, query, false);
+        if let Some(data) = cache::get(&key) {
+            return Ok(data);
+        }
         let response = self
             .signed_request(reqwest::Method::GET, path, false)?
             .query(query)
             .send()
             .await
             .map_err(|error| format!("SF 匿名 App 请求失败：{error}"))?;
-        Self::parse_response(response, path)
+        let data = Self::parse_response(response, path)
             .await
-            .map_err(|error| error.describe(path))
+            .map_err(|error| error.describe(path))?;
+        cache::insert(key, data.clone());
+        Ok(data)
     }
 
     /// 发送已签名 JSON POST 请求，并返回拆开的数据载荷。

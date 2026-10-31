@@ -1,10 +1,22 @@
 use super::parse_detail::{detail_from_audio_payload, detail_from_novel_payload};
+use super::parsing::{json_i64_field, json_text_field};
 use super::AppClient;
-use crate::domain::catalog::{NovelDetail, SearchNovel};
+use crate::domain::catalog::{NovelDetail, PublicShelf, PublicShelfItem, SearchNovel};
 use crate::domain::ids::validate_novel_id;
 use serde_json::Value;
 
 impl AppClient {
+    /// 读取当前账号的书架分类及小说、有声和漫画条目。
+    pub(crate) async fn get_bookshelf(&self, force_refresh: bool) -> Result<PublicShelf, String> {
+        let query = [("expand", "novels,albums,comics".to_string())];
+        let response = if force_refresh {
+            self.get_data_uncached("/user/Pockets", &query).await?
+        } else {
+            self.get_data("/user/Pockets", &query).await?
+        };
+        parse_bookshelf(&response)
+    }
+
     /// 查找小说对应的有声专辑编号。
     ///
     /// 优先使用小说编号反查；失败时尝试标题提示，最后回退到公开小说详情中的
@@ -225,4 +237,102 @@ impl AppClient {
             .await?;
         Ok(detail_from_audio_payload(&detail, novel_id))
     }
+}
+
+/// 将 `/user/Pockets` 响应转换为书架分类与条目。
+fn parse_bookshelf(response: &Value) -> Result<PublicShelf, String> {
+    let pockets = response
+        .as_array()
+        .ok_or_else(|| "SF App 书架未返回分组列表".to_string())?;
+    let mut categories = Vec::new();
+    let mut items = Vec::new();
+    for pocket in pockets {
+        let name = json_text_field(pocket, &["name"]).unwrap_or_else(|| "未分类".to_string());
+        if !categories.contains(&name) {
+            categories.push(name.clone());
+        }
+        let expand = pocket.get("expand");
+        match expand
+            .and_then(|value| value.get("novels"))
+            .and_then(Value::as_array)
+        {
+            Some(novels) => items.extend(
+                novels
+                    .iter()
+                    .filter_map(shelf_novel)
+                    .map(|item| (name.clone(), item)),
+            ),
+            None if pocket.get("novelId").is_some() => {
+                if let Some(item) = shelf_novel(pocket) {
+                    items.push((name.clone(), item));
+                }
+            }
+            None => {}
+        }
+        items.extend(
+            expand
+                .and_then(|value| value.get("albums"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(shelf_album)
+                .map(|item| (name.clone(), item)),
+        );
+        items.extend(
+            expand
+                .and_then(|value| value.get("comics"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(shelf_comic)
+                .map(|item| (name.clone(), item)),
+        );
+    }
+    Ok(PublicShelf { categories, items })
+}
+
+/// 将 App 书架中的小说条目转换为内部记录。
+fn shelf_novel(value: &Value) -> Option<PublicShelfItem> {
+    Some(PublicShelfItem {
+        kind: "novel",
+        id: json_i64_field(value, &["novelId"]).filter(|id| *id > 0)?,
+        media_id: None,
+        title: json_text_field(value, &["novelName"]).unwrap_or_else(|| "未命名作品".to_string()),
+        author: json_text_field(value, &["authorName"]).unwrap_or_else(|| "未知作者".to_string()),
+        cover: json_text_field(value, &["novelCover"]).unwrap_or_default(),
+        source_path: None,
+    })
+}
+
+/// 将 App 书架中的有声条目转换为内部记录。
+fn shelf_album(value: &Value) -> Option<PublicShelfItem> {
+    Some(PublicShelfItem {
+        kind: "audio",
+        id: json_i64_field(value, &["novelId"]).filter(|id| *id > 0)?,
+        media_id: json_i64_field(value, &["albumId"]).filter(|id| *id > 0),
+        title: json_text_field(value, &["name"]).unwrap_or_else(|| "未命名有声专辑".to_string()),
+        author: json_text_field(value, &["authorName"]).unwrap_or_else(|| "未知作者".to_string()),
+        cover: json_text_field(value, &["coverBig", "coverMedium", "coverSmall"])
+            .unwrap_or_default(),
+        source_path: None,
+    })
+}
+
+/// 将 App 书架中的漫画条目转换为内部记录。
+fn shelf_comic(value: &Value) -> Option<PublicShelfItem> {
+    Some(PublicShelfItem {
+        kind: "comic",
+        id: json_i64_field(value, &["comicId"]).filter(|id| *id > 0)?,
+        media_id: None,
+        title: json_text_field(value, &["comicName"]).unwrap_or_else(|| "未命名漫画".to_string()),
+        author: json_text_field(value, &["authorName"]).unwrap_or_else(|| "未知作者".to_string()),
+        cover: json_text_field(
+            value,
+            &["comicCover", "coverBig", "coverMedium", "coverSmall"],
+        )
+        .unwrap_or_default(),
+        source_path: json_text_field(value, &["folderName"]).filter(|folder| {
+            folder.len() <= 100 && folder.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        }),
+    })
 }

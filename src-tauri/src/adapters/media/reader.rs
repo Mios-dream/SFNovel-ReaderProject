@@ -128,8 +128,23 @@ async fn load_text(
     let storage = NativeStorage::new(app.clone());
     let mut content = match chapter.content_kind {
         TextContentKind::ImageVip | TextContentKind::EncryptedVip => {
-            load_vip_text_content(app, &source, &cache_root.join("vip"), novel_id, chapter_id)
-                .await?
+            match source
+                .try_direct_text_chapter(chapter_id, |raw| storage.decode_api_content(raw))
+                .await
+            {
+                Some(Ok(content)) => content,
+                Some(Err(error)) => return Err(error),
+                None => {
+                    load_vip_text_content(
+                        app,
+                        &source,
+                        &cache_root.join("vip"),
+                        novel_id,
+                        chapter_id,
+                    )
+                    .await?
+                }
+            }
         }
         TextContentKind::Text | TextContentKind::Unknown => {
             match source
@@ -139,7 +154,9 @@ async fn load_text(
                 .await
             {
                 Ok(result) => result.content,
-                Err(error) if is_risk_control_failure(&error) => return Err(error),
+                Err(error) if source.has_app_session() || is_risk_control_failure(&error) => {
+                    return Err(error)
+                }
                 Err(error) => load_vip_text_content(
                     app,
                     &source,

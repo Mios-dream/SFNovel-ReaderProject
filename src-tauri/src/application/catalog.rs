@@ -196,26 +196,31 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
     /// 读取当前账号的公开书架并去重。
     ///
     /// # 参数
-    /// - `_force_refresh`：保留给调用方的刷新意图；当前每次都会重新请求。
+    /// - `force_refresh`：为 true 时跳过缓存重新请求书架。
     ///
     /// # 错误
     /// 未登录或上游书架请求失败时返回错误。
     pub(crate) async fn bookshelf(
         &self,
-        _force_refresh: Option<bool>,
+        force_refresh: Option<bool>,
     ) -> AppResult<BookshelfCollection> {
-        let public_shelf = self.remote.bookshelf().await?;
+        let public_shelf = self
+            .remote
+            .bookshelf(force_refresh.unwrap_or(false))
+            .await?;
         let categories = public_shelf.categories;
         let mut items = Vec::new();
         for (category, record) in public_shelf.items {
             if items.iter().any(|item: &SearchNovel| {
-                item.novel_id == record.id && item.bookshelf_type.as_deref() == Some(record.kind)
+                item.novel_id == record.id
+                    && item.media_id == record.media_id
+                    && item.bookshelf_type.as_deref() == Some(record.kind)
             }) {
                 continue;
             }
             items.push(SearchNovel {
                 novel_id: record.id,
-                media_id: None,
+                media_id: record.media_id,
                 novel_name: record.title,
                 author_name: record.author,
                 novel_cover: record.cover,

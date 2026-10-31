@@ -175,7 +175,7 @@ pub(crate) async fn get_comic_details(
 ///
 /// # 参数
 /// - `app`：Tauri 应用句柄。
-/// - `force_refresh`：调用方的刷新意图；当前实现始终重新请求。
+/// - `force_refresh`：为 true 时跳过缓存重新请求书架。
 ///
 /// # 错误
 /// 未登录或上游书架请求失败时返回错误消息。

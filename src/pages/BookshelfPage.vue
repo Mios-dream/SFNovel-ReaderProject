@@ -87,7 +87,7 @@ function jumpToPage(event: Event) {
         >
           <NovelCard
             v-for="novel in desk.pagedBookshelf.value"
-            :key="`${novel.novelId}-${novel.bookshelfName || '默认书架'}-${novel.bookshelfType || 'novel'}`"
+            :key="`${novel.novelId}-${novel.mediaId || ''}-${novel.bookshelfName || '默认书架'}-${novel.bookshelfType || 'novel'}`"
             :novel="novel"
             :format-date="desk.formatDate"
             @select="desk.openChapterPicker"

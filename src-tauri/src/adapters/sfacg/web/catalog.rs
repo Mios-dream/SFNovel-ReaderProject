@@ -266,6 +266,7 @@ fn parse_public_pocket_items(html: &str) -> Vec<PublicShelfItem> {
                 result.push(PublicShelfItem {
                     kind,
                     id,
+                    media_id: None,
                     title,
                     author,
                     cover,
@@ -362,6 +363,7 @@ fn parse_public_comic_items(html: &str) -> Vec<PublicShelfItem> {
             result.push(PublicShelfItem {
                 kind: "comic",
                 id,
+                media_id: None,
                 title,
                 author,
                 cover,
