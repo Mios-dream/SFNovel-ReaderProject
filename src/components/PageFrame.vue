@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject } from "vue";
-import { CloudDownload } from "lucide-vue-next";
+import { CloudDownload } from "@lucide/vue";
 import { useRoute, useRouter } from "vue-router";
 import AppSidebar from "./AppSidebar.vue";
 import { deskInjectionKey } from "../deskContext";

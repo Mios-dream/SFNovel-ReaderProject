@@ -10,7 +10,7 @@ import {
   Smartphone,
   Ticket,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { AuthStatus, UserProfile } from "../types";
 
 const props = defineProps<{

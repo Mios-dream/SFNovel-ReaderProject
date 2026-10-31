@@ -19,7 +19,7 @@ import {
   Star,
   Ticket,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import ExportModal from "../components/ExportModal.vue";
 import { deskInjectionKey } from "../deskContext";
 

@@ -8,7 +8,7 @@ import {
   Play,
   Trash2,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { Job } from "../types";
 
 defineProps<{ open: boolean; jobs: Job[] }>();

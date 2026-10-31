@@ -12,7 +12,7 @@ import {
   Play,
   Settings2,
   Trash2,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import PageFrame from "../components/PageFrame.vue";
 import { deskInjectionKey } from "../deskContext";
 import type { Book } from "../types";

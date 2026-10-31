@@ -12,7 +12,7 @@
   <a href="https://tauri.app/"><img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white"></a>
   <a href="https://vuejs.org/"><img alt="Vue 3" src="https://img.shields.io/badge/Vue-3-4FC08D?style=flat-square&logo=vue.js"></a>
   <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/Rust-2021-000000?style=flat-square&logo=rust"></a>
-  <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat-square&logo=typescript&logoColor=white"></a>
+  <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-6.0-3178C6?style=flat-square&logo=typescript&logoColor=white"></a>
   <a href="./package.json"><img alt="License GPL3.0" src="https://img.shields.io/badge/License-GPL3.0-blue?style=flat-square"></a>
 </p>
 
@@ -103,7 +103,7 @@
 
 | 软件             | 版本                                                | 说明                         |
 | ---------------- | --------------------------------------------------- | ---------------------------- |
-| Node.js          | >= 18.17.0                                          | 安装前端依赖并运行 Tauri CLI |
+| Node.js          | 20.19+ 或 22.12+                                    | 安装前端依赖并运行 Tauri CLI |
 | Rust             | stable                                              | 编译 Tauri 原生后端          |
 | Windows 开发工具 | Visual Studio Build Tools（C++）和 WebView2 Runtime | Windows 桌面开发与运行所需   |
 

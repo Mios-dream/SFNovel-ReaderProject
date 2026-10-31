@@ -18,7 +18,7 @@ import {
   Star,
   Ticket,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { deskInjectionKey } from "../deskContext";
 import { reportError } from "../composables/useToast";
 import type { Chapter, ChapterMode, ChapterVolume } from "../types";

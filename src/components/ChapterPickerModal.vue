@@ -226,7 +226,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   LockKeyholeOpen,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { Chapter, ChapterMode, ChapterVolume, Novel } from "../types";
 
 const props = defineProps<{

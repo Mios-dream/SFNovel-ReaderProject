@@ -56,5 +56,8 @@ fn sfacg_sign_v2(nonce: &str, timestamp: u128, device_id: &str) -> Result<String
             *value += 19;
         }
     }
-    Ok(format!("{:X}", Md5::digest(&mixed)))
+    Ok(Md5::digest(&mixed)
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect())
 }

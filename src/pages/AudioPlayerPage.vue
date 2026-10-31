@@ -27,7 +27,7 @@ import {
   TimerOff,
   Volume2,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import AudioPlayerDrawer from "../components/AudioPlayerDrawer.vue";
 import { reportError, showToast } from "../composables/useToast";
 import { deskInjectionKey } from "../deskContext";

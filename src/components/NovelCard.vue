@@ -4,7 +4,7 @@ import {
   FileText,
   Headphones,
   Image as ImageIcon,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { Novel } from "../types";
 
 defineProps<{

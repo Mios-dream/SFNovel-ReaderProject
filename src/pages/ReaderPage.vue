@@ -19,7 +19,7 @@ import {
   ScrollText,
   X,
   MapPin,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { useRouter } from "vue-router";
 import { deskInjectionKey } from "../deskContext";
 import type { OnlineTextChapter } from "../types";
@@ -40,7 +40,6 @@ type DisplayMode = "vertical" | "paged";
 const desk = requireDesk();
 const router = useRouter();
 const readerElement = ref<HTMLElement>();
-const stageElement = ref<HTMLElement>();
 const readerCanvas = ref<HTMLCanvasElement>();
 const online = computed(() => desk.readerSource.value === "online");
 const book = computed(() => desk.localBook.value);

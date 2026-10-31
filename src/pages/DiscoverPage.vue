@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { inject } from "vue";
-import { BookOpen, LoaderCircle, Search, Sparkles } from "lucide-vue-next";
+import { BookOpen, LoaderCircle, Search, Sparkles } from "@lucide/vue";
 import recommendationOne from "../assets/image/header_cover/正派团宠惊坐起，反派竟是我自己.jpg";
 import recommendationTwo from "../assets/image/header_cover/变成狐娘的我被真龙圣女捕获了.jpg";
 import recommendationThree from "../assets/image/header_cover/工会看板娘之野望.jpg";

@@ -7,7 +7,7 @@ import {
   LogOut,
   Smartphone,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { ref, watch } from "vue";
 import type { AuthStatus } from "../types";
 

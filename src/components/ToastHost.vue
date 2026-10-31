@@ -5,7 +5,7 @@ import {
   Info,
   TriangleAlert,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { useToast, type ToastType } from "../composables/useToast";
 
 const { toasts, dismissToast } = useToast();

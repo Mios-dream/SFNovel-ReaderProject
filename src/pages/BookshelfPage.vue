@@ -6,7 +6,7 @@ import {
   ChevronRight,
   LoaderCircle,
   RefreshCw,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import NovelCard from "../components/NovelCard.vue";
 import PageFrame from "../components/PageFrame.vue";
 import { deskInjectionKey } from "../deskContext";

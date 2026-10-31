@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Trash2, X } from "lucide-vue-next";
+import { Trash2, X } from "@lucide/vue";
 import type { Book } from "../types";
 
 defineProps<{ book?: Book }>();

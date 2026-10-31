@@ -13,7 +13,7 @@ import {
   X,
   ZoomIn,
   ZoomOut,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { useRouter } from "vue-router";
 import { deskInjectionKey } from "../deskContext";
 

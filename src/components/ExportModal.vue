@@ -7,7 +7,7 @@ import {
   Headphones,
   Images,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 
 type Media = "novel" | "audio" | "comic";
 type ExportFormat = "epub" | "markdown" | "txt" | "audio" | "comic";

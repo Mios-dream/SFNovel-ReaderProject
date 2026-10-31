@@ -6,7 +6,7 @@ import {
   Save,
   Settings2,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { reactive, ref, watch } from "vue";
 import type { RequestPolicy } from "../types";
 
