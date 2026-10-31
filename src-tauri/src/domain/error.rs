@@ -83,6 +83,11 @@ impl AppError {
     pub(crate) fn into_message(self) -> String {
         self.message
     }
+
+    /// 判断错误是否表示当前登录会话已失效。
+    pub(crate) fn is_unauthenticated(&self) -> bool {
+        self.kind == ErrorKind::Unauthenticated
+    }
 }
 
 impl fmt::Display for AppError {

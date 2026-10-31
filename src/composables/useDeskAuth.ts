@@ -56,6 +56,7 @@ export function useDeskAuth(notify: Notify) {
       } catch (error) {
         clearAccountProfileCache();
         accountProfileError.value = nativeErrorMessage(error, "读取账户资料失败");
+        await refreshAuthStatus();
         return false;
       } finally {
         accountProfileLoading.value = false;

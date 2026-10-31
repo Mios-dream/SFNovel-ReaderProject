@@ -28,12 +28,10 @@ impl WebClient {
         let account_text = strip_html_text(&my_html);
         let month_ticket = extract_numbers_after_text(&account_text, "月票")
             .first()
-            .copied()
-            .unwrap_or(0);
+            .copied();
         let wallet = extract_numbers_after_text(&account_text, "我的钱包");
-        let fire_money = wallet.first().copied().unwrap_or(0);
-        let coupons = wallet.get(1).copied().unwrap_or(0);
-        profile.web_details_available = true;
+        let fire_money = wallet.first().copied();
+        let coupons = wallet.get(1).copied();
         profile.fire_money_remain = fire_money;
         profile.coupons_remain = coupons;
         profile.monthly_ticket = month_ticket;
@@ -137,14 +135,11 @@ fn user_profile_from_login_info(value: &str) -> Result<UserProfile, String> {
         account_id,
         nick_name,
         avatar,
-        app_details_available: false,
-        web_details_available: false,
         vip_details_available: false,
         vip_system: String::new(),
-        welfare_coin: 0,
-        fire_money_remain: 0,
-        coupons_remain: 0,
-        monthly_ticket: 0,
+        fire_money_remain: None,
+        coupons_remain: None,
+        monthly_ticket: None,
         vip_level: 0,
         vip_name: String::new(),
     })

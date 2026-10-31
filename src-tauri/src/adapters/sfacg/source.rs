@@ -212,42 +212,38 @@ impl SfSource {
         client.get_public_bookshelf().await
     }
 
-    /// 读取账户资料。App 资料优先，网页资料补齐月票和 VIP。
-    pub(crate) async fn account_profile(&self) -> Result<UserProfile, String> {
-        let app_profile = if self.has_app_session() {
-            match self.app_client.get_user_profile().await {
-                Ok(profile) => Some(profile),
+    /// 读取账户资料。存在 App 凭证时只读取 App，否则读取网页资料。
+    pub(crate) async fn account_profile(&self) -> Result<UserProfile, AppError> {
+        if self.has_app_session() {
+            return match self.app_client.get_user_profile().await {
+                Ok(profile) => Ok(profile),
                 Err(error) => {
-                    eprintln!("[sfacg] App profile unavailable: {error}");
-                    None
+                    let message = error.describe("/user");
+                    eprintln!("[sfacg] App profile unavailable: {message}");
+                    if error.is_session_expired() {
+                        Err(AppError::unauthenticated(
+                            "SF App 登录已失效，已自动退出，请重新登录 App。",
+                        ))
+                    } else {
+                        Err(AppError::upstream(message))
+                    }
                 }
-            }
-        } else {
-            None
-        };
-        let web_profile = if self.has_web_session() {
-            match self.web_client.get_user_profile().await {
-                Ok(profile) => Some(profile),
+            };
+        }
+        if self.has_web_session() {
+            return match self.web_client.get_user_profile().await {
+                Ok(profile) => Ok(profile),
                 Err(error) => {
                     eprintln!("[sfacg] Web profile unavailable: {error}");
-                    None
+                    Err(AppError::upstream(error))
                 }
-            }
-        } else {
-            None
-        };
-        match (app_profile, web_profile) {
-            (Some(app), Some(web)) => Ok(merge_profiles(app, web)),
-            (Some(profile), None) | (None, Some(profile)) => Ok(profile),
-            (None, None) if !self.has_app_session() && !self.has_web_session() => {
-                Err("请先连接 App 或网站凭证".to_string())
-            }
-            (None, None) => Err("当前登录会话已失效，请重新登录".to_string()),
+            };
         }
+        Err(AppError::unauthenticated("请先连接 App 或网站凭证"))
     }
 
     /// 验证当前账户会话可用。
-    pub(crate) async fn verify_account(&self) -> Result<(), String> {
+    pub(crate) async fn verify_account(&self) -> Result<(), AppError> {
         self.account_profile().await.map(|_| ())
     }
 
@@ -376,37 +372,6 @@ fn is_comic_folder(value: &str) -> bool {
         && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 
-/// 将网页侧可选的展示资料合并到 App 账户资料。
-///
-/// App 资料优先；仅空值、网页余额与 VIP 补充字段会采用网页来源。
-///
-/// # 参数
-/// - `app`：App API 返回的账户资料。
-/// - `web`：网页端返回的补充资料。
-///
-/// # 返回
-/// 返回合并后的账户资料。
-fn merge_profiles(mut app: UserProfile, web: UserProfile) -> UserProfile {
-    app.web_details_available = web.web_details_available;
-    app.monthly_ticket = web.monthly_ticket;
-    if web.vip_details_available {
-        app.vip_system = web.vip_system;
-        app.vip_level = web.vip_level;
-        app.vip_name = web.vip_name;
-        app.vip_details_available = true;
-    }
-    if app.account_id == 0 {
-        app.account_id = web.account_id;
-    }
-    if app.nick_name.trim().is_empty() {
-        app.nick_name = web.nick_name;
-    }
-    if app.avatar.trim().is_empty() {
-        app.avatar = web.avatar;
-    }
-    app
-}
-
 /// 将远程适配层错误转换为应用层上游错误。
 ///
 /// # 参数
@@ -483,11 +448,11 @@ impl RemoteGateway for SfSource {
     }
 
     async fn account_profile(&self) -> AppResult<UserProfile> {
-        SfSource::account_profile(self).await.map_err(remote_error)
+        SfSource::account_profile(self).await
     }
 
     async fn verify_account(&self) -> AppResult<()> {
-        SfSource::verify_account(self).await.map_err(remote_error)
+        SfSource::verify_account(self).await
     }
 
     async fn login_app(&self, username: &str, password: &str) -> AppResult<String> {

@@ -188,6 +188,17 @@ impl AppClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<Value, String> {
+        self.get_data_inner(path, query, true)
+            .await
+            .map_err(|error| error.describe(path))
+    }
+
+    /// 请求 App API 资源，并保留可分类的上游失败信息。
+    pub(crate) async fn get_data_typed(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<Value, AppApiError> {
         self.get_data_inner(path, query, true).await
     }
 
@@ -197,7 +208,7 @@ impl AppClient {
         path: &str,
         query: &[(&str, String)],
         allow_registration: bool,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, AppApiError> {
         match self.send_get(path, query).await {
             Ok(data) => Ok(data),
             Err(error)
@@ -207,20 +218,17 @@ impl AppClient {
                     .device_registration_attempted
                     .swap(true, Ordering::AcqRel)
                 {
-                    return Err(error.describe(path));
+                    return Err(error);
                 }
                 match self.register_device().await {
-                    Ok(()) => self
-                        .send_get(path, query)
-                        .await
-                        .map_err(|retry_error| retry_error.describe(path)),
-                    Err(registration_error) => Err(format!(
+                    Ok(()) => self.send_get(path, query).await,
+                    Err(registration_error) => Err(AppApiError::local(format!(
                         "{}；自动设备登记失败：{registration_error}",
                         error.describe(path)
-                    )),
+                    ))),
                 }
             }
-            Err(error) => Err(error.describe(path)),
+            Err(error) => Err(error),
         }
     }
 
@@ -238,6 +246,34 @@ impl AppClient {
             .await
             .map_err(AppApiError::transport)?;
         Self::parse_response(response, path).await
+    }
+
+    /// 读取当前账号持有的月票数量。
+    ///
+    /// App 通过 `HEAD /user/tickets` 的 `X-Total-Count` 响应头返回数量。
+    pub(super) async fn get_user_ticket_count(&self) -> Result<Option<i64>, AppApiError> {
+        let response = self
+            .signed_request(reqwest::Method::HEAD, "/user/tickets", true)
+            .map_err(AppApiError::local)?
+            .send()
+            .await
+            .map_err(AppApiError::transport)?;
+        let status = response.status();
+        if !status.is_success() {
+            let error = AppApiError::from_response(status.as_u16(), &Value::Null);
+            eprintln!(
+                "[sfacg] App request rejected: path=/user/tickets, http={}, api_code={:?}, error_code={:?}",
+                status.as_u16(),
+                error.api_http_code,
+                error.api_error_code,
+            );
+            return Err(error);
+        }
+        Ok(response
+            .headers()
+            .get("X-Total-Count")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<i64>().ok()))
     }
 
     /// 解析 App API 响应：成功时拆出 `data`，失败时保留可分类的上游状态。

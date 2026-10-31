@@ -117,27 +117,7 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
     /// # 错误
     /// App 会话清理失败或状态同步失败时返回错误。
     pub(crate) async fn logout_app(&self) -> AppResult<AuthStatus> {
-        self.gateway.clear_app().await?;
-        self.state.clear_profile_cache();
-        {
-            let mut current = self
-                .state
-                .session
-                .lock()
-                .map_err(|_| AppError::internal("登录会话状态不可用"))?;
-            if let Some(session) = current.as_mut() {
-                session.app_cookie = None;
-                if session.web_cookie.is_some() {
-                    session.user_name = "已登录 SF 账号".to_string();
-                }
-            }
-            if current
-                .as_ref()
-                .is_some_and(|session| session.web_cookie.is_none())
-            {
-                *current = None;
-            }
-        }
+        self.clear_app_session().await?;
         self.status_snapshot()
     }
 
@@ -172,7 +152,18 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
     /// # 错误
     /// 会话失效、上游请求失败或状态读取失败时返回错误。
     pub(crate) async fn verify(&self) -> AppResult<AuthStatus> {
-        self.remote.verify_account().await?;
+        if let Err(error) = self.remote.verify_account().await {
+            if error.is_unauthenticated()
+                && self
+                    .state
+                    .status()
+                    .map_err(AppError::internal)?
+                    .app_authenticated
+            {
+                self.clear_app_session().await?;
+            }
+            return Err(error);
+        }
         self.status_snapshot()
     }
 
@@ -185,10 +176,48 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
             self.remember_profile_name(&profile);
             return Ok(profile);
         }
-        let profile = self.remote.account_profile().await?;
+        let profile = match self.remote.account_profile().await {
+            Ok(profile) => profile,
+            Err(error) => {
+                if error.is_unauthenticated()
+                    && self
+                        .state
+                        .status()
+                        .map_err(AppError::internal)?
+                        .app_authenticated
+                {
+                    self.clear_app_session().await?;
+                }
+                return Err(error);
+            }
+        };
         self.state.store_profile(&profile);
         self.remember_profile_name(&profile);
         Ok(profile)
+    }
+
+    /// 清除 App 会话，并保留仍然存在的 Web 会话。
+    async fn clear_app_session(&self) -> AppResult<()> {
+        self.gateway.clear_app().await?;
+        self.state.clear_profile_cache();
+        let mut current = self
+            .state
+            .session
+            .lock()
+            .map_err(|_| AppError::internal("登录会话状态不可用"))?;
+        if let Some(session) = current.as_mut() {
+            session.app_cookie = None;
+            if session.web_cookie.is_some() {
+                session.user_name = "已登录 SF 账号".to_string();
+            }
+        }
+        if current
+            .as_ref()
+            .is_some_and(|session| session.web_cookie.is_none())
+        {
+            *current = None;
+        }
+        Ok(())
     }
 
     /// 在不阻断资料读取的前提下更新会话中的展示名称。

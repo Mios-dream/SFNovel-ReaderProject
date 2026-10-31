@@ -239,15 +239,26 @@ impl super::AppClient {
     ///
     /// # 错误
     /// 章节编号无效、上游未返回正文或缺少作品、分卷标识时返回错误。
-    pub(crate) async fn get_user_profile(&self) -> Result<UserProfile, String> {
+    pub(crate) async fn get_user_profile(&self) -> Result<UserProfile, AppApiError> {
         let user = self
-            .get_data("/user", &[("expand", "welfareCoin".to_string())])
+            .get_data_typed("/user", &[("expand", "welfareCoin".to_string())])
             .await?;
-        let money = self.get_data("/user/money", &[]).await?;
+        let money = self.get_data_typed("/user/money", &[]).await?;
+        let monthly_ticket = match self.get_user_ticket_count().await {
+            Ok(count) => count,
+            Err(error) if error.is_session_expired() => return Err(error),
+            Err(error) => {
+                eprintln!(
+                    "[sfacg] App ticket count unavailable: {}",
+                    error.describe("/user/tickets")
+                );
+                None
+            }
+        };
         let account_id = user
             .get("accountId")
             .and_then(Value::as_i64)
-            .ok_or_else(|| "SF 登录会话可能已失效".to_string())?;
+            .ok_or_else(|| AppApiError::local("SF 登录会话可能已失效".to_string()))?;
         Ok(UserProfile {
             account_id,
             nick_name: user
@@ -261,24 +272,11 @@ impl super::AppClient {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
-            app_details_available: true,
-            web_details_available: false,
             vip_details_available: true,
             vip_system: "legacy".to_string(),
-            welfare_coin: user
-                .get("expand")
-                .and_then(|value| value.get("welfareCoin"))
-                .and_then(Value::as_i64)
-                .unwrap_or(0),
-            fire_money_remain: money
-                .get("fireMoneyRemain")
-                .and_then(Value::as_i64)
-                .unwrap_or(0),
-            coupons_remain: money
-                .get("couponsRemain")
-                .and_then(Value::as_i64)
-                .unwrap_or(0),
-            monthly_ticket: 0,
+            fire_money_remain: money.get("fireMoneyRemain").and_then(Value::as_i64),
+            coupons_remain: money.get("couponsRemain").and_then(Value::as_i64),
+            monthly_ticket,
             vip_level: money.get("vipLevel").and_then(Value::as_i64).unwrap_or(0),
             vip_name: String::new(),
         })

@@ -2,7 +2,6 @@
 import { computed, ref, watch } from "vue";
 import {
   CircleUserRound,
-  Coins,
   Flame,
   Globe2,
   LoaderCircle,
@@ -33,13 +32,13 @@ watch(
 
 const avatarLabel = computed(() => props.profile?.nickName.slice(0, 1) || "S");
 /**
- * Formats a nullable numeric account value using the Chinese locale.
+ * Formats a nullable account balance, using an explicit value for missing data.
  *
- * @param value The account value to display; missing values are treated as zero.
+ * @param value The account value to display; missing values are shown as unknown.
  * @returns The locale-formatted number suitable for the profile template.
  */
-const number = (value: number | undefined) =>
-  new Intl.NumberFormat("zh-CN").format(value || 0);
+const balance = (value: number | null) =>
+  value === null ? "未知" : new Intl.NumberFormat("zh-CN").format(value);
 </script>
 
 <template>
@@ -74,26 +73,18 @@ const number = (value: number | undefined) =>
           </div>
         </header>
 
-        <div
-          v-if="profile.webDetailsAvailable || profile.appDetailsAvailable"
-          class="balance-grid"
-          aria-label="账户余额"
-        >
+        <div class="balance-grid" aria-label="账户余额">
           <article>
             <Flame :size="18" /><span>火券</span
-            ><strong>{{ number(profile.fireMoneyRemain) }}</strong>
+            ><strong>{{ balance(profile.fireMoneyRemain) }}</strong>
           </article>
           <article>
             <Ticket :size="18" /><span>代券</span
-            ><strong>{{ number(profile.couponsRemain) }}</strong>
-          </article>
-          <article v-if="profile.appDetailsAvailable">
-            <Coins :size="18" /><span>金币</span
-            ><strong>{{ number(profile.welfareCoin) }}</strong>
+            ><strong>{{ balance(profile.couponsRemain) }}</strong>
           </article>
           <article>
             <Ticket :size="18" /><span>月票</span
-            ><strong>{{ number(profile.monthlyTicket) }}</strong>
+            ><strong>{{ balance(profile.monthlyTicket) }}</strong>
           </article>
         </div>
         <div v-if="profile.vipDetailsAvailable" class="membership">

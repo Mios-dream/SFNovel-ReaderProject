@@ -171,14 +171,11 @@ export type UserProfile = {
   accountId: number;
   nickName: string;
   avatar: string;
-  appDetailsAvailable: boolean;
-  webDetailsAvailable: boolean;
   vipDetailsAvailable: boolean;
   vipSystem: "new" | "legacy";
-  welfareCoin: number;
-  fireMoneyRemain: number;
-  couponsRemain: number;
-  monthlyTicket: number;
+  fireMoneyRemain: number | null;
+  couponsRemain: number | null;
+  monthlyTicket: number | null;
   vipLevel: number;
   vipName: string;
 };

@@ -4,7 +4,7 @@ use serde_json::Value;
 ///
 /// 同时保留 HTTP 状态和上游 JSON 中的业务状态，用于区分会话失效、设备未登记、
 /// 客户端版本限制和账号风控，而不是只拼接一段错误文本。
-pub(super) struct AppApiError {
+pub(crate) struct AppApiError {
     /// 传输层 HTTP 状态码；本地错误为 `0`。
     pub(super) http_status: u16,
     /// 上游 `status.httpCode` 业务状态码。
@@ -67,6 +67,14 @@ impl AppApiError {
             && (self.http_status == 401 || self.api_http_code == Some(401))
     }
 
+    /// 判断失败是否表示登录 Cookie 已失效。
+    pub(crate) fn is_session_expired(&self) -> bool {
+        let code = self
+            .api_http_code
+            .or_else(|| (self.http_status > 0).then_some(i64::from(self.http_status)));
+        code == Some(401) && self.api_error_code != Some(507)
+    }
+
     /// 判断失败是否表示接口只对官方客户端开放。
     ///
     /// 实测该拦截只取决于请求头里的 App 版本串，接口地址和参数都与官方客户端一致，
@@ -97,7 +105,7 @@ impl AppApiError {
     ///
     /// # 返回
     /// 返回包含可操作提示的错误文本。
-    pub(super) fn describe(&self, _path: &str) -> String {
+    pub(crate) fn describe(&self, _path: &str) -> String {
         let message = self
             .message
             .clone()
