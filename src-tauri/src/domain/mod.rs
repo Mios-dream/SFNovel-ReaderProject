@@ -7,4 +7,5 @@ pub(crate) mod download;
 pub(crate) mod error;
 pub(crate) mod ids;
 pub(crate) mod library;
+pub(crate) mod signin;
 pub(crate) mod settings;

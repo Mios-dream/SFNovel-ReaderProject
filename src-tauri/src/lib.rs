@@ -188,7 +188,11 @@ pub fn run() {
             commands::auth::logout_app_session,
             commands::auth::logout_web_session,
             commands::auth::verify_authenticated_request,
-            commands::auth::get_account_profile
+            commands::auth::get_account_profile,
+            commands::signin::get_signin_month,
+            commands::signin::get_signin_overview,
+            commands::signin::submit_signin,
+            commands::signin::claim_signin_reward
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

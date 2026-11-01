@@ -369,6 +369,10 @@ export function useNovelDesk() {
       queueOpen.value = false;
       return;
     }
+    if (auth.signinOpen.value) {
+      auth.signinOpen.value = false;
+      return;
+    }
     if (auth.credentialsOpen.value) {
       auth.credentialsOpen.value = false;
       return;

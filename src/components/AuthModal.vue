@@ -208,14 +208,20 @@ function submit() {
 }
 .login-form input {
   width: 100%;
-  min-height: 39px;
+  min-height: 40px;
   padding: 0 12px;
   border: 1px solid #efd8cc;
   border-radius: 10px;
   color: #69453d;
   background: rgba(255, 255, 255, 0.8);
   box-sizing: border-box;
+  font-size: 16px;
 }
+
+.login-form input:focus {
+  outline: 1px solid var(--theme-color);
+}
+
 .modal-icon {
   display: grid;
   width: 42px;

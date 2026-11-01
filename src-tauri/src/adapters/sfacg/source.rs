@@ -17,6 +17,7 @@ use crate::domain::catalog::{
 use crate::domain::content::{ApiChapterContent, ImageAsset, TextChapter, TextOrigin};
 use crate::domain::error::{AppError, AppResult};
 use crate::domain::ids::validate_novel_id;
+use crate::domain::signin::{SigninContinueDays, SigninDay, SigninReward, SigninWeekItem};
 use async_trait::async_trait;
 use tauri::{AppHandle, Manager, Runtime};
 
@@ -245,6 +246,60 @@ impl SfSource {
         Err(AppError::unauthenticated("请先连接 App 或网站凭证"))
     }
 
+    /// 读取指定月份的签到日期。
+    pub(crate) async fn signin_month(&self, year: i64, month: i64) -> AppResult<Vec<SigninDay>> {
+        self.require_app("签到")
+            .map_err(remote_error)?
+            .get_signin_month(year, month)
+            .await
+            .map_err(remote_error)
+    }
+
+    /// 读取连续签到摘要。
+    pub(crate) async fn signin_continue_days(&self) -> AppResult<SigninContinueDays> {
+        self.require_app("签到")
+            .map_err(remote_error)?
+            .get_signin_continue_days()
+            .await
+            .map_err(remote_error)
+    }
+
+    /// 读取本周签到记录。
+    pub(crate) async fn signin_week(&self) -> AppResult<Vec<SigninWeekItem>> {
+        self.require_app("签到")
+            .map_err(remote_error)?
+            .get_signin_week()
+            .await
+            .map_err(remote_error)
+    }
+
+    /// 读取签到奖励记录。
+    pub(crate) async fn signin_rewards(&self) -> AppResult<Vec<SigninReward>> {
+        self.require_app("签到")
+            .map_err(remote_error)?
+            .get_signin_rewards()
+            .await
+            .map_err(remote_error)
+    }
+
+    /// 提交指定日期的签到。
+    pub(crate) async fn submit_signin(&self, date: &str) -> AppResult<()> {
+        self.require_app("签到")
+            .map_err(remote_error)?
+            .submit_signin(date)
+            .await
+            .map_err(remote_error)
+    }
+
+    /// 领取指定配置的签到奖励。
+    pub(crate) async fn claim_signin_reward(&self, config_id: i64) -> AppResult<()> {
+        self.require_app("签到")
+            .map_err(remote_error)?
+            .claim_signin_reward(config_id)
+            .await
+            .map_err(remote_error)
+    }
+
     /// 验证当前账户会话可用。
     pub(crate) async fn verify_account(&self) -> Result<(), AppError> {
         self.account_profile().await.map(|_| ())
@@ -448,6 +503,30 @@ impl RemoteGateway for SfSource {
 
     async fn account_profile(&self) -> AppResult<UserProfile> {
         SfSource::account_profile(self).await
+    }
+
+    async fn signin_month(&self, year: i64, month: i64) -> AppResult<Vec<SigninDay>> {
+        SfSource::signin_month(self, year, month).await
+    }
+
+    async fn signin_continue_days(&self) -> AppResult<SigninContinueDays> {
+        SfSource::signin_continue_days(self).await
+    }
+
+    async fn signin_week(&self) -> AppResult<Vec<SigninWeekItem>> {
+        SfSource::signin_week(self).await
+    }
+
+    async fn signin_rewards(&self) -> AppResult<Vec<SigninReward>> {
+        SfSource::signin_rewards(self).await
+    }
+
+    async fn submit_signin(&self, date: &str) -> AppResult<()> {
+        SfSource::submit_signin(self, date).await
+    }
+
+    async fn claim_signin_reward(&self, config_id: i64) -> AppResult<()> {
+        SfSource::claim_signin_reward(self, config_id).await
     }
 
     async fn verify_account(&self) -> AppResult<()> {

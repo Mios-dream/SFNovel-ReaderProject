@@ -179,6 +179,42 @@ export type UserProfile = {
   vipLevel: number;
   vipName: string;
 };
+export type SigninDay = {
+  year: number;
+  month: number;
+  day: number;
+};
+export type SigninPrize = {
+  name: string;
+  num: number;
+};
+export type SigninContinueDays = {
+  totalContinueDays: number;
+  currentMonthContinueDays: number;
+  maxContinueDays: number;
+};
+export type SigninWeekItem = {
+  day: number;
+  date: string;
+  weekday: string;
+  isSignIn: boolean;
+  rewards: SigninPrize[];
+};
+export type SigninReward = {
+  recordId: number;
+  configId: number;
+  typeName: string;
+  day: number;
+  unit: string;
+  status: number;
+  isFinish: boolean;
+  rewards: SigninPrize[];
+};
+export type SigninOverview = {
+  continueDays: SigninContinueDays;
+  week: SigninWeekItem[];
+  rewards: SigninReward[];
+};
 /** 下载请求与过程文件设置。 */
 export type DownloadSettings = {
   requestIntervalMs: number;

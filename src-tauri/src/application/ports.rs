@@ -14,6 +14,7 @@ use crate::domain::library::{
     BookDetail, ExportFile, LibraryComicChapter, LibraryEntry, StoredChapter,
 };
 use crate::domain::settings::{AppSettings, ContentDictionaryResult};
+use crate::domain::signin::{SigninContinueDays, SigninDay, SigninReward, SigninWeekItem};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 
@@ -51,6 +52,18 @@ pub(crate) trait RemoteGateway: Send + Sync {
     async fn bookshelf(&self, force_refresh: bool) -> AppResult<PublicShelf>;
     /// 读取当前账号资料。
     async fn account_profile(&self) -> AppResult<UserProfile>;
+    /// 读取指定月份的签到日期。
+    async fn signin_month(&self, year: i64, month: i64) -> AppResult<Vec<SigninDay>>;
+    /// 读取连续签到摘要。
+    async fn signin_continue_days(&self) -> AppResult<SigninContinueDays>;
+    /// 读取本周签到记录。
+    async fn signin_week(&self) -> AppResult<Vec<SigninWeekItem>>;
+    /// 读取签到奖励记录。
+    async fn signin_rewards(&self) -> AppResult<Vec<SigninReward>>;
+    /// 提交指定日期的签到。
+    async fn submit_signin(&self, date: &str) -> AppResult<()>;
+    /// 领取指定配置的签到奖励。
+    async fn claim_signin_reward(&self, config_id: i64) -> AppResult<()>;
     /// 通过上游请求验证当前账号会话。
     async fn verify_account(&self) -> AppResult<()>;
     /// 使用账号密码换取 App Cookie。

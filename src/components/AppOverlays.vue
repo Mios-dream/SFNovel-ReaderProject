@@ -6,6 +6,7 @@ import ChapterPickerModal from "./ChapterPickerModal.vue";
 import ConfirmDeleteModal from "./ConfirmDeleteModal.vue";
 import DownloadQueueModal from "./DownloadQueueModal.vue";
 import SettingModal from "./SettingModal.vue";
+import SigninModal from "./SigninModal.vue";
 import { deskInjectionKey } from "../deskContext";
 
 const desk = inject(deskInjectionKey);
@@ -57,7 +58,12 @@ if (!desk) throw new Error("Desk context is unavailable");
     :error="desk.accountProfileError.value"
     @close="desk.accountOpen.value = false"
     @logout="desk.logout"
+    @signin="desk.openSignin"
     @manage-connections="desk.manageConnections"
+  />
+  <SigninModal
+    :open="desk.signinOpen.value"
+    @close="desk.signinOpen.value = false"
   />
   <SettingModal
     :open="desk.settingsOpen.value"

@@ -28,6 +28,8 @@ mod parse_detail;
 mod parsing;
 /// `SFSecurity` 请求签名生成。
 mod signing;
+/// 签到月历、连续天数、本周记录与奖励接口。
+mod signin;
 
 pub(crate) use client::AppClient;
 pub(crate) use error::is_risk_control_failure;

@@ -10,6 +10,7 @@ export function useDeskAuth(notify: Notify) {
   const credentialsOpen = ref(false);
   const credentialsTab = ref<"official" | "password">("official");
   const accountOpen = ref(false);
+  const signinOpen = ref(false);
   const accountProfile = ref<UserProfile>();
   const accountProfileLoading = ref(false);
   const accountProfileError = ref("");
@@ -113,6 +114,7 @@ export function useDeskAuth(notify: Notify) {
       await invoke<void>("logout");
       auth.value = { authenticated: false, appAuthenticated: false, webAuthenticated: false };
       accountOpen.value = false;
+      signinOpen.value = false;
       credentialsOpen.value = false;
       clearAccountProfileCache();
       notify("已清除本地登录会话");
@@ -124,11 +126,13 @@ export function useDeskAuth(notify: Notify) {
   async function logoutApp() {
     try {
       auth.value = await invoke<AuthStatus>("logout_app_session");
+      signinOpen.value = false;
       if (auth.value.authenticated) {
         await loadAccountProfile(true);
       } else {
         clearAccountProfileCache();
         accountOpen.value = false;
+        signinOpen.value = false;
       }
       notify("App 登录已退出，网站登录不受影响");
     } catch (error) {
@@ -165,7 +169,14 @@ export function useDeskAuth(notify: Notify) {
     openCredentials();
   }
 
+  function openSignin() {
+    if (!auth.value.appAuthenticated) return;
+    accountOpen.value = false;
+    signinOpen.value = true;
+  }
+
   function openCredentials(tab: "official" | "password" = "official") {
+    signinOpen.value = false;
     credentialsTab.value = tab;
     credentialsOpen.value = true;
   }
@@ -179,6 +190,7 @@ export function useDeskAuth(notify: Notify) {
     credentialsOpen,
     credentialsTab,
     accountOpen,
+    signinOpen,
     accountProfile,
     accountProfileLoading,
     accountProfileError,
@@ -191,6 +203,7 @@ export function useDeskAuth(notify: Notify) {
     logoutApp,
     logoutWeb,
     openAccount,
+    openSignin,
     manageConnections,
     openCredentials,
     openAppCredentials,

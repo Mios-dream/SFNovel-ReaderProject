@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import {
+  CalendarCheck2,
   CircleUserRound,
   Flame,
   Globe2,
@@ -9,7 +10,6 @@ import {
   Settings2,
   Smartphone,
   Ticket,
-  X,
 } from "@lucide/vue";
 import type { AuthStatus, UserProfile } from "../types";
 
@@ -20,7 +20,12 @@ const props = defineProps<{
   loading: boolean;
   error: string;
 }>();
-const emit = defineEmits<{ close: []; logout: []; manageConnections: [] }>();
+const emit = defineEmits<{
+  close: [];
+  logout: [];
+  manageConnections: [];
+  signin: [];
+}>();
 const avatarFailed = ref(false);
 
 watch(
@@ -44,9 +49,6 @@ const balance = (value: number | null) =>
 <template>
   <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
     <section class="modal glass" aria-labelledby="account-profile-title">
-      <button class="close-button" title="关闭" @click="emit('close')">
-        <X :size="20" />
-      </button>
       <template v-if="loading && !profile">
         <div class="loading-state">
           <LoaderCircle class="spin" :size="26" /><span>正在读取账户信息</span>
@@ -66,10 +68,21 @@ const balance = (value: number | null) =>
             />
             <span v-else>{{ avatarLabel }}</span>
           </div>
-          <div>
-            <p>SF 账号</p>
+          <div class="profile-copy">
+            <div class="profile-tagline">
+              <span class="account-tag">SF 账号</span>
+              <button
+                class="signin-button"
+                :disabled="!auth.appAuthenticated"
+                :title="
+                  auth.appAuthenticated ? '每日签到' : '连接 App 登录后可签到'
+                "
+                @click="emit('signin')"
+              >
+                <CalendarCheck2 :size="15" />签到
+              </button>
+            </div>
             <h2 id="account-profile-title">{{ profile.nickName }}</h2>
-            <small v-if="profile.accountId">ID: {{ profile.accountId }}</small>
           </div>
         </header>
 
@@ -105,7 +118,7 @@ const balance = (value: number | null) =>
         <p>{{ error || "暂未获取到账号资料" }}</p>
       </div>
       <section class="credential-summary" aria-label="登录凭证状态">
-        <strong>登录凭证</strong>
+        <strong>登录状态</strong>
         <div class="credential-icons">
           <span
             v-if="auth.appAuthenticated"
@@ -121,12 +134,14 @@ const balance = (value: number | null) =>
           /></span>
         </div>
       </section>
-      <button class="connections-button" @click="emit('manageConnections')">
-        <Settings2 :size="17" />管理登录连接
-      </button>
-      <button class="logout-button" @click="emit('logout')">
-        <LogOut :size="17" />退出全部账户
-      </button>
+      <div class="account-actions">
+        <button class="connections-button" @click="emit('manageConnections')">
+          <Settings2 :size="16" />管理登录
+        </button>
+        <button class="logout-button" @click="emit('logout')">
+          <LogOut :size="16" />退出全部账户
+        </button>
+      </div>
     </section>
   </div>
 </template>
@@ -144,33 +159,17 @@ const balance = (value: number | null) =>
 .modal {
   position: relative;
   width: min(430px, 100%);
+  max-height: calc(100dvh - 36px);
   padding: 28px;
+  overflow-y: auto;
   border-radius: 20px;
   background: rgba(255, 249, 245, 0.88);
-}
-.close-button {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  display: grid;
-  width: 40px;
-  height: 40px;
-  border: 0;
-  border-radius: 13px;
-  color: #a17367;
-  background: rgba(255, 255, 255, 0.7);
-  place-items: center;
-}
-.close-button:hover {
-  color: var(--theme-color-dark);
-  background: #fff0e7;
 }
 .profile-header {
   display: flex;
   align-items: center;
   gap: 13px;
-  margin-bottom: 23px;
-  padding-right: 38px;
+  margin-bottom: 18px;
 }
 .avatar {
   display: grid;
@@ -196,10 +195,21 @@ const balance = (value: number | null) =>
     "Microsoft YaHei",
     sans-serif;
 }
-.profile-header p {
-  margin: 0 0 3px;
+.profile-copy {
+  flex: 1;
+  min-width: 0;
+}
+.profile-tagline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+}
+.account-tag {
   color: #b08072;
-  font-size: 11px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 .profile-header h2 {
   margin: 0;
@@ -210,10 +220,6 @@ const balance = (value: number | null) =>
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.profile-header small {
-  color: #aa8275;
-  font: 11px monospace;
-}
 .balance-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -221,7 +227,7 @@ const balance = (value: number | null) =>
 }
 .balance-grid article {
   display: grid;
-  min-height: 103px;
+  min-height: 90px;
   padding: 12px;
   border: 1px solid #f2dacd;
   border-radius: 10px;
@@ -233,7 +239,7 @@ const balance = (value: number | null) =>
 .balance-grid span {
   align-self: end;
   color: #a17a6e;
-  font-size: 11px;
+  font-size: 12px;
 }
 .balance-grid strong {
   overflow: hidden;
@@ -249,8 +255,9 @@ const balance = (value: number | null) =>
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 12px;
-  padding: 12px;
+  min-height: 40px;
+  margin-top: 10px;
+  padding: 9px 12px;
   border-radius: 10px;
   color: #8a655b;
   background: #fff0e7;
@@ -267,8 +274,9 @@ const balance = (value: number | null) =>
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 12px;
-  padding: 12px;
+  min-height: 40px;
+  margin-top: 10px;
+  padding: 9px 12px;
   border: 1px dashed #efd0c0;
   border-radius: 10px;
   color: #8a655b;
@@ -284,9 +292,9 @@ const balance = (value: number | null) =>
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 18px;
-  min-height: 48px;
-  padding: 0 14px;
+  margin-top: 14px;
+  min-height: 44px;
+  padding: 0 12px;
   border: 1px solid #ecd8ce;
   border-radius: 10px;
   background: #fffaf7;
@@ -305,8 +313,8 @@ const balance = (value: number | null) =>
 .credential-icon {
   display: grid;
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 8px;
   color: #967b70;
   background: #f4e7e1;
@@ -320,24 +328,50 @@ const balance = (value: number | null) =>
   color: #3f796b;
   background: #e3f4ed;
 }
+.signin-button {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #efc8b4;
+  border-radius: 9px;
+  color: var(--theme-color-dark);
+  background: #fff4ec;
+  font-size: 12px;
+  font-weight: 600;
+}
+.signin-button:hover:not(:disabled) {
+  border-color: var(--theme-color);
+  background: #ffe9db;
+}
+.signin-button:disabled {
+  cursor: not-allowed;
+  border-color: #eadbd4;
+  color: #b49b92;
+  background: #f7efeb;
+}
+.account-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
 .connections-button,
 .logout-button {
   display: flex;
+  flex: 1;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  width: 100%;
-  min-height: 42px;
-  margin-top: 22px;
-  border: 1px solid #edc4b5;
+  gap: 6px;
+  min-width: 0;
+  min-height: 40px;
   border-radius: 10px;
-  color: #ad5b48;
-  background: transparent;
   font-size: 13px;
   font-weight: 600;
 }
 .connections-button {
-  margin-top: 22px;
   border: 1px solid #efd0c0;
   color: #8d5948;
   background: #fffaf7;
@@ -348,10 +382,13 @@ const balance = (value: number | null) =>
   background: #fff0e7;
 }
 .logout-button {
-  margin-top: 10px;
+  border: 1px solid #e7c8bd;
+  color: #a76253;
+  background: transparent;
 }
 .logout-button:hover {
   color: #fff;
+  border-color: #c96f48;
   background: #c96f48;
 }
 .loading-state,
@@ -383,6 +420,12 @@ const balance = (value: number | null) =>
 @media (max-width: 420px) {
   .modal {
     padding: 22px;
+  }
+  .profile-header {
+    gap: 10px;
+  }
+  .signin-button {
+    padding: 0 8px;
   }
   .balance-grid article {
     padding: 10px;

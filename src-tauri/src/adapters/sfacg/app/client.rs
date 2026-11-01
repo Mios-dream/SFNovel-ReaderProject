@@ -119,7 +119,8 @@ impl AppClient {
         device: &DeviceProfile,
     ) -> Result<reqwest::RequestBuilder, String> {
         let nonce = Uuid::new_v4().to_string().to_uppercase();
-        let is_post = method == reqwest::Method::POST;
+        let has_json_body =
+            method == reqwest::Method::POST || method == reqwest::Method::PUT;
         let mut request = self
             .client
             .request(method, format!("{SF_API_HOST}{path}"))
@@ -128,7 +129,7 @@ impl AppClient {
             .header("Accept", APP_ACCEPT)
             .header(reqwest::header::USER_AGENT, device.user_agent())
             .header("SFSecurity", security_header(device, &nonce)?);
-        if is_post {
+        if has_json_body {
             request = request.header("Content-Type", "application/json; charset=UTF-8");
         }
         if include_session {
@@ -374,6 +375,19 @@ impl AppClient {
     /// 此方法仅供请求体由 App 协议定义的原生层集成调用，任意渲染进程载荷不能到达此处。
     pub(crate) async fn post_data(&self, path: &str, body: &Value) -> Result<Value, String> {
         self.post_data_inner(path, body, true).await
+    }
+
+    /// 发送已签名 JSON PUT 请求，并返回拆开的数据载荷。
+    pub(crate) async fn put_data(&self, path: &str, body: &Value) -> Result<Value, String> {
+        let response = self
+            .signed_request(reqwest::Method::PUT, path, true)?
+            .json(body)
+            .send()
+            .await
+            .map_err(|error| format!("SF App 请求失败：{error}"))?;
+        Self::parse_response(response, path)
+            .await
+            .map_err(|error| error.describe(path))
     }
 
     /// 发送不带 App 会话的 JSON POST 请求，用于冷启动设备登记。
