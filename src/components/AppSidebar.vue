@@ -23,7 +23,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   navigate: [view: ViewName];
   account: [];
-  requestSettings: [];
+  settings: [];
 }>();
 const avatarFailed = ref(false);
 
@@ -70,9 +70,9 @@ watch(
         >
       </div>
       <button
-        class="request-settings-button"
+        class="settings-button"
         title="设置"
-        @click="emit('requestSettings')"
+        @click="emit('settings')"
       >
         <Settings2 :size="20" /><span>应用设置</span>
       </button>
@@ -198,7 +198,7 @@ nav button.active {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.request-settings-button {
+.settings-button {
   display: flex;
   width: 100%;
   align-items: center;
@@ -212,7 +212,7 @@ nav button.active {
   background: #fff7f2;
   font-size: 14px;
 }
-.request-settings-button:hover {
+.settings-button:hover {
   color: #fff;
   background: var(--theme-color);
 }
@@ -307,7 +307,7 @@ nav button.active {
     gap: 6px;
     margin: 0 0 0 auto;
   }
-  .request-settings-button {
+  .settings-button {
     display: grid;
     width: 40px;
     height: 40px;
@@ -319,7 +319,7 @@ nav button.active {
     background: rgba(255, 255, 255, 0.58);
     place-items: center;
   }
-  .request-settings-button span {
+  .settings-button span {
     display: none;
   }
   .account-button {

@@ -8,11 +8,11 @@ import {
   X,
 } from "@lucide/vue";
 import { reactive, ref, watch } from "vue";
-import type { RequestPolicy } from "../types";
+import type { AppSettings } from "../types";
 
 const props = defineProps<{
   open: boolean;
-  policy: RequestPolicy;
+  settings: AppSettings;
   saving: boolean;
   dictionarySize: number;
   dictionaryUpdating: boolean;
@@ -20,24 +20,40 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
-  save: [policy: RequestPolicy];
+  save: [settings: AppSettings];
   updateDictionary: [chapterId: number];
 }>();
 
-const defaultPolicy: RequestPolicy = {
-  requestIntervalMs: 500,
-  maxConcurrentDownloads: 1,
-  ocrProcessFilesEnabled: false,
-  useExternalStorage: false,
+const defaultSettings: AppSettings = {
+  download: {
+    requestIntervalMs: 500,
+    maxConcurrentDownloads: 1,
+    ocrProcessFilesEnabled: false,
+  },
+  storage: {
+    useExternalStorage: false,
+  },
+  desktop: {
+    closeToTray: true,
+  },
 };
+
+function cloneSettings(settings: AppSettings): AppSettings {
+  return {
+    download: { ...settings.download },
+    storage: { ...settings.storage },
+    desktop: { ...settings.desktop },
+  };
+}
+
 // 使用本地草稿编辑，只有提交表单时才将设置发送给后端。
-const draft = reactive<RequestPolicy>({ ...props.policy });
+const draft = reactive<AppSettings>(cloneSettings(props.settings));
 const dictionaryChapterDraft = ref(props.dictionaryChapterId);
 const isAndroid = /Android/i.test(navigator.userAgent);
 
 watch(
-  () => props.policy,
-  (policy) => Object.assign(draft, policy),
+  () => props.settings,
+  (settings) => Object.assign(draft, cloneSettings(settings)),
   { deep: true, immediate: true },
 );
 watch(
@@ -48,13 +64,8 @@ watch(
   { immediate: true },
 );
 
-/**
- * Restores the editable request policy draft to conservative defaults.
- *
- * @returns No value; mutates only the local draft until the user submits it.
- */
 function resetDraft() {
-  Object.assign(draft, defaultPolicy);
+  Object.assign(draft, cloneSettings(defaultSettings));
 }
 </script>
 
@@ -74,25 +85,55 @@ function resetDraft() {
         <h2>设置</h2>
       </header>
 
-      <form class="settings-form" @submit.prevent="emit('save', { ...draft })">
+      <form
+        class="settings-form"
+        @submit.prevent="emit('save', cloneSettings(draft))"
+      >
         <div class="settings-content">
-          <section class="settings-group">
+          <section v-if="!isAndroid" class="settings-group">
             <header class="settings-group-header">
-              <strong>存储与下载</strong>
+              <strong>桌面端</strong>
             </header>
 
-            <div v-if="isAndroid" class="setting-row">
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>关闭窗口时</strong>
+                <small>{{
+                  draft.desktop.closeToTray
+                    ? "托盘图标可重新打开窗口"
+                    : "关闭窗口将结束进程"
+                }}</small>
+              </div>
+              <label class="setting-control">
+                <select v-model="draft.desktop.closeToTray">
+                  <option :value="true">后台运行</option>
+                  <option :value="false">直接退出</option>
+                </select>
+              </label>
+            </div>
+          </section>
+          <section v-if="isAndroid" class="settings-group">
+            <header class="settings-group-header">
+              <strong>存储</strong>
+            </header>
+
+            <div class="setting-row">
               <div class="setting-info">
                 <strong>本地存储位置</strong>
                 <small>外部存储位于 Download/SF Novel Flow</small>
               </div>
               <label class="setting-control">
-                <select v-model="draft.useExternalStorage">
+                <select v-model="draft.storage.useExternalStorage">
                   <option :value="false">内部存储</option>
                   <option :value="true">外部存储</option>
                 </select>
               </label>
             </div>
+          </section>
+          <section class="settings-group">
+            <header class="settings-group-header">
+              <strong>下载</strong>
+            </header>
 
             <div class="setting-row">
               <div class="setting-info">
@@ -101,7 +142,7 @@ function resetDraft() {
               </div>
               <label class="setting-control">
                 <input
-                  v-model.number="draft.requestIntervalMs"
+                  v-model.number="draft.download.requestIntervalMs"
                   type="number"
                   min="100"
                   max="10000"
@@ -118,7 +159,7 @@ function resetDraft() {
               </div>
               <label class="setting-control">
                 <input
-                  v-model.number="draft.maxConcurrentDownloads"
+                  v-model.number="draft.download.maxConcurrentDownloads"
                   type="number"
                   min="1"
                   max="3"
@@ -137,10 +178,13 @@ function resetDraft() {
                 >
               </div>
               <label class="setting-control toggle-control">
-                <input v-model="draft.ocrProcessFilesEnabled" type="checkbox" />
+                <input
+                  v-model="draft.download.ocrProcessFilesEnabled"
+                  type="checkbox"
+                />
                 <span class="toggle" aria-hidden="true"></span>
                 <span>{{
-                  draft.ocrProcessFilesEnabled ? "已启用" : "已关闭"
+                  draft.download.ocrProcessFilesEnabled ? "已启用" : "已关闭"
                 }}</span>
               </label>
             </div>

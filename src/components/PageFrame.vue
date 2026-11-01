@@ -41,7 +41,7 @@ async function navigate(view: ViewName) {
       :profile="desk.accountProfile.value"
       @navigate="navigate"
       @account="desk.openAccount"
-      @request-settings="desk.openRequestPolicy"
+      @settings="desk.openSettings"
     />
     <slot />
     <button

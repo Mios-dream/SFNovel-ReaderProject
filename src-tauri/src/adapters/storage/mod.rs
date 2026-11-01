@@ -72,12 +72,12 @@ impl NativeStorage {
         settings::decode_api_content(&self.app, content, is_content_encrypted)
     }
 
-    /// 读取持久化请求策略。
+    /// 读取持久化应用设置。
     ///
     /// # 错误
-    /// 策略文件无法读取或解析失败时返回错误消息。
-    pub(crate) fn policy(&self) -> Result<crate::domain::settings::RequestPolicy, String> {
-        settings::load_policy(&self.app)
+    /// 设置文件无法读取或解析失败时返回错误消息。
+    pub(crate) fn settings(&self) -> Result<crate::domain::settings::AppSettings, String> {
+        settings::load_settings(&self.app)
     }
 
     /// 请求或确认外部存储访问权限。
@@ -138,8 +138,9 @@ impl LibraryStore for NativeStorage {
         #[cfg(target_os = "android")]
         {
             paths::library_directory(&self.app).map_err(storage_error)?;
-            if !settings::load_policy(&self.app)
+            if !settings::load_settings(&self.app)
                 .map_err(storage_error)?
+                .storage
                 .use_external_storage
             {
                 return Err(crate::domain::error::AppError::permission_denied(
@@ -180,14 +181,14 @@ impl LibraryStore for NativeStorage {
 }
 
 impl SettingsStore for NativeStorage {
-    /// 读取请求策略。
-    fn load_policy(&self) -> AppResult<crate::domain::settings::RequestPolicy> {
-        settings::load_policy(&self.app).map_err(storage_error)
+    /// 读取应用设置。
+    fn load_settings(&self) -> AppResult<crate::domain::settings::AppSettings> {
+        settings::load_settings(&self.app).map_err(storage_error)
     }
 
-    /// 保存请求策略。
-    fn save_policy(&self, policy: &crate::domain::settings::RequestPolicy) -> AppResult<()> {
-        settings::save_policy(&self.app, policy).map_err(storage_error)
+    /// 保存应用设置。
+    fn save_settings(&self, settings: &crate::domain::settings::AppSettings) -> AppResult<()> {
+        settings::save_settings(&self.app, settings).map_err(storage_error)
     }
 
     /// 读取正文恢复字典。

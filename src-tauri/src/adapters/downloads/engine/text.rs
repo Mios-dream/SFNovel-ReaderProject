@@ -253,7 +253,10 @@ async fn run_inner(
     let _storage_guard = storage_lock.lock().await;
     let source = SfSource::connect(app).await?;
     let storage = NativeStorage::new(app.clone());
-    let policy = storage.policy().unwrap_or_default();
+    let download = storage
+        .settings()
+        .map(|settings| settings.download)
+        .unwrap_or_default();
     let directory = storage.new_book_directory(title)?;
 
     let mut manifest = read_book_manifest(&directory)?;
@@ -385,7 +388,7 @@ async fn run_inner(
                                 &directory,
                                 novel_id,
                                 chapter_id,
-                                policy.ocr_process_files_enabled,
+                                download.ocr_process_files_enabled,
                             )
                             .await;
                             let (content, source_path) = match vip_result {
@@ -449,7 +452,10 @@ async fn run_inner(
         });
         registry::emit_job(app, state, job_id);
         registry::emit_library(app, state, job_id);
-        tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(
+            download.request_interval_ms,
+        ))
+        .await;
     }
 
     manifest.downloaded_text_chapter_ids = Some(downloaded_text_chapter_ids(&store));

@@ -1,7 +1,6 @@
 //! 应用自有目录的解析与名称约束。
 
-use super::atomic::read_or_default;
-use crate::domain::settings::RequestPolicy;
+use super::settings::load_settings;
 use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
@@ -19,16 +18,16 @@ pub(crate) fn app_data_directory(app: &tauri::AppHandle) -> Result<PathBuf, Stri
         .map_err(|error| format!("无法解析应用数据目录：{error}"))
 }
 
-/// 按请求策略返回书库目录并确保其存在。
+/// 按存储设置返回书库目录并确保其存在。
 ///
 /// # 参数
 /// - `app`：Tauri 应用句柄。
 ///
 /// # 错误
-/// 策略读取失败或目录无法创建时返回错误消息。
+/// 设置读取失败或目录无法创建时返回错误消息。
 pub(crate) fn library_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let policy = read_or_default::<RequestPolicy>(&request_policy_path(app)?, "请求策略")?;
-    let directory = if cfg!(target_os = "android") && policy.use_external_storage {
+    let settings = load_settings(app)?;
+    let directory = if cfg!(target_os = "android") && settings.storage.use_external_storage {
         PathBuf::from("/storage/emulated/0/Download/SF Novel Flow")
     } else {
         app_data_directory(app)?.join("library")
@@ -70,12 +69,12 @@ pub(crate) fn local_book_directory(app: &tauri::AppHandle, name: &str) -> Result
     Ok(canonical)
 }
 
-/// 返回请求策略文件路径。
+/// 返回应用设置文件路径。
 ///
 /// # 错误
 /// 应用数据目录无法解析时返回错误消息。
-pub(crate) fn request_policy_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(app_data_directory(app)?.join("request-policy.json"))
+pub(crate) fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_directory(app)?.join("settings.json"))
 }
 
 /// 返回正文恢复字典文件路径。

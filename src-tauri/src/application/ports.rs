@@ -13,7 +13,7 @@ use crate::domain::error::AppResult;
 use crate::domain::library::{
     BookDetail, ExportFile, LibraryComicChapter, LibraryEntry, StoredChapter,
 };
-use crate::domain::settings::{ContentDictionaryResult, RequestPolicy};
+use crate::domain::settings::{AppSettings, ContentDictionaryResult};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 
@@ -113,10 +113,10 @@ pub(crate) trait LibraryStore: Send + Sync {
 /// 用户设置与正文恢复字典端口。
 #[async_trait]
 pub(crate) trait SettingsStore: Send + Sync {
-    /// 读取请求策略。
-    fn load_policy(&self) -> AppResult<RequestPolicy>;
-    /// 保存请求策略。
-    fn save_policy(&self, policy: &RequestPolicy) -> AppResult<()>;
+    /// 读取应用设置。
+    fn load_settings(&self) -> AppResult<AppSettings>;
+    /// 保存应用设置。
+    fn save_settings(&self, settings: &AppSettings) -> AppResult<()>;
     /// 读取正文恢复字典。
     fn load_dictionary(&self) -> AppResult<HashMap<String, String>>;
     /// 覆盖写入正文恢复字典。

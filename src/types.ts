@@ -179,10 +179,21 @@ export type UserProfile = {
   vipLevel: number;
   vipName: string;
 };
-/** 下载请求限流设置，与服务端 config.json 的 requestPolicy 对应。 */
-export type RequestPolicy = {
+/** 下载请求与过程文件设置。 */
+export type DownloadSettings = {
   requestIntervalMs: number;
   maxConcurrentDownloads: number;
   ocrProcessFilesEnabled: boolean;
+};
+export type StorageSettings = {
   useExternalStorage: boolean;
+};
+export type DesktopSettings = {
+  closeToTray: boolean;
+};
+/** 应用设置按功能分类，持久化到单个 settings.json。 */
+export type AppSettings = {
+  download: DownloadSettings;
+  storage: StorageSettings;
+  desktop: DesktopSettings;
 };

@@ -164,7 +164,10 @@ async fn run_inner(
         None => source.audio_album_id(novel_id, Some(title)).await?,
     };
     let storage = NativeStorage::new(app.clone());
-    let policy = storage.policy().unwrap_or_default();
+    let download = storage
+        .settings()
+        .map(|settings| settings.download)
+        .unwrap_or_default();
     let directory = storage.new_book_directory(title)?;
     let mut manifest = read_book_manifest(&directory)?;
     {
@@ -297,7 +300,10 @@ async fn run_inner(
         });
         registry::emit_job(app, state, job_id);
         registry::emit_library(app, state, job_id);
-        tokio::time::sleep(std::time::Duration::from_millis(policy.request_interval_ms)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(
+            download.request_interval_ms,
+        ))
+        .await;
     }
     persist_audio_playlist(&audio_directory, &catalog)?;
     let mut downloaded_ids = downloaded.into_iter().collect::<Vec<_>>();

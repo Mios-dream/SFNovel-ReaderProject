@@ -9,7 +9,7 @@ import { useDeskJobs } from "./useDeskJobs";
 import { useDeskLibrary } from "./useDeskLibrary";
 import { useNovelSearch } from "./useNovelSearch";
 import { useOnlineReading } from "./useOnlineReading";
-import { useRequestPolicy } from "./useRequestPolicy";
+import { useSettings } from "./useSettings";
 import { showToast, type ToastType } from "./useToast";
 
 type RemoteMediaType = "novel" | "audio" | "comic";
@@ -74,7 +74,7 @@ export function useNovelDesk() {
     return false;
   }
 
-  const requestPolicy = useRequestPolicy(notify);
+  const settings = useSettings(notify);
   const library = useDeskLibrary({
     libraryDetailReturnView,
     notify,
@@ -377,8 +377,8 @@ export function useNovelDesk() {
       auth.accountOpen.value = false;
       return;
     }
-    if (requestPolicy.requestPolicyOpen.value) {
-      requestPolicy.requestPolicyOpen.value = false;
+    if (settings.settingsOpen.value) {
+      settings.settingsOpen.value = false;
       return;
     }
     if (library.confirmBook.value) {
@@ -444,7 +444,7 @@ export function useNovelDesk() {
     ...bookshelf,
     ...chapterPicker,
     ...auth,
-    ...requestPolicy,
+    ...settings,
     remoteBook,
     remoteBookLoading,
     remoteMedia,

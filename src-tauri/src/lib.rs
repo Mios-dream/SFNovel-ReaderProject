@@ -14,13 +14,59 @@ use adapters::platform::initialize_device_identity;
 use application::ports::DownloadGateway;
 use application::state::AuthSessionState;
 #[cfg(not(target_os = "android"))]
-use tauri::Manager;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager,
+};
 
 #[cfg(target_os = "android")]
 use adapters::platform::{android_auth_plugin, android_ocr_plugin};
 
 #[cfg(target_os = "windows")]
 use adapters::platform::{restore_app_session, restore_web_session};
+
+#[cfg(not(target_os = "android"))]
+/// 显示并聚焦主窗口。
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+/// 创建桌面系统托盘及菜单。
+fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut tray = TrayIconBuilder::new()
+        .tooltip("SF Novel Flow")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// 构建并运行 Tauri 应用。
@@ -42,6 +88,8 @@ pub fn run() {
             tauri::async_runtime::block_on(initialize_device_identity(&handle))?;
             #[cfg(not(target_os = "android"))]
             initialize_device_identity(&handle)?;
+            #[cfg(not(target_os = "android"))]
+            setup_tray(&handle)?;
 
             if let Ok(directory) = adapters::storage::paths::app_data_directory(&handle) {
                 application::state::install_profile_cache_path(
@@ -49,10 +97,10 @@ pub fn run() {
                 );
             }
 
-            let policy = adapters::storage::NativeStorage::new(handle.clone())
-                .policy()
+            let settings = adapters::storage::NativeStorage::new(handle.clone())
+                .settings()
                 .unwrap_or_default();
-            adapters::downloads::configure_concurrency(policy.max_concurrent_downloads);
+            adapters::downloads::configure_concurrency(settings.download.max_concurrent_downloads);
 
             let _ = NativeDownloadGateway::new(handle.clone()).restore();
 
@@ -76,6 +124,22 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     {
         builder = builder.manage(adapters::ocr::DesktopOcrState::default());
+        builder = builder.on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let close_to_tray = adapters::storage::NativeStorage::new(app.clone())
+                    .settings()
+                    .map(|settings| settings.desktop.close_to_tray)
+                    .unwrap_or(true);
+                if close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        });
     }
     #[cfg(target_os = "android")]
     {
@@ -89,8 +153,8 @@ pub fn run() {
             commands::diagnostics::app_runtime_version,
             commands::library::list_local_library,
             commands::library::open_download_directory,
-            commands::settings::get_request_policy,
-            commands::settings::save_request_policy,
+            commands::settings::get_settings,
+            commands::settings::save_settings,
             commands::library::get_content_dictionary,
             commands::library::update_content_dictionary,
             commands::catalog::search_novels,

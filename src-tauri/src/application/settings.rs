@@ -1,8 +1,8 @@
-//! 请求策略与正文恢复字典用例。
+//! 应用设置与正文恢复字典用例。
 
 use crate::application::ports::{RemoteGateway, SettingsStore};
 use crate::domain::error::{AppError, AppResult};
-use crate::domain::settings::{ContentDictionaryResult, RequestPolicy};
+use crate::domain::settings::{AppSettings, ContentDictionaryResult};
 
 /// 判断字符是否属于正文比对可使用的汉字区间。
 ///
@@ -15,7 +15,7 @@ fn is_han_character(character: char) -> bool {
     )
 }
 
-/// 负责请求策略校验和正文恢复字典更新的应用服务。
+/// 负责应用设置校验和正文恢复字典更新的应用服务。
 pub(crate) struct SettingsService<'a, S: SettingsStore> {
     /// 设置与字典持久化实现。
     store: &'a S,
@@ -30,32 +30,32 @@ impl<'a, S: SettingsStore> SettingsService<'a, S> {
         Self { store }
     }
 
-    /// 读取当前请求策略。
+    /// 读取当前应用设置。
     ///
     /// # 错误
     /// 设置文件不存在、损坏或无法读取时返回错误。
-    pub(crate) fn policy(&self) -> AppResult<RequestPolicy> {
-        self.store.load_policy()
+    pub(crate) fn settings(&self) -> AppResult<AppSettings> {
+        self.store.load_settings()
     }
 
-    /// 校验并保存请求策略。
+    /// 校验并保存应用设置。
     ///
     /// # 参数
-    /// - `policy`：请求间隔和并发下载数都必须位于允许区间。
+    /// - `settings`：下载请求间隔和并发下载数都必须位于允许区间。
     ///
     /// # 错误
     /// 任一字段越界或写入失败时返回错误。
-    pub(crate) fn save_policy(&self, policy: RequestPolicy) -> AppResult<RequestPolicy> {
-        if !(100..=60_000).contains(&policy.request_interval_ms) {
+    pub(crate) fn save_settings(&self, settings: AppSettings) -> AppResult<AppSettings> {
+        if !(100..=60_000).contains(&settings.download.request_interval_ms) {
             return Err(AppError::invalid_input(
                 "请求间隔必须在 100 到 60000 毫秒之间",
             ));
         }
-        if !(1..=4).contains(&policy.max_concurrent_downloads) {
+        if !(1..=4).contains(&settings.download.max_concurrent_downloads) {
             return Err(AppError::invalid_input("最大并发下载数必须在 1 到 4 之间"));
         }
-        self.store.save_policy(&policy)?;
-        Ok(policy)
+        self.store.save_settings(&settings)?;
+        Ok(settings)
     }
 
     /// 返回正文恢复字典的当前规模。

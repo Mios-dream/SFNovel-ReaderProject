@@ -1,8 +1,8 @@
-//! 请求策略、正文恢复字典与平台存储权限。
+//! 应用设置、正文恢复字典与平台存储权限。
 
 use super::atomic::{read_or_default, write_atomically};
-use super::paths::{content_dictionary_path, request_policy_path};
-use crate::domain::settings::{ContentDictionaryResult, RequestPolicy};
+use super::paths::{content_dictionary_path, settings_path};
+use crate::domain::settings::{AppSettings, ContentDictionaryResult};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -11,20 +11,20 @@ use std::path::PathBuf;
 /// 应用首次运行时使用的内置正文恢复字典。
 const DEFAULT_CONTENT_DICTIONARY: &str = include_str!("../../../../sfacg-content-dictionary.json");
 
-/// 读取请求策略；文件缺失时使用默认值。
+/// 读取应用设置；文件缺失时使用默认值。
 ///
 /// # 错误
-/// 策略文件读取或解析失败时返回错误消息。
-pub(crate) fn load_policy(app: &tauri::AppHandle) -> Result<RequestPolicy, String> {
-    read_or_default(&request_policy_path(app)?, "请求策略")
+/// 设置文件读取或解析失败时返回错误消息。
+pub(crate) fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String> {
+    read_or_default(&settings_path(app)?, "应用设置")
 }
 
-/// 原子保存请求策略。
+/// 原子保存应用设置。
 ///
 /// # 错误
 /// 路径解析、序列化或写入失败时返回错误消息。
-pub(crate) fn save_policy(app: &tauri::AppHandle, policy: &RequestPolicy) -> Result<(), String> {
-    write_atomically(&request_policy_path(app)?, policy, "请求策略")
+pub(crate) fn save_settings(app: &tauri::AppHandle, settings: &AppSettings) -> Result<(), String> {
+    write_atomically(&settings_path(app)?, settings, "应用设置")
 }
 
 /// 判断字符是否属于恢复字典允许的汉字区间。
@@ -145,7 +145,7 @@ pub(crate) fn decode_api_content(
 /// # 错误
 /// 策略读取失败或平台权限请求失败时返回错误消息。
 pub(crate) async fn ensure_external_storage_access(app: &tauri::AppHandle) -> Result<bool, String> {
-    if !load_policy(app)?.use_external_storage {
+    if !load_settings(app)?.storage.use_external_storage {
         return Ok(true);
     }
     #[cfg(target_os = "android")]

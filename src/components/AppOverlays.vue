@@ -60,14 +60,14 @@ if (!desk) throw new Error("Desk context is unavailable");
     @manage-connections="desk.manageConnections"
   />
   <SettingModal
-    :open="desk.requestPolicyOpen.value"
-    :policy="desk.requestPolicy.value"
-    :saving="desk.requestPolicySaving.value"
+    :open="desk.settingsOpen.value"
+    :settings="desk.settings.value"
+    :saving="desk.settingsSaving.value"
     :dictionary-size="desk.contentDictionarySize.value"
     :dictionary-updating="desk.contentDictionaryUpdating.value"
     :dictionary-chapter-id="desk.contentDictionaryChapterId.value"
-    @close="desk.requestPolicyOpen.value = false"
-    @save="desk.saveRequestPolicy"
+    @close="desk.settingsOpen.value = false"
+    @save="desk.saveSettings"
     @update-dictionary="desk.updateContentDictionary"
   />
   <ConfirmDeleteModal

@@ -269,7 +269,7 @@ function submit() {
   background: #f8e5e4;
 }
 .connection-copy {
-  flex: 1 1 190px;
+  flex: 1;
   min-width: 0;
 }
 .connection-copy strong,

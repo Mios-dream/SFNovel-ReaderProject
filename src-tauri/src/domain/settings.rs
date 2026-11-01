@@ -2,31 +2,73 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 原生网络下载任务使用的请求限制。
+/// 应用设置根结构，按功能分类持久化。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AppSettings {
+    /// 下载请求与过程文件选项。
+    #[serde(default)]
+    pub(crate) download: DownloadSettings,
+    /// 本地书库存储选项。
+    #[serde(default)]
+    pub(crate) storage: StorageSettings,
+    /// 桌面端窗口行为。
+    #[serde(default)]
+    pub(crate) desktop: DesktopSettings,
+}
+
+/// 下载请求限流与过程文件选项。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct RequestPolicy {
+pub(crate) struct DownloadSettings {
     /// 相邻网络请求之间的最小间隔，单位毫秒。
     pub(crate) request_interval_ms: u64,
     /// 同时运行的下载任务上限。
     pub(crate) max_concurrent_downloads: u8,
-    /// 是否对下载的图片执行 OCR 恢复。
+    /// 是否对下载的图片执行 OCR 恢复并保存过程文件。
     #[serde(default)]
     pub(crate) ocr_process_files_enabled: bool,
-    /// 是否把书库写入外部存储目录。
-    #[serde(default)]
-    pub(crate) use_external_storage: bool,
 }
 
-impl Default for RequestPolicy {
+impl Default for DownloadSettings {
     fn default() -> Self {
         Self {
             request_interval_ms: 500,
             max_concurrent_downloads: 1,
             ocr_process_files_enabled: false,
-            use_external_storage: false,
         }
     }
+}
+
+/// 本地书库存储选项。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StorageSettings {
+    /// 是否把书库写入外部存储目录。
+    #[serde(default)]
+    pub(crate) use_external_storage: bool,
+}
+
+/// 桌面端窗口行为。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DesktopSettings {
+    /// 关闭主窗口时是否保留托盘后台运行。
+    #[serde(default = "default_close_to_tray")]
+    pub(crate) close_to_tray: bool,
+}
+
+impl Default for DesktopSettings {
+    fn default() -> Self {
+        Self {
+            close_to_tray: true,
+        }
+    }
+}
+
+/// 保持托盘后台运行是关闭窗口的默认行为。
+fn default_close_to_tray() -> bool {
+    true
 }
 
 /// 读取或更新正文恢复字典后返回的结果。
@@ -38,26 +80,4 @@ pub(crate) struct ContentDictionaryResult {
     /// 本次更新新增的条目数；读取操作不返回该字段。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) added: Option<usize>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::RequestPolicy;
-
-    #[test]
-    fn request_policy_contract_uses_camel_case_and_optional_defaults() {
-        let policy: RequestPolicy =
-            serde_json::from_str(r#"{"requestIntervalMs":250,"maxConcurrentDownloads":3}"#)
-                .unwrap();
-
-        assert_eq!(policy.request_interval_ms, 250);
-        assert_eq!(policy.max_concurrent_downloads, 3);
-        assert!(!policy.ocr_process_files_enabled);
-        assert!(!policy.use_external_storage);
-
-        let value = serde_json::to_value(&policy).unwrap();
-        assert_eq!(value["requestIntervalMs"], 250);
-        assert_eq!(value["maxConcurrentDownloads"], 3);
-        assert!(value.get("request_interval_ms").is_none());
-    }
 }

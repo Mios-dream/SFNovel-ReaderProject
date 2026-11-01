@@ -1,29 +1,36 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { RequestPolicy } from "../types";
+import type { AppSettings } from "../types";
 import type { Notify } from "./deskShared";
 
-export function useRequestPolicy(notify: Notify) {
-  const requestPolicyOpen = ref(false);
-  const requestPolicy = ref<RequestPolicy>({
-    requestIntervalMs: 500,
-    maxConcurrentDownloads: 1,
-    ocrProcessFilesEnabled: false,
-    useExternalStorage: false,
+export function useSettings(notify: Notify) {
+  const settingsOpen = ref(false);
+  const settings = ref<AppSettings>({
+    download: {
+      requestIntervalMs: 500,
+      maxConcurrentDownloads: 1,
+      ocrProcessFilesEnabled: false,
+    },
+    storage: {
+      useExternalStorage: false,
+    },
+    desktop: {
+      closeToTray: true,
+    },
   });
-  const requestPolicySaving = ref(false);
+  const settingsSaving = ref(false);
   const contentDictionarySize = ref(0);
   const contentDictionaryUpdating = ref(false);
   const contentDictionaryChapterId = ref(8436696);
 
-  async function openRequestPolicy() {
-    requestPolicyOpen.value = true;
+  async function openSettings() {
+    settingsOpen.value = true;
     try {
-      requestPolicy.value = await invoke<RequestPolicy>("get_request_policy");
+      settings.value = await invoke<AppSettings>("get_settings");
       const dictionary = await invoke<{ size: number }>("get_content_dictionary");
       contentDictionarySize.value = dictionary.size;
     } catch (error) {
-      notify(error instanceof Error ? error.message : "读取请求设置失败", "error");
+      notify(error instanceof Error ? error.message : "读取设置失败", "error");
     }
   }
 
@@ -40,7 +47,7 @@ export function useRequestPolicy(notify: Notify) {
         { chapterId },
       );
       contentDictionarySize.value = result.size;
-      notify(`正文恢复字典已更新，新增 ${result.added ?? 0} 个字符`);
+      notify("正文恢复字典已更新，新增 " + (result.added ?? 0) + " 个字符");
     } catch (error) {
       notify(error instanceof Error ? error.message : "正文恢复字典更新失败", "error");
     } finally {
@@ -48,38 +55,38 @@ export function useRequestPolicy(notify: Notify) {
     }
   }
 
-  async function saveRequestPolicy(policy: RequestPolicy) {
-    requestPolicySaving.value = true;
+  async function saveSettings(value: AppSettings) {
+    settingsSaving.value = true;
     try {
-      const saved = await invoke<RequestPolicy>("save_request_policy", {
-        policy,
+      const saved = await invoke<AppSettings>("save_settings", {
+        settings: value,
       });
-      requestPolicy.value = saved;
+      settings.value = saved;
       if (
-        saved.useExternalStorage &&
+        saved.storage.useExternalStorage &&
         !(await invoke<boolean>("ensure_external_storage_access"))
       ) {
         notify("外部存储不可用，请授权或在设置中切换为内部存储", "error");
         return;
       }
-      requestPolicyOpen.value = false;
+      settingsOpen.value = false;
       notify("设置已更新");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "保存请求设置失败", "error");
+      notify(error instanceof Error ? error.message : "保存设置失败", "error");
     } finally {
-      requestPolicySaving.value = false;
+      settingsSaving.value = false;
     }
   }
 
   return {
-    requestPolicyOpen,
-    requestPolicy,
-    requestPolicySaving,
+    settingsOpen,
+    settings,
+    settingsSaving,
     contentDictionarySize,
     contentDictionaryUpdating,
     contentDictionaryChapterId,
-    openRequestPolicy,
+    openSettings,
     updateContentDictionary,
-    saveRequestPolicy,
+    saveSettings,
   };
 }
