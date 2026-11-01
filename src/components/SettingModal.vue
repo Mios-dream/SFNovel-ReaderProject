@@ -9,6 +9,7 @@ import {
 } from "@lucide/vue";
 import { reactive, ref, watch } from "vue";
 import type { AppSettings } from "../types";
+import SettingSelect from "./SettingSelect.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -50,6 +51,14 @@ function cloneSettings(settings: AppSettings): AppSettings {
 const draft = reactive<AppSettings>(cloneSettings(props.settings));
 const dictionaryChapterDraft = ref(props.dictionaryChapterId);
 const isAndroid = /Android/i.test(navigator.userAgent);
+const closeActions = [
+  { label: "后台运行", value: true },
+  { label: "直接退出", value: false },
+];
+const storageLocations = [
+  { label: "内部存储", value: false },
+  { label: "外部存储", value: true },
+];
 
 watch(
   () => props.settings,
@@ -104,12 +113,13 @@ function resetDraft() {
                     : "关闭窗口将结束进程"
                 }}</small>
               </div>
-              <label class="setting-control">
-                <select v-model="draft.desktop.closeToTray">
-                  <option :value="true">后台运行</option>
-                  <option :value="false">直接退出</option>
-                </select>
-              </label>
+              <div class="setting-control">
+                <SettingSelect
+                  v-model="draft.desktop.closeToTray"
+                  :options="closeActions"
+                  label="关闭窗口时"
+                />
+              </div>
             </div>
           </section>
           <section v-if="isAndroid" class="settings-group">
@@ -122,12 +132,13 @@ function resetDraft() {
                 <strong>本地存储位置</strong>
                 <small>外部存储位于 Download/SF Novel Flow</small>
               </div>
-              <label class="setting-control">
-                <select v-model="draft.storage.useExternalStorage">
-                  <option :value="false">内部存储</option>
-                  <option :value="true">外部存储</option>
-                </select>
-              </label>
+              <div class="setting-control">
+                <SettingSelect
+                  v-model="draft.storage.useExternalStorage"
+                  :options="storageLocations"
+                  label="本地存储位置"
+                />
+              </div>
             </div>
           </section>
           <section class="settings-group">
@@ -393,8 +404,7 @@ function resetDraft() {
   color: #987166;
   font-size: 12px;
 }
-input,
-select {
+input {
   width: 130px;
   min-height: 42px;
   border: 1px solid #efcfbf;
@@ -405,8 +415,7 @@ select {
   outline: none;
   font-size: 16px;
 }
-input:focus,
-select:focus {
+input:focus {
   border-color: var(--theme-color);
   box-shadow: 0 0 0 3px #f8d7c6;
 }
@@ -604,16 +613,12 @@ input[type="checkbox"] {
     justify-self: end;
     font-size: 11px;
   }
-  .setting-control input:not([type="checkbox"]),
-  .setting-control select {
+  .setting-control input:not([type="checkbox"]) {
     width: 98px;
     min-height: 38px;
     border-radius: 9px;
     padding: 0 10px;
     font-size: 12px;
-  }
-  .setting-control select {
-    width: 116px;
   }
   .toggle {
     width: 40px;
