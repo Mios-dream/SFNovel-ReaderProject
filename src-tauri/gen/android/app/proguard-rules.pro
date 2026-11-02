@@ -25,3 +25,6 @@
 # references, so renaming or removing this package can leave a pending JNI
 # exception and abort the Android process.
 -keep class ai.onnxruntime.** { *; }
+
+-keep class com.sansan.sf_novel_flow.AutoSigninWorker { <init>(...); }
+-keep class com.sansan.sf_novel_flow.AutoSigninBridge { native <methods>; }

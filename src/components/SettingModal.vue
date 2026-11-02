@@ -36,6 +36,10 @@ const defaultSettings: AppSettings = {
   },
   desktop: {
     closeToTray: true,
+    autostart: false,
+  },
+  signin: {
+    autoSigninEnabled: false,
   },
 };
 
@@ -44,6 +48,7 @@ function cloneSettings(settings: AppSettings): AppSettings {
     download: { ...settings.download },
     storage: { ...settings.storage },
     desktop: { ...settings.desktop },
+    signin: { ...settings.signin },
   };
 }
 
@@ -51,6 +56,7 @@ function cloneSettings(settings: AppSettings): AppSettings {
 const draft = reactive<AppSettings>(cloneSettings(props.settings));
 const dictionaryChapterDraft = ref(props.dictionaryChapterId);
 const isAndroid = /Android/i.test(navigator.userAgent);
+const isWindows = /Windows/i.test(navigator.userAgent);
 const closeActions = [
   { label: "后台运行", value: true },
   { label: "直接退出", value: false },
@@ -120,6 +126,17 @@ function resetDraft() {
                   label="关闭窗口时"
                 />
               </div>
+            </div>
+
+            <div v-if="isWindows" class="setting-row">
+              <div class="setting-info">
+                <strong>开机自启</strong>
+              </div>
+              <label class="setting-control toggle-control">
+                <input v-model="draft.desktop.autostart" type="checkbox" />
+                <span class="toggle" aria-hidden="true"></span>
+                <span>{{ draft.desktop.autostart ? "已启用" : "已关闭" }}</span>
+              </label>
             </div>
           </section>
           <section v-if="isAndroid" class="settings-group">

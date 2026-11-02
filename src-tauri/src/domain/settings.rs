@@ -15,6 +15,9 @@ pub(crate) struct AppSettings {
     /// 桌面端窗口行为。
     #[serde(default)]
     pub(crate) desktop: DesktopSettings,
+    /// 签到自动化选项。
+    #[serde(default)]
+    pub(crate) signin: SigninSettings,
 }
 
 /// 下载请求限流与过程文件选项。
@@ -56,12 +59,16 @@ pub(crate) struct DesktopSettings {
     /// 关闭主窗口时是否保留托盘后台运行。
     #[serde(default = "default_close_to_tray")]
     pub(crate) close_to_tray: bool,
+    /// 是否在登录系统后自动启动应用。
+    #[serde(default)]
+    pub(crate) autostart: bool,
 }
 
 impl Default for DesktopSettings {
     fn default() -> Self {
         Self {
             close_to_tray: true,
+            autostart: false,
         }
     }
 }
@@ -69,6 +76,15 @@ impl Default for DesktopSettings {
 /// 保持托盘后台运行是关闭窗口的默认行为。
 fn default_close_to_tray() -> bool {
     true
+}
+
+/// 签到自动化选项。
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SigninSettings {
+    /// 是否在后台自动完成每日签到。
+    #[serde(default)]
+    pub(crate) auto_signin_enabled: bool,
 }
 
 /// 读取或更新正文恢复字典后返回的结果。

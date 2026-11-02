@@ -226,10 +226,15 @@ export type StorageSettings = {
 };
 export type DesktopSettings = {
   closeToTray: boolean;
+  autostart: boolean;
+};
+export type SigninSettings = {
+  autoSigninEnabled: boolean;
 };
 /** 应用设置按功能分类，持久化到单个 settings.json。 */
 export type AppSettings = {
   download: DownloadSettings;
   storage: StorageSettings;
   desktop: DesktopSettings;
+  signin: SigninSettings;
 };

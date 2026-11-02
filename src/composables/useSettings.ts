@@ -16,6 +16,10 @@ export function useSettings(notify: Notify) {
     },
     desktop: {
       closeToTray: true,
+      autostart: false,
+    },
+    signin: {
+      autoSigninEnabled: false,
     },
   });
   const settingsSaving = ref(false);

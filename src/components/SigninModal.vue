@@ -11,6 +11,7 @@ import {
 import { computed, ref, watch } from "vue";
 import { reportError, showToast } from "../composables/useToast";
 import type {
+  AppSettings,
   SigninOverview,
   SigninPrize,
   SigninReward,
@@ -48,6 +49,10 @@ const overview = ref<SigninOverview>();
 const loading = ref(false);
 const signing = ref(false);
 const claimingConfigId = ref<number>();
+const autoSigninEnabled = ref(false);
+const autoSigninSaving = ref(false);
+const isAndroid = /Android/i.test(navigator.userAgent);
+const autoSigninTime = isAndroid ? "每天 12:00" : "应用运行时检查";
 let requestGeneration = 0;
 
 const week = computed(() => overview.value?.week.slice(0, 7) || []);
@@ -96,6 +101,32 @@ async function submitSignin() {
     reportError(reason, "签到失败");
   } finally {
     signing.value = false;
+  }
+}
+
+async function loadAutoSignin() {
+  try {
+    const settings = await invoke<AppSettings>("get_settings");
+    autoSigninEnabled.value = settings.signin.autoSigninEnabled;
+  } catch (reason) {
+    reportError(reason, "读取自动签到设置失败");
+  }
+}
+
+async function toggleAutoSignin() {
+  if (autoSigninSaving.value) return;
+  const next = !autoSigninEnabled.value;
+  autoSigninSaving.value = true;
+  try {
+    const settings = await invoke<AppSettings>("get_settings");
+    settings.signin.autoSigninEnabled = next;
+    await invoke("save_settings", { settings });
+    autoSigninEnabled.value = next;
+    showToast(next ? "已开启自动签到" : "已关闭自动签到", "success");
+  } catch (reason) {
+    reportError(reason, "更新自动签到设置失败");
+  } finally {
+    autoSigninSaving.value = false;
   }
 }
 
@@ -155,6 +186,7 @@ watch(
   (isOpen) => {
     if (isOpen) {
       void refreshAll();
+      void loadAutoSignin();
       return;
     }
     requestGeneration += 1;
@@ -217,6 +249,24 @@ watch(
                 <LoaderCircle v-if="signing" class="spin" :size="17" />
                 <Check v-else-if="todaySigned" :size="17" />
                 <span>{{ todaySigned ? "已签到" : "签到" }}</span>
+              </button>
+            </div>
+
+            <div class="auto-signin">
+              <div class="auto-signin-copy">
+                <span class="auto-signin-label">自动签到</span>
+                <span class="auto-signin-time">{{ autoSigninTime }}</span>
+              </div>
+              <button
+                type="button"
+                class="auto-signin-switch"
+                role="switch"
+                aria-label="自动签到"
+                :aria-checked="autoSigninEnabled"
+                :disabled="autoSigninSaving"
+                @click="toggleAutoSignin"
+              >
+                <span class="auto-signin-thumb" />
               </button>
             </div>
 
@@ -426,6 +476,64 @@ watch(
   color: #9a7a70;
   font-size: 12px;
   font-weight: 500;
+}
+.auto-signin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 18px;
+  border-bottom: 1px solid #f4e6de;
+  background: #fffdfb;
+}
+.auto-signin-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.auto-signin-label {
+  color: #674941;
+  font-size: 14px;
+  font-weight: 600;
+}
+.auto-signin-time {
+  color: #a88377;
+  font-size: 12px;
+}
+.auto-signin-switch {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #e7d8d1;
+  transition: background 160ms ease;
+}
+.auto-signin-switch[aria-checked="true"] {
+  background: var(--theme-color);
+}
+.auto-signin-switch:disabled {
+  opacity: 0.6;
+}
+.auto-signin-switch:focus-visible {
+  outline: 2px solid var(--theme-color);
+  outline-offset: 2px;
+}
+.auto-signin-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(91, 49, 39, 0.18);
+  transition: transform 160ms ease;
+}
+.auto-signin-switch[aria-checked="true"] .auto-signin-thumb {
+  transform: translateX(16px);
 }
 .sign-button {
   display: inline-flex;
@@ -720,6 +828,9 @@ watch(
   .summary-stat + .summary-stat {
     padding-left: 12px;
   }
+  .auto-signin {
+    padding: 11px 14px;
+  }
   .sign-button {
     min-width: 82px;
     min-height: 36px;
@@ -758,7 +869,9 @@ watch(
   .icon-button,
   .sign-button,
   .claim-button,
-  .day-card {
+  .day-card,
+  .auto-signin-switch,
+  .auto-signin-thumb {
     transition: none;
   }
 }

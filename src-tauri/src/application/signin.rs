@@ -47,6 +47,23 @@ impl<'a, R: RemoteGateway> SigninService<'a, R> {
         self.remote.submit_signin(date).await
     }
 
+    /// 当天尚未签到时提交签到，并返回本次是否实际提交。
+    #[cfg(not(target_os = "android"))]
+    pub(crate) async fn auto_sign_in(&self, date: &str) -> AppResult<bool> {
+        if !is_valid_date(date) {
+            return Err(AppError::invalid_input("签到日期格式无效"));
+        }
+        let week = self.remote.signin_week().await?;
+        if week
+            .iter()
+            .any(|item| item.date.get(..10) == Some(date) && item.is_sign_in)
+        {
+            return Ok(false);
+        }
+        self.remote.submit_signin(date).await?;
+        Ok(true)
+    }
+
     /// 领取一条签到奖励。
     pub(crate) async fn claim_reward(&self, config_id: i64) -> AppResult<()> {
         if config_id <= 0 {

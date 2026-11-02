@@ -3541,6 +3541,7 @@ name = "sf-novel-flow"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "jni 0.21.1",
  "md-5",
  "reqwest",
  "serde",

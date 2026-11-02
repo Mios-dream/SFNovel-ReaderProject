@@ -13,6 +13,10 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 const OFFICIAL_LOGIN_URL: &str = "https://m.sfacg.com/login";
 /// 官方登录 WebView 窗口的唯一标签。
 const OFFICIAL_LOGIN_WINDOW_LABEL: &str = "sfacg-official-login";
+/// 当前用户登录后自动启动应用的注册表位置。
+const AUTOSTART_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+/// 开机启动项名称。
+const AUTOSTART_VALUE: &str = "SF Novel Flow";
 
 #[derive(Deserialize, Serialize)]
 /// 加密保存的 App 或 Web 登录会话。
@@ -54,6 +58,42 @@ fn web_session_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .app_data_dir()
         .map(|directory| directory.join("web-session.v2.bin"))
         .map_err(|error| format!("无法解析网页登录会话路径：{error}"))
+}
+
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// 设置或移除当前用户的开机启动项。
+pub(crate) fn set_autostart(enabled: bool) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
+    use windows_sys::Win32::System::Registry::{
+        RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ,
+    };
+
+    let key = wide(AUTOSTART_KEY);
+    let name = wide(AUTOSTART_VALUE);
+    let status = if enabled {
+        let executable = std::env::current_exe()
+            .map_err(|error| format!("无法读取应用启动路径：{error}"))?;
+        let command = wide(&format!("\"{}\"", executable.display()));
+        unsafe {
+            RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                name.as_ptr(),
+                REG_SZ,
+                command.as_ptr().cast(),
+                (command.len() * std::mem::size_of::<u16>()) as u32,
+            )
+        }
+    } else {
+        unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr()) }
+    };
+    if status != ERROR_SUCCESS && !(status == ERROR_FILE_NOT_FOUND && !enabled) {
+        return Err(format!("无法更新开机启动设置（错误码 {status}）"));
+    }
+    Ok(())
 }
 
 /// 使用 Windows DPAPI 加密敏感数据。

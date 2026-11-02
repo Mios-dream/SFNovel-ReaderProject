@@ -16,7 +16,7 @@ mod windows;
 pub(crate) use android::{android_auth_plugin, android_ocr_plugin};
 
 #[cfg(target_os = "windows")]
-pub(crate) use windows::{restore_app_session, restore_web_session};
+pub(crate) use windows::{restore_app_session, restore_web_session, set_autostart};
 
 /// 初始化当前进程的设备身份。
 #[cfg(target_os = "windows")]
