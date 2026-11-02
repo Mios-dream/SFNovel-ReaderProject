@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import {
+  BookOpenText,
+  Download,
+  HardDrive,
   LoaderCircle,
+  Monitor,
   RefreshCw,
   RotateCcw,
   Save,
   Settings2,
   X,
 } from "@lucide/vue";
-import { reactive, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
+import type { UpdateStatus } from "../composables/useUpdater";
 import type { AppSettings } from "../types";
 import SettingSelect from "./SettingSelect.vue";
 
@@ -18,11 +23,17 @@ const props = defineProps<{
   dictionarySize: number;
   dictionaryUpdating: boolean;
   dictionaryChapterId: number;
+  currentVersion: string;
+  updateStatus: UpdateStatus;
+  updateVersion?: string;
 }>();
 const emit = defineEmits<{
   close: [];
   save: [settings: AppSettings];
   updateDictionary: [chapterId: number];
+  checkUpdate: [];
+  showUpdate: [];
+  openReleases: [];
 }>();
 
 const defaultSettings: AppSettings = {
@@ -41,6 +52,9 @@ const defaultSettings: AppSettings = {
   signin: {
     autoSigninEnabled: false,
   },
+  updates: {
+    autoCheck: true,
+  },
 };
 
 function cloneSettings(settings: AppSettings): AppSettings {
@@ -49,6 +63,7 @@ function cloneSettings(settings: AppSettings): AppSettings {
     storage: { ...settings.storage },
     desktop: { ...settings.desktop },
     signin: { ...settings.signin },
+    updates: { ...settings.updates },
   };
 }
 
@@ -82,6 +97,44 @@ watch(
 function resetDraft() {
   Object.assign(draft, cloneSettings(defaultSettings));
 }
+
+function handleUpdateAction() {
+  if (props.updateStatus === "available" || props.updateStatus === "error") {
+    emit("showUpdate");
+    return;
+  }
+  emit("checkUpdate");
+}
+
+function updateHint() {
+  switch (props.updateStatus) {
+    case "checking":
+      return "正在连接 GitHub";
+    case "available":
+      return `发现新版本 v${props.updateVersion}`;
+    case "error":
+      return "检查失败，可重试或前往 GitHub";
+    default:
+      return "";
+  }
+}
+
+const versionLabel = computed(() =>
+  props.currentVersion === "未知" ? "未知" : `v${props.currentVersion}`,
+);
+
+function updateActionLabel() {
+  switch (props.updateStatus) {
+    case "checking":
+      return "正在检查";
+    case "available":
+      return "查看更新";
+    case "error":
+      return "查看详情";
+    default:
+      return "检查更新";
+  }
+}
 </script>
 
 <template>
@@ -105,61 +158,9 @@ function resetDraft() {
         @submit.prevent="emit('save', cloneSettings(draft))"
       >
         <div class="settings-content">
-          <section v-if="!isAndroid" class="settings-group">
-            <header class="settings-group-header">
-              <strong>桌面端</strong>
-            </header>
-
-            <div class="setting-row">
-              <div class="setting-info">
-                <strong>关闭窗口时</strong>
-                <small>{{
-                  draft.desktop.closeToTray
-                    ? "托盘图标可重新打开窗口"
-                    : "关闭窗口将结束进程"
-                }}</small>
-              </div>
-              <div class="setting-control">
-                <SettingSelect
-                  v-model="draft.desktop.closeToTray"
-                  :options="closeActions"
-                  label="关闭窗口时"
-                />
-              </div>
-            </div>
-
-            <div v-if="isWindows" class="setting-row">
-              <div class="setting-info">
-                <strong>开机自启</strong>
-              </div>
-              <label class="setting-control toggle-control">
-                <input v-model="draft.desktop.autostart" type="checkbox" />
-                <span class="toggle" aria-hidden="true"></span>
-                <span>{{ draft.desktop.autostart ? "已启用" : "已关闭" }}</span>
-              </label>
-            </div>
-          </section>
-          <section v-if="isAndroid" class="settings-group">
-            <header class="settings-group-header">
-              <strong>存储</strong>
-            </header>
-
-            <div class="setting-row">
-              <div class="setting-info">
-                <strong>本地存储位置</strong>
-                <small>外部存储位于 Download/SF Novel Flow</small>
-              </div>
-              <div class="setting-control">
-                <SettingSelect
-                  v-model="draft.storage.useExternalStorage"
-                  :options="storageLocations"
-                  label="本地存储位置"
-                />
-              </div>
-            </div>
-          </section>
           <section class="settings-group">
             <header class="settings-group-header">
+              <span class="settings-group-icon"><Download :size="16" /></span>
               <strong>下载</strong>
             </header>
 
@@ -200,10 +201,7 @@ function resetDraft() {
             <div class="setting-row">
               <div class="setting-info">
                 <strong>保存 OCR 过程文件</strong>
-                <small
-                  >保存分行图片、预处理结果和逐段识别文本到章节 OCR
-                  目录，便于检查识别问题</small
-                >
+                <small>用于检查识别问题</small>
               </div>
               <label class="setting-control toggle-control">
                 <input
@@ -219,6 +217,9 @@ function resetDraft() {
           </section>
           <section class="settings-group dictionary-group">
             <header class="settings-group-header">
+              <span class="settings-group-icon"
+                ><BookOpenText :size="16"
+              /></span>
               <strong>解码字典</strong>
               <small>从网页小说章节构建解码字典</small>
             </header>
@@ -226,7 +227,7 @@ function resetDraft() {
             <div class="setting-row">
               <div class="setting-info">
                 <strong>公开章节id</strong>
-                <small>用于构建解码字典使用的网页小说章节id</small>
+                <small>更新字典所需的小说章节id</small>
               </div>
               <label class="setting-control">
                 <input
@@ -256,6 +257,108 @@ function resetDraft() {
                 />
                 <RefreshCw v-else :size="16" />
                 {{ dictionaryUpdating ? "正在比对" : "更新字典" }}
+              </button>
+            </div>
+          </section>
+          <section v-if="!isAndroid" class="settings-group">
+            <header class="settings-group-header">
+              <span class="settings-group-icon"><Monitor :size="16" /></span>
+              <strong>桌面端</strong>
+            </header>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>关闭窗口时</strong>
+                <small>{{
+                  draft.desktop.closeToTray
+                    ? "托盘图标可重新打开窗口"
+                    : "关闭窗口将结束进程"
+                }}</small>
+              </div>
+              <div class="setting-control">
+                <SettingSelect
+                  v-model="draft.desktop.closeToTray"
+                  :options="closeActions"
+                  label="关闭窗口时"
+                />
+              </div>
+            </div>
+
+            <div v-if="isWindows" class="setting-row">
+              <div class="setting-info">
+                <strong>开机自启</strong>
+              </div>
+              <label class="setting-control toggle-control">
+                <input v-model="draft.desktop.autostart" type="checkbox" />
+                <span class="toggle" aria-hidden="true"></span>
+                <span>{{ draft.desktop.autostart ? "已启用" : "已关闭" }}</span>
+              </label>
+            </div>
+          </section>
+          <section v-if="isAndroid" class="settings-group">
+            <header class="settings-group-header">
+              <span class="settings-group-icon"><HardDrive :size="16" /></span>
+              <strong>存储</strong>
+            </header>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>本地存储位置</strong>
+                <small>外部存储位于 Download/SF Novel Flow</small>
+              </div>
+              <div class="setting-control">
+                <SettingSelect
+                  v-model="draft.storage.useExternalStorage"
+                  :options="storageLocations"
+                  label="本地存储位置"
+                />
+              </div>
+            </div>
+          </section>
+          <section class="settings-group update-group">
+            <header class="settings-group-header">
+              <span class="settings-group-icon"><RefreshCw :size="16" /></span>
+              <strong>更新</strong>
+            </header>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>当前版本</strong>
+              </div>
+              <span class="version-label">{{ versionLabel }}</span>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>自动检查更新</strong>
+                <small>每次启动时检查 GitHub 最新版本</small>
+              </div>
+              <label class="setting-control toggle-control">
+                <input v-model="draft.updates.autoCheck" type="checkbox" />
+                <span class="toggle" aria-hidden="true"></span>
+                <span>{{ draft.updates.autoCheck ? "已启用" : "已关闭" }}</span>
+              </label>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>应用更新</strong>
+                <small v-if="updateHint()">{{ updateHint() }}</small>
+              </div>
+              <button
+                class="secondary-button"
+                :disabled="updateStatus === 'checking'"
+                type="button"
+                @click="handleUpdateAction"
+              >
+                <LoaderCircle
+                  v-if="updateStatus === 'checking'"
+                  class="spin"
+                  :size="16"
+                />
+                <Download v-else-if="updateStatus === 'available'" :size="16" />
+                <RefreshCw v-else :size="16" />
+                {{ updateActionLabel() }}
               </button>
             </div>
           </section>
@@ -315,6 +418,7 @@ function resetDraft() {
   color: #69453d;
   font-family: KaTongFont, "Microsoft YaHei", sans-serif;
   font-size: 23px;
+  margin: 0;
 }
 .settings-header p {
   margin: 0;
@@ -362,38 +466,60 @@ function resetDraft() {
   margin-top: 27px;
 }
 .settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 8px;
+  padding: 2px 8px 4px 0;
   overscroll-behavior: contain;
 }
-.settings-group + .settings-group {
-  margin-top: 26px;
+.settings-group {
+  padding-bottom: 8px;
+  border: 1px solid rgba(217, 173, 151, 0.32);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow:
+    0 8px 24px rgba(137, 76, 55, 0.045),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 .settings-group-header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  border-bottom: 3px solid #efd7ca;
-  padding-bottom: 10px;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 16px 5px;
+}
+.settings-group-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--theme-color-dark);
+  background: #ffeadf;
 }
 .settings-group-header strong {
-  color: #805245;
-  font-size: 19px;
-  font-weight: bold;
+  color: #69453d;
+  font-size: 15px;
+  font-weight: 700;
 }
 .settings-group-header small {
-  color: #b08072;
-  font-size: 11px;
+  min-width: 0;
+  margin-left: auto;
+  color: #a17367;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: right;
 }
 .setting-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  min-height: 76px;
-  border-bottom: 1px solid #efd7ca;
+  min-height: 62px;
+  padding: 10px 16px;
 }
 .setting-info {
   flex: 1 1 auto;
@@ -408,9 +534,12 @@ function resetDraft() {
   font-size: 14px;
 }
 .setting-info small {
-  margin-top: 5px;
+  margin-top: 4px;
   color: #a17367;
   font-size: 12px;
+}
+.update-group .setting-row {
+  min-height: 58px;
 }
 .setting-control {
   display: flex;
@@ -420,6 +549,11 @@ function resetDraft() {
   gap: 9px;
   color: #987166;
   font-size: 12px;
+}
+.version-label {
+  color: #8d5948;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 input {
   width: 130px;
@@ -521,7 +655,8 @@ input[type="checkbox"] {
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  margin-top: 28px;
+  margin-top: 12px;
+  padding-top: 4px;
 }
 .reset-button {
   display: inline-flex;
@@ -587,23 +722,33 @@ input[type="checkbox"] {
     margin-top: 16px;
   }
   .settings-content {
-    padding-right: 2px;
+    gap: 12px;
+    padding: 2px 2px 4px 0;
     scroll-padding-bottom: 8px;
   }
-  .settings-group + .settings-group {
-    margin-top: 17px;
+  .settings-group {
+    padding-bottom: 6px;
+    border-radius: 15px;
   }
   .settings-group-header {
     align-items: center;
     gap: 8px;
-    padding-bottom: 7px;
-    border-bottom-width: 2px;
+    padding: 11px 12px 3px;
+  }
+  .settings-group-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+  }
+  .settings-group-icon svg {
+    width: 14px;
+    height: 14px;
   }
   .settings-group-header strong {
-    font-size: 15px;
+    font-size: 14px;
   }
   .settings-group-header small {
-    font-size: 10.5px;
+    font-size: 12px;
     line-height: 1.4;
     text-align: right;
   }
@@ -612,15 +757,18 @@ input[type="checkbox"] {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px 12px;
     min-height: 0;
-    padding: 12px 0;
+    padding: 11px 12px;
+  }
+  .update-group .setting-row {
+    min-height: 0;
   }
   .setting-info strong {
     font-size: 13px;
     line-height: 1.35;
   }
   .setting-info small {
-    margin-top: 3px;
-    font-size: 11px;
+    margin-top: 2px;
+    font-size: 12px;
     line-height: 1.45;
   }
   .setting-control {
@@ -628,7 +776,7 @@ input[type="checkbox"] {
     gap: 7px;
     justify-content: flex-end;
     justify-self: end;
-    font-size: 11px;
+    font-size: 12px;
   }
   .setting-control input:not([type="checkbox"]) {
     width: 98px;
@@ -657,7 +805,6 @@ input[type="checkbox"] {
     gap: 10px;
     margin-top: 13px;
     padding-top: 12px;
-    border-top: 1px solid #efd7ca;
   }
   .reset-button {
     flex: 0 0 auto;

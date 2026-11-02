@@ -231,10 +231,14 @@ export type DesktopSettings = {
 export type SigninSettings = {
   autoSigninEnabled: boolean;
 };
+export type UpdateSettings = {
+  autoCheck: boolean;
+};
 /** 应用设置按功能分类，持久化到单个 settings.json。 */
 export type AppSettings = {
   download: DownloadSettings;
   storage: StorageSettings;
   desktop: DesktopSettings;
   signin: SigninSettings;
+  updates: UpdateSettings;
 };

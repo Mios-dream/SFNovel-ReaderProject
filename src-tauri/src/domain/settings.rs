@@ -18,6 +18,9 @@ pub(crate) struct AppSettings {
     /// 签到自动化选项。
     #[serde(default)]
     pub(crate) signin: SigninSettings,
+    /// 应用更新选项。
+    #[serde(default)]
+    pub(crate) updates: UpdateSettings,
 }
 
 /// 下载请求限流与过程文件选项。
@@ -85,6 +88,25 @@ pub(crate) struct SigninSettings {
     /// 是否在后台自动完成每日签到。
     #[serde(default)]
     pub(crate) auto_signin_enabled: bool,
+}
+
+/// 应用更新选项。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UpdateSettings {
+    /// 是否在启动后自动检查新版本。
+    #[serde(default = "default_auto_check")]
+    pub(crate) auto_check: bool,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self { auto_check: true }
+    }
+}
+
+fn default_auto_check() -> bool {
+    true
 }
 
 /// 读取或更新正文恢复字典后返回的结果。

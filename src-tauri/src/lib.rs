@@ -269,7 +269,8 @@ pub fn run() {
             commands::signin::get_signin_month,
             commands::signin::get_signin_overview,
             commands::signin::submit_signin,
-            commands::signin::claim_signin_reward
+            commands::signin::claim_signin_reward,
+            commands::updates::check_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

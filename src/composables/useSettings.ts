@@ -21,16 +21,25 @@ export function useSettings(notify: Notify) {
     signin: {
       autoSigninEnabled: false,
     },
+    updates: {
+      autoCheck: true,
+    },
   });
   const settingsSaving = ref(false);
   const contentDictionarySize = ref(0);
   const contentDictionaryUpdating = ref(false);
   const contentDictionaryChapterId = ref(8436696);
 
+  async function loadSettings() {
+    const value = await invoke<AppSettings>("get_settings");
+    settings.value = value;
+    return value;
+  }
+
   async function openSettings() {
     settingsOpen.value = true;
     try {
-      settings.value = await invoke<AppSettings>("get_settings");
+      await loadSettings();
       const dictionary = await invoke<{ size: number }>("get_content_dictionary");
       contentDictionarySize.value = dictionary.size;
     } catch (error) {
@@ -89,6 +98,7 @@ export function useSettings(notify: Notify) {
     contentDictionarySize,
     contentDictionaryUpdating,
     contentDictionaryChapterId,
+    loadSettings,
     openSettings,
     updateContentDictionary,
     saveSettings,

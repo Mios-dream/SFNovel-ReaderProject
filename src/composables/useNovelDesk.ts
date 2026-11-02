@@ -11,6 +11,7 @@ import { useDeskLibrary } from "./useDeskLibrary";
 import { useNovelSearch } from "./useNovelSearch";
 import { useOnlineReading } from "./useOnlineReading";
 import { useSettings } from "./useSettings";
+import { useUpdater } from "./useUpdater";
 import { showToast, type ToastType } from "./useToast";
 
 type RemoteMediaType = "novel" | "audio" | "comic";
@@ -79,6 +80,12 @@ export function useNovelDesk() {
   }
 
   const settings = useSettings(notify);
+  const updater = useUpdater(notify);
+
+  function checkForUpdatesFromSettings() {
+    settings.settingsOpen.value = false;
+    void updater.checkForUpdate(true);
+  }
   const library = useDeskLibrary({
     libraryDetailReturnView,
     notify,
@@ -462,6 +469,10 @@ export function useNovelDesk() {
       auth.accountOpen.value = false;
       return;
     }
+    if (updater.modalOpen.value) {
+      updater.closeModal();
+      return;
+    }
     if (settings.settingsOpen.value) {
       settings.settingsOpen.value = false;
       return;
@@ -503,6 +514,15 @@ export function useNovelDesk() {
         // The Android app plugin is unavailable in browser and desktop builds.
       });
     void auth.refreshAuthStatus().then(() => auth.loadAccountProfile());
+    void updater.loadCurrentVersion();
+    void settings
+      .loadSettings()
+      .then((loaded) => {
+        if (loaded.updates.autoCheck) void updater.checkForUpdate(false);
+      })
+      .catch(() => {
+        // 设置读取失败时不影响应用启动。
+      });
     document.addEventListener("copy", blockCopy);
     document.addEventListener(
       "visibilitychange",
@@ -530,6 +550,8 @@ export function useNovelDesk() {
     ...chapterPicker,
     ...auth,
     ...settings,
+    ...updater,
+    checkForUpdatesFromSettings,
     remoteBook,
     remoteBookLoading,
     remoteMedia,

@@ -7,6 +7,7 @@ import ConfirmDeleteModal from "./ConfirmDeleteModal.vue";
 import DownloadQueueModal from "./DownloadQueueModal.vue";
 import SettingModal from "./SettingModal.vue";
 import SigninModal from "./SigninModal.vue";
+import UpdateModal from "./UpdateModal.vue";
 import { deskInjectionKey } from "../deskContext";
 
 const desk = inject(deskInjectionKey);
@@ -72,9 +73,25 @@ if (!desk) throw new Error("Desk context is unavailable");
     :dictionary-size="desk.contentDictionarySize.value"
     :dictionary-updating="desk.contentDictionaryUpdating.value"
     :dictionary-chapter-id="desk.contentDictionaryChapterId.value"
+    :current-version="desk.currentVersion.value"
+    :update-status="desk.status.value"
+    :update-version="desk.info.value?.version"
     @close="desk.settingsOpen.value = false"
     @save="desk.saveSettings"
     @update-dictionary="desk.updateContentDictionary"
+    @check-update="desk.checkForUpdatesFromSettings"
+    @show-update="desk.showUpdate"
+    @open-releases="desk.openReleases"
+  />
+  <UpdateModal
+    :open="desk.modalOpen.value"
+    :status="desk.status.value"
+    :info="desk.info.value"
+    :current-version="desk.currentVersion.value"
+    :error="desk.error.value"
+    @close="desk.closeModal"
+    @retry="desk.checkForUpdate(true)"
+    @open-releases="desk.openReleases"
   />
   <ConfirmDeleteModal
     :book="desk.confirmBook.value"

@@ -6,3 +6,4 @@ pub(crate) mod ocr;
 pub(crate) mod platform;
 pub(crate) mod sfacg;
 pub(crate) mod storage;
+pub(crate) mod updater;
