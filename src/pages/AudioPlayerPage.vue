@@ -169,6 +169,7 @@ const autoPlayNext = ref(savedAudioPreferences.autoPlayNext);
 const timerMenuOpen = ref(false);
 const desktopSettingsOpen = ref(false);
 const desktopPlaylistOpen = ref(false);
+const trackList = ref<HTMLElement>();
 const desktopSettingsButton = ref<HTMLButtonElement>();
 const desktopSettingsPanel = ref<HTMLElement>();
 const desktopSettingsStyle = ref<Record<string, string>>({
@@ -392,6 +393,20 @@ function togglePlaylist() {
 function closePlaylistDrawer() {
   if (compactViewport.value) closeMobileDrawers();
   else desktopPlaylistOpen.value = false;
+}
+
+async function revealCurrentTrack() {
+  if (!playlistOpen.value && !desktopPlaylistOpen.value) return;
+  await nextTick();
+  const list = trackList.value;
+  const active = list?.querySelector<HTMLElement>("button.active");
+  if (!list || !active) return;
+  const listRect = list.getBoundingClientRect();
+  const activeRect = active.getBoundingClientRect();
+  list.scrollTop +=
+    activeRect.top +
+    activeRect.height / 2 -
+    (listRect.top + list.clientHeight / 2);
 }
 
 function toggleAutoPlay() {
@@ -621,6 +636,10 @@ watch(
     void selectTrack(index || 0, false);
   },
   { immediate: true },
+);
+watch(
+  [playlistOpen, desktopPlaylistOpen, () => tracks.value.length, trackIndex],
+  () => void revealCurrentTrack(),
 );
 
 function goBack() {
@@ -1066,7 +1085,7 @@ async function retryOnlineAudio(shouldPlay = true) {
           ><small>{{ tracks.length }} 章</small
           ><X class="drawer-close" :size="19" />
         </button>
-        <div class="track-list">
+        <div ref="trackList" class="track-list">
           <button
             v-for="(track, index) in tracks"
             :key="track.key"

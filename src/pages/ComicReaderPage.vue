@@ -65,6 +65,7 @@ const previousChapter = computed(() => chapters.value[chapterIndex.value - 1]);
 const nextChapter = computed(() => chapters.value[chapterIndex.value + 1]);
 const controlsVisible = ref(true);
 const directoryOpen = ref(false);
+const directoryList = ref<HTMLElement>();
 const displayMode = ref<DisplayMode>("vertical");
 const pageIndex = ref(0);
 const chapterLoading = ref(false);
@@ -374,6 +375,20 @@ function showDirectory() {
   directoryOpen.value = true;
 }
 
+async function revealCurrentChapter() {
+  if (!directoryOpen.value || desk.directoryLoading.value) return;
+  await nextTick();
+  const list = directoryList.value;
+  const active = list?.querySelector<HTMLElement>(".directory-item.active");
+  if (!list || !active) return;
+  const listRect = list.getBoundingClientRect();
+  const activeRect = active.getBoundingClientRect();
+  list.scrollTop +=
+    activeRect.top +
+    activeRect.height / 2 -
+    (listRect.top + list.clientHeight / 2);
+}
+
 onMounted(async () => {
   if (online.value) {
     if (!desk.onlineBook.value) {
@@ -411,6 +426,11 @@ watch(
       void openChapter(chapterId);
     }
   },
+);
+
+watch(
+  [directoryOpen, () => desk.directoryLoading.value, () => comicChapter.value?.id],
+  () => void revealCurrentChapter(),
 );
 
 watch(
@@ -715,7 +735,11 @@ watch(
           {{ desk.directoryError.value }}
           <button type="button" @click="retryOnlineLoad">重试</button>
         </div>
-        <div v-else-if="chapters.length" class="directory-list">
+        <div
+          v-else-if="chapters.length"
+          ref="directoryList"
+          class="directory-list"
+        >
           <section class="directory-volume">
             <h3>全部章节</h3>
             <button
