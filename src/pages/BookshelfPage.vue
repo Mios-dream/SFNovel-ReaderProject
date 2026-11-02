@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { inject } from "vue";
+import { computed, inject, nextTick, ref } from "vue";
 import {
   BookMarked,
   ChevronLeft,
   ChevronRight,
   LoaderCircle,
   RefreshCw,
+  Search,
+  X,
 } from "@lucide/vue";
 import NovelCard from "../components/NovelCard.vue";
 import PageFrame from "../components/PageFrame.vue";
@@ -18,6 +20,50 @@ function requireDesk() {
 }
 
 const desk = requireDesk();
+
+const searchOpen = ref(false);
+const shelfQuery = ref("");
+const searchInput = ref<HTMLInputElement>();
+const normalizedQuery = computed(() =>
+  shelfQuery.value.trim().toLocaleLowerCase(),
+);
+const searchResults = computed(() => {
+  const query = normalizedQuery.value;
+  if (!query) return [];
+  return desk.filteredBookshelf.value.filter((novel) =>
+    `${novel.novelName}\n${novel.authorName}`
+      .toLocaleLowerCase()
+      .includes(query),
+  );
+});
+const visibleBookshelf = computed(() =>
+  normalizedQuery.value ? searchResults.value : desk.pagedBookshelf.value,
+);
+
+function openSearch() {
+  searchOpen.value = true;
+  void nextTick(() => searchInput.value?.focus());
+}
+
+function closeSearch() {
+  searchOpen.value = false;
+}
+
+function clearSearch() {
+  shelfQuery.value = "";
+}
+
+function toggleSearch() {
+  if (searchOpen.value) closeSearch();
+  else openSearch();
+}
+
+function dismissSearch(event: MouseEvent) {
+  const target = event.target;
+  if (!searchOpen.value || !(target instanceof Element)) return;
+  if (target.closest(".shelf-search, .shelf-actions")) return;
+  closeSearch();
+}
 
 // 书架分页和分类筛选由父级计算，页面只负责转发用户操作。
 /**
@@ -38,7 +84,7 @@ function jumpToPage(event: Event) {
 
 <template>
   <PageFrame>
-    <main class="bookshelf-page">
+    <main class="bookshelf-page" @click="dismissSearch">
       <section class="section-head shelf-head">
         <div>
           <p class="eyebrow">SFACG BOOKSHELF</p>
@@ -46,21 +92,65 @@ function jumpToPage(event: Event) {
             {{
               desk.bookshelfLoading.value
                 ? "正在同步书架"
-                : `共 ${desk.bookshelf.value.length} 本收藏`
+                : normalizedQuery
+                  ? `找到 ${searchResults.length} 本收藏`
+                  : `共 ${desk.bookshelf.value.length} 本收藏`
             }}
           </h2>
         </div>
-        <button
-          class="icon-button"
-          title="刷新书架"
-          :disabled="desk.bookshelfLoading.value"
-          @click="desk.refreshBookshelf()"
-        >
-          <RefreshCw
-            :class="{ spin: desk.bookshelfLoading.value }"
-            :size="19"
-          />
-        </button>
+        <div class="shelf-actions">
+          <button
+            class="icon-button"
+            :class="{ active: searchOpen || normalizedQuery }"
+            title="搜索书架"
+            aria-label="搜索书架"
+            aria-controls="bookshelf-search"
+            :aria-expanded="searchOpen"
+            @click="toggleSearch"
+          >
+            <Search :size="19" />
+          </button>
+          <button
+            class="icon-button"
+            title="刷新书架"
+            :disabled="desk.bookshelfLoading.value"
+            @click="desk.refreshBookshelf()"
+          >
+            <RefreshCw
+              :class="{ spin: desk.bookshelfLoading.value }"
+              :size="19"
+            />
+          </button>
+        </div>
+        <Transition name="search-pop">
+          <div
+            v-if="searchOpen"
+            id="bookshelf-search"
+            class="shelf-search"
+            role="search"
+          >
+            <Search :size="16" />
+            <input
+              ref="searchInput"
+              v-model="shelfQuery"
+              autocomplete="off"
+              placeholder="搜索书名或作者"
+              aria-label="搜索书架中的书籍"
+              @keydown.esc.prevent="closeSearch"
+            />
+            <button
+              class="clear-search"
+              :class="{ visible: shelfQuery }"
+              type="button"
+              title="清除搜索"
+              aria-label="清除搜索"
+              :disabled="!shelfQuery"
+              @click="clearSearch"
+            >
+              <X :size="14" />
+            </button>
+          </div>
+        </Transition>
       </section>
       <div
         v-if="desk.bookshelfLoading.value && !desk.bookshelf.value.length"
@@ -81,12 +171,9 @@ function jumpToPage(event: Event) {
             {{ category }}
           </button>
         </div>
-        <div
-          v-if="desk.pagedBookshelf.value.length"
-          class="novel-grid shelf-grid"
-        >
+        <div v-if="visibleBookshelf.length" class="novel-grid shelf-grid">
           <NovelCard
-            v-for="novel in desk.pagedBookshelf.value"
+            v-for="novel in visibleBookshelf"
             :key="`${novel.novelId}-${novel.mediaId || ''}-${novel.bookshelfName || '默认书架'}-${novel.bookshelfType || 'novel'}`"
             :novel="novel"
             :format-date="desk.formatDate"
@@ -95,11 +182,18 @@ function jumpToPage(event: Event) {
           />
         </div>
         <div v-else class="empty-state">
-          <BookMarked :size="28" />
-          <p>该分类中还没有可显示的小说</p>
+          <Search v-if="normalizedQuery" :size="28" />
+          <BookMarked v-else :size="28" />
+          <p>
+            {{
+              normalizedQuery
+                ? "没有找到匹配的书籍"
+                : "该分类中还没有可显示的小说"
+            }}
+          </p>
         </div>
         <nav
-          v-if="desk.bookshelfTotalPages.value > 1"
+          v-if="!normalizedQuery && desk.bookshelfTotalPages.value > 1"
           class="pagination"
           aria-label="书架分页"
         >
@@ -161,7 +255,12 @@ function jumpToPage(event: Event) {
   margin: 33px 0 15px;
 }
 .shelf-head {
+  position: relative;
   margin-top: 7px;
+}
+.shelf-actions {
+  display: flex;
+  gap: 8px;
 }
 .eyebrow {
   margin: 0 0 6px;
@@ -189,6 +288,94 @@ function jumpToPage(event: Event) {
 .icon-button:hover {
   color: var(--theme-color-dark);
   background: #fff0e7;
+}
+.icon-button:focus-visible {
+  outline: 2px solid var(--theme-color);
+  outline-offset: 2px;
+}
+.icon-button.active,
+.icon-button.active:hover {
+  color: #fff;
+  background: var(--theme-color);
+}
+.shelf-search {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 50%;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(440px, calc(100% - 8px));
+  padding: 8px 8px 8px 12px;
+  border: 1px solid #f1d9ce;
+  border-radius: 13px;
+  color: #b17f70;
+  background: rgba(255, 252, 249, 0.97);
+  box-shadow: 0 16px 34px rgba(115, 72, 56, 0.18);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transform: translateX(-50%);
+  transform-origin: top center;
+}
+.shelf-search:focus-within {
+  border-color: var(--theme-color);
+  box-shadow:
+    0 16px 34px rgba(115, 72, 56, 0.18),
+    0 0 0 3px rgba(226, 148, 100, 0.14);
+}
+.shelf-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: #5f423c;
+  background: transparent;
+  font-size: 13px;
+}
+.shelf-search input::placeholder {
+  color: #bd978a;
+}
+.clear-search {
+  display: grid;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: #a17367;
+  background: transparent;
+  place-items: center;
+  visibility: hidden;
+  transition: 0.15s;
+}
+.clear-search.visible {
+  visibility: visible;
+}
+.clear-search:hover {
+  color: var(--theme-color-dark);
+  background: #ffeadf;
+}
+.search-pop-enter-active {
+  transition:
+    opacity 140ms ease-out,
+    transform 220ms linear(0, 0.58 18%, 0.89 38%, 1.03 62%, 0.995 82%, 1);
+}
+.search-pop-leave-active {
+  transition:
+    opacity 140ms ease-in,
+    transform 140ms ease-in;
+}
+.search-pop-enter-from,
+.search-pop-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -6px) scale(0.97);
+}
+.search-pop-enter-to,
+.search-pop-leave-from {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
 }
 .empty-state {
   display: grid;
@@ -284,6 +471,14 @@ function jumpToPage(event: Event) {
   }
   .novel-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf-search,
+  .search-pop-enter-active,
+  .search-pop-leave-active {
+    transition: none;
   }
 }
 </style>
