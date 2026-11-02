@@ -189,3 +189,51 @@ pub(crate) async fn get_bookshelf(
         .await
         .map_err(AppError::into_message)
 }
+
+#[tauri::command]
+/// 收藏小说、有声专辑或漫画。
+///
+/// # 参数
+/// - `app`：Tauri 应用句柄。
+/// - `kind`：`novel`、`audio` 或 `comic`。
+/// - `novel_id`：小说编号；漫画使用漫画编号。
+/// - `media_id`：有声专辑编号。
+///
+/// # 错误
+/// 类型不支持、编号非法、未登录 App 或上游请求失败时返回错误消息。
+pub(crate) async fn add_remote_favorite(
+    app: tauri::AppHandle,
+    kind: String,
+    novel_id: i64,
+    media_id: Option<i64>,
+) -> Result<(), String> {
+    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+    CatalogService::new(&remote, &storage)
+        .add_favorite(&kind, novel_id, media_id)
+        .await
+        .map_err(AppError::into_message)
+}
+
+#[tauri::command]
+/// 取消小说、有声专辑或漫画收藏。
+///
+/// # 参数
+/// - `app`：Tauri 应用句柄。
+/// - `kind`：`novel`、`audio` 或 `comic`。
+/// - `novel_id`：小说编号；漫画使用漫画编号。
+/// - `media_id`：有声专辑编号。
+///
+/// # 错误
+/// 类型不支持、编号非法、未登录 App 或上游请求失败时返回错误消息。
+pub(crate) async fn remove_remote_favorite(
+    app: tauri::AppHandle,
+    kind: String,
+    novel_id: i64,
+    media_id: Option<i64>,
+) -> Result<(), String> {
+    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+    CatalogService::new(&remote, &storage)
+        .remove_favorite(&kind, novel_id, media_id)
+        .await
+        .map_err(AppError::into_message)
+}

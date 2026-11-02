@@ -50,6 +50,20 @@ pub(crate) trait RemoteGateway: Send + Sync {
     async fn comic_catalog(&self, comic_id: i64) -> AppResult<Vec<ComicChapter>>;
     /// 读取当前账号的公开书架。
     async fn bookshelf(&self, force_refresh: bool) -> AppResult<PublicShelf>;
+    /// 收藏小说、有声专辑或漫画。
+    async fn add_favorite(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+    ) -> AppResult<()>;
+    /// 取消小说、有声专辑或漫画收藏。
+    async fn remove_favorite(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+    ) -> AppResult<()>;
     /// 读取当前账号资料。
     async fn account_profile(&self) -> AppResult<UserProfile>;
     /// 读取指定月份的签到日期。

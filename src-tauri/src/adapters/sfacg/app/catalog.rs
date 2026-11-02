@@ -17,6 +17,40 @@ impl AppClient {
         parse_bookshelf(&response)
     }
 
+    /// 取消小说、有声专辑或漫画收藏。
+    pub(crate) async fn remove_favorite(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+    ) -> Result<(), String> {
+        match kind {
+            "novel" => {
+                self.delete_data(&format!("/user/pockets/novels/{novel_id}"))
+                    .await
+            }
+            "comic" => {
+                self.delete_data(&format!("/user/pockets/comic/{novel_id}"))
+                    .await
+            }
+            "audio" => {
+                let album_id = media_id.ok_or_else(|| "有声作品缺少专辑编号".to_string())?;
+                let query = [("expand", "albums".to_string())];
+                let response = self.get_data_uncached("/user/Pockets", &query).await?;
+                let pocket_ids = audio_pocket_ids(&response, album_id);
+                if pocket_ids.is_empty() {
+                    return Err("书架中未找到该有声作品".to_string());
+                }
+                for pocket_id in pocket_ids {
+                    self.delete_data(&format!("/pockets/{pocket_id}/albums/{album_id}"))
+                        .await?;
+                }
+                Ok(())
+            }
+            _ => Err("不支持的收藏类型".to_string()),
+        }
+    }
+
     /// 查找小说对应的有声专辑编号。
     ///
     /// 优先使用小说编号反查；失败时尝试标题提示，最后回退到公开小说详情中的
@@ -289,6 +323,31 @@ fn parse_bookshelf(response: &Value) -> Result<PublicShelf, String> {
         );
     }
     Ok(PublicShelf { categories, items })
+}
+
+/// 从书架响应中找出包含指定有声专辑的全部分组编号。
+fn audio_pocket_ids(response: &Value, album_id: i64) -> Vec<i64> {
+    let mut pocket_ids = Vec::new();
+    for pocket in response.as_array().into_iter().flatten() {
+        let Some(pocket_id) = pocket
+            .get("pocketId")
+            .and_then(Value::as_i64)
+            .filter(|id| *id != 0)
+        else {
+            continue;
+        };
+        let contains_album = pocket
+            .get("expand")
+            .and_then(|value| value.get("albums"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|album| album.get("albumId").and_then(Value::as_i64) == Some(album_id));
+        if contains_album && !pocket_ids.contains(&pocket_id) {
+            pocket_ids.push(pocket_id);
+        }
+    }
+    pocket_ids
 }
 
 /// 将 App 书架中的小说条目转换为内部记录。

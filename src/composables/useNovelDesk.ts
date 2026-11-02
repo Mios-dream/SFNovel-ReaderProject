@@ -1,7 +1,8 @@
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { ChapterMode, Novel, ReaderSource, ViewName } from "../types";
+import { nativeErrorMessage } from "./deskShared";
 import { useChapterPicker } from "./useChapterPicker";
 import { useDeskAuth } from "./useDeskAuth";
 import { useDeskBookshelf } from "./useDeskBookshelf";
@@ -54,8 +55,11 @@ export function useNovelDesk() {
   const remoteBookLoading = ref(false);
   const remoteMedia = ref<RemoteMedia>({});
   const remoteMediaDetecting = ref(false);
+  const remoteFavoriteKeys = ref<Set<string>>(new Set());
+  const remoteFavoriteLoading = ref("");
   const remoteDetailCache = new Map<string, Novel>();
   const remoteDetailRequests = new Map<string, Promise<Novel>>();
+  let remoteFavoritesRequest: Promise<void> | undefined;
   let stopBackListener: { unregister: () => Promise<void> } | undefined;
   let disposed = false;
   let remoteBookRequest = 0;
@@ -138,6 +142,82 @@ export function useNovelDesk() {
     return `${remoteMediaType(novel)}:${novel.novelId}:${novel.mediaId || ""}:${novel.sourcePath || ""}`;
   }
 
+  function remoteFavoriteKey(novel: Novel) {
+    return `${remoteMediaType(novel)}:${novel.novelId}:${novel.mediaId || ""}`;
+  }
+
+  function isRemoteFavorite(novel?: Novel) {
+    return novel
+      ? remoteFavoriteKeys.value.has(remoteFavoriteKey(novel))
+      : false;
+  }
+
+  function isRemoteFavoriteLoading(novel?: Novel) {
+    return !!novel && remoteFavoriteLoading.value === remoteFavoriteKey(novel);
+  }
+
+  function loadRemoteFavorites() {
+    if (!auth.auth.value.appAuthenticated)
+      return remoteFavoritesRequest ?? Promise.resolve();
+    if (remoteFavoritesRequest) return remoteFavoritesRequest;
+    remoteFavoritesRequest = (async () => {
+      try {
+        const response = await invoke<{ items: Novel[] }>("get_bookshelf", {
+          forceRefresh: false,
+        });
+        for (const item of response.items)
+          remoteFavoriteKeys.value.add(remoteFavoriteKey(item));
+      } catch {
+        // 未登录或书架读取失败时保持未收藏状态。
+      } finally {
+        remoteFavoritesRequest = undefined;
+      }
+    })();
+    return remoteFavoritesRequest;
+  }
+
+  async function toggleRemoteFavorite(novel: Novel) {
+    const key = remoteFavoriteKey(novel);
+    if (remoteFavoriteLoading.value) return;
+    const favorited = remoteFavoriteKeys.value.has(key);
+    remoteFavoriteLoading.value = key;
+    try {
+      await invoke(
+        favorited ? "remove_remote_favorite" : "add_remote_favorite",
+        {
+          kind: remoteMediaType(novel),
+          novelId: novel.novelId,
+          mediaId: novel.mediaId,
+        },
+      );
+      if (favorited) {
+        remoteFavoriteKeys.value.delete(key);
+        notify("已取消收藏");
+      } else {
+        remoteFavoriteKeys.value.add(key);
+        notify("已收藏");
+      }
+      void bookshelf.refreshBookshelf();
+    } catch (error) {
+      notify(
+        nativeErrorMessage(error, favorited ? "取消收藏失败" : "收藏失败"),
+        "error",
+      );
+    } finally {
+      if (remoteFavoriteLoading.value === key) remoteFavoriteLoading.value = "";
+    }
+  }
+
+  watch(
+    () => auth.auth.value.appAuthenticated,
+    (authenticated) => {
+      remoteFavoriteKeys.value = new Set();
+      remoteFavoriteLoading.value = "";
+      if (authenticated && active.value === "remoteDetail")
+        void loadRemoteFavorites();
+    },
+  );
+
   function requestRemoteDetail(
     novel: Novel,
     kind: RemoteMediaType = remoteMediaType(novel),
@@ -211,6 +291,7 @@ export function useNovelDesk() {
     const request = ++remoteBookRequest;
     remoteBook.value = novel;
     active.value = "remoteDetail";
+    if (!preserveMedia) void loadRemoteFavorites();
     if (!preserveMedia) {
       remoteMedia.value = { [remoteMediaType(novel)]: novel };
       remoteMediaDetecting.value = true;
@@ -453,6 +534,9 @@ export function useNovelDesk() {
     remoteBookLoading,
     remoteMedia,
     remoteMediaDetecting,
+    isRemoteFavorite,
+    isRemoteFavoriteLoading,
+    toggleRemoteFavorite,
     remoteDetailReturnView,
     onlineReturnView,
     openRemoteBookDetail,

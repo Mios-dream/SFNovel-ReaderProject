@@ -240,6 +240,8 @@ pub fn run() {
             commands::catalog::get_comic_chapters,
             commands::catalog::get_comic_details,
             commands::catalog::get_bookshelf,
+            commands::catalog::add_remote_favorite,
+            commands::catalog::remove_remote_favorite,
             commands::reading::load_online_text_chapter,
             commands::reading::load_online_comic_chapter,
             commands::reading::load_online_audio_track,

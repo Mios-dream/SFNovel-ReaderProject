@@ -216,6 +216,40 @@ impl SfSource {
         client.get_public_bookshelf().await
     }
 
+    /// 收藏小说、有声专辑或漫画。
+    pub(crate) async fn add_favorite(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+    ) -> Result<(), String> {
+        let path = match kind {
+            "novel" => format!("/novels/{novel_id}/favs"),
+            "audio" => format!(
+                "/albums/{}/favs",
+                media_id.ok_or_else(|| "有声作品缺少专辑编号".to_string())?
+            ),
+            "comic" => format!("/comics/{novel_id}/favs"),
+            _ => return Err("不支持的收藏类型".to_string()),
+        };
+        self.require_app("收藏")?
+            .post_data(&path, &serde_json::json!({}))
+            .await
+            .map(|_| ())
+    }
+
+    /// 取消小说、有声专辑或漫画收藏。
+    pub(crate) async fn remove_favorite(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+    ) -> Result<(), String> {
+        self.require_app("取消收藏")?
+            .remove_favorite(kind, novel_id, media_id)
+            .await
+    }
+
     /// 读取账户资料。存在 App 凭证时只读取 App，否则读取网页资料。
     pub(crate) async fn account_profile(&self) -> Result<UserProfile, AppError> {
         if self.has_app_session() {
@@ -497,6 +531,28 @@ impl RemoteGateway for SfSource {
 
     async fn bookshelf(&self, force_refresh: bool) -> AppResult<PublicShelf> {
         SfSource::bookshelf(self, force_refresh)
+            .await
+            .map_err(remote_error)
+    }
+
+    async fn add_favorite(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+    ) -> AppResult<()> {
+        SfSource::add_favorite(self, kind, novel_id, media_id)
+            .await
+            .map_err(remote_error)
+    }
+
+    async fn remove_favorite(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+    ) -> AppResult<()> {
+        SfSource::remove_favorite(self, kind, novel_id, media_id)
             .await
             .map_err(remote_error)
     }

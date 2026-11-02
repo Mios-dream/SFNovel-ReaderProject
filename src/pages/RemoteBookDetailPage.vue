@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { computed, inject, nextTick, ref, watch } from "vue";
 import {
   BookOpen,
+  Bookmark,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -76,6 +77,8 @@ const currentMediaLabel = computed(() =>
       ? "漫画"
       : "小说",
 );
+const isFavorite = computed(() => desk.isRemoteFavorite(novel.value));
+const favoriteBusy = computed(() => desk.isRemoteFavoriteLoading(novel.value));
 const remoteStatusLabel = computed(() =>
   novel.value?.isFinish == null
     ? ""
@@ -112,6 +115,11 @@ function startOnline(chapterId?: number) {
   const work = novel.value;
   if (!work) return;
   desk.startOnlineReading(work, mode.value, chapterId);
+}
+
+function favoriteWork() {
+  const work = novel.value;
+  if (work) void desk.toggleRemoteFavorite(work);
 }
 
 function selectMedia(media: RemoteMediaType) {
@@ -299,8 +307,9 @@ function textChapterBadge(
               class="status-tag"
               :class="{ finished: novel.isFinish }"
               >{{ remoteStatusLabel }}</span
-            ><span v-if="novel.typeName || novel.bookshelfName"
-              >分类 · {{ novel.typeName || novel.bookshelfName }}</span
+            ><span v-if="novel.typeName || novel.bookshelfName">{{
+              novel.typeName || novel.bookshelfName
+            }}</span
             ><span v-for="tag in novel.tags || []" :key="tag">{{ tag }}</span>
           </div>
           <button
@@ -313,6 +322,20 @@ function textChapterBadge(
           <div class="desktop-primary-actions">
             <button class="desktop-start-reading" @click="startOnline()">
               <Play :size="18" />{{ onlineActionLabel }}
+            </button>
+            <button
+              class="desktop-favorite"
+              :class="{ favorited: isFavorite }"
+              :disabled="favoriteBusy"
+              :aria-label="isFavorite ? '取消收藏' : '收藏'"
+              @click="favoriteWork"
+            >
+              <LoaderCircle v-if="favoriteBusy" class="spin" :size="17" />
+              <Bookmark
+                v-else
+                :size="17"
+                :fill="isFavorite ? 'currentColor' : 'none'"
+              />{{ isFavorite ? "已收藏" : "收藏" }}
             </button>
             <button class="desktop-action" @click="openDownload">
               <Download :size="17" />下载
@@ -479,8 +502,10 @@ function textChapterBadge(
           class="status-tag"
           :class="{ finished: novel.isFinish }"
           >{{ remoteStatusLabel }}</span
-        ><span v-if="novel.typeName || novel.bookshelfName" class="category-tag"
-          >分类 · {{ novel.typeName || novel.bookshelfName }}</span
+        ><span
+          v-if="novel.typeName || novel.bookshelfName"
+          class="category-tag"
+          >{{ novel.typeName || novel.bookshelfName }}</span
         ><span v-for="tag in novel.tags || []" :key="tag">{{ tag }}</span>
       </section>
       <section class="book-intro" aria-labelledby="book-intro-title">
@@ -578,9 +603,7 @@ function textChapterBadge(
                     v-if="chapter.isVip"
                     class="chapter-badge vip"
                     :class="{ unlocked: chapter.isUnlocked === true }"
-                    :title="
-                      chapter.isUnlocked === true ? '已解锁' : 'VIP 章节'
-                    "
+                    :title="chapter.isUnlocked === true ? '已解锁' : 'VIP 章节'"
                     ><LockKeyholeOpen
                       v-if="chapter.isUnlocked === true"
                       :size="12"
@@ -607,6 +630,19 @@ function textChapterBadge(
         <ListTree :size="21" /><span>目录</span></button
       ><button class="online-action" title="下载章节" @click="openDownload">
         <Download :size="20" /><span>下载</span></button
+      ><button
+        class="favorite-action"
+        :class="{ favorited: isFavorite }"
+        :disabled="favoriteBusy"
+        :aria-label="isFavorite ? '取消收藏' : '收藏'"
+        @click="favoriteWork"
+      >
+        <LoaderCircle v-if="favoriteBusy" class="spin" :size="18" />
+        <Bookmark
+          v-else
+          :size="18"
+          :fill="isFavorite ? 'currentColor' : 'none'"
+        /><span>{{ isFavorite ? "已收藏" : "收藏" }}</span></button
       ><button class="primary-action" @click="startOnline()">
         <Play :size="17" />{{ onlineActionLabel }}
       </button>
@@ -1265,6 +1301,40 @@ function textChapterBadge(
   .desktop-start-reading:hover {
     background: #d96746;
   }
+  .desktop-favorite {
+    display: inline-flex;
+    min-height: 43px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 16px;
+    border: 1px solid #e9ad1e;
+    border-radius: 10px;
+    color: white;
+    background: #fcbd30;
+    box-shadow: 0 6px 14px rgba(220, 158, 16, 0.2);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease,
+      box-shadow 160ms ease;
+  }
+  .desktop-favorite:hover:not(:disabled):not(.favorited) {
+    border-color: #daa018;
+    background: #f2b220;
+  }
+  .desktop-favorite.favorited {
+    border-color: #e2e2e2;
+    color: #8d8d8d;
+    background: #f0f0f0;
+    box-shadow: none;
+  }
+  .desktop-favorite:disabled {
+    cursor: default;
+  }
   .desktop-secondary-actions {
     display: inline-flex;
     align-items: center;
@@ -1789,7 +1859,7 @@ function textChapterBadge(
   .directory-action {
     display: flex;
     min-height: 48px;
-    flex: 0 0 52px;
+    flex: 0 0 48px;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -1799,12 +1869,12 @@ function textChapterBadge(
     color: #625a4e;
     background: transparent;
     font: inherit;
-    font-size: 10px;
+    font-size: 12px;
   }
   .online-action {
     display: flex;
     min-height: 48px;
-    flex: 0 0 52px;
+    flex: 0 0 48px;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -1814,17 +1884,46 @@ function textChapterBadge(
     color: #625a4e;
     background: transparent;
     font: inherit;
-    font-size: 10px;
+    font-size: 12px;
+  }
+  .favorite-action {
+    display: inline-flex;
+    min-height: 48px;
+    flex: 1 1 0;
+    min-width: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 0 11px;
+    border: 0;
+    border-radius: 999px;
+    color: white;
+    background: linear-gradient(90deg, #fcbd30 0%, #fdab31 100%);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease;
+  }
+  .favorite-action.favorited {
+    color: #8d8d8d;
+    background: #f0f0f0;
+  }
+  .favorite-action:disabled {
+    cursor: default;
   }
   .primary-action {
     display: inline-flex;
     min-height: 48px;
     flex: 1 1 0;
+    min-width: 0;
     align-items: center;
     justify-content: center;
     gap: 6px;
     border: 0;
-    border-radius: 14px;
+    border-radius: 999px;
     color: #fff;
     background: #eb6545;
     box-shadow: 0 5px 13px rgba(207, 91, 62, 0.25);
@@ -1974,5 +2073,11 @@ function textChapterBadge(
   gap: 8px;
   color: #a0998d;
   font-size: 13px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .desktop-favorite,
+  .favorite-action {
+    transition: none;
+  }
 }
 </style>

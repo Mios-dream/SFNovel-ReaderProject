@@ -318,15 +318,22 @@ impl AppClient {
     /// 解析 App API 响应：成功时拆出 `data`，失败时保留可分类的上游状态。
     async fn parse_response(response: reqwest::Response, path: &str) -> Result<Value, AppApiError> {
         let http_status = response.status().as_u16();
-        let body = response
-            .json::<Value>()
-            .await
-            .map_err(|error| AppApiError {
+        let bytes = response.bytes().await.map_err(|error| AppApiError {
+            http_status,
+            api_http_code: None,
+            api_error_code: None,
+            message: Some(format!("SF App 响应读取失败：{error}")),
+        })?;
+        let body = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice::<Value>(&bytes).map_err(|error| AppApiError {
                 http_status,
                 api_http_code: None,
                 api_error_code: None,
                 message: Some(format!("SF App 响应格式无效：{error}")),
-            })?;
+            })?
+        };
         let api_http_code = body
             .get("status")
             .and_then(|value| value.get("httpCode"))
@@ -388,6 +395,19 @@ impl AppClient {
         Self::parse_response(response, path)
             .await
             .map_err(|error| error.describe(path))
+    }
+
+    /// 发送已签名 DELETE 请求，并接受空响应体。
+    pub(crate) async fn delete_data(&self, path: &str) -> Result<(), String> {
+        let response = self
+            .signed_request(reqwest::Method::DELETE, path, true)?
+            .send()
+            .await
+            .map_err(|error| format!("SF App 请求失败：{error}"))?;
+        Self::parse_response(response, path)
+            .await
+            .map_err(|error| error.describe(path))?;
+        Ok(())
     }
 
     /// 发送不带 App 会话的 JSON POST 请求，用于冷启动设备登记。

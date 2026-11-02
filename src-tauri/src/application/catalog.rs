@@ -232,4 +232,62 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
         }
         Ok(BookshelfCollection { categories, items })
     }
+
+    /// 收藏小说、有声专辑或漫画。
+    ///
+    /// # 参数
+    /// - `kind`：`novel`、`audio` 或 `comic`。
+    /// - `novel_id`：小说编号；漫画使用漫画编号。
+    /// - `media_id`：有声专辑编号。
+    ///
+    /// # 错误
+    /// 类型不支持、编号非法或上游请求失败时返回错误。
+    pub(crate) async fn add_favorite(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+    ) -> AppResult<()> {
+        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
+        match kind {
+            "novel" | "comic" => {}
+            "audio" => {
+                validate_novel_id(
+                    media_id.ok_or_else(|| AppError::invalid_input("有声作品缺少专辑编号"))?,
+                )
+                .map_err(AppError::invalid_input)?;
+            }
+            _ => return Err(AppError::invalid_input("不支持的收藏类型")),
+        }
+        self.remote.add_favorite(kind, novel_id, media_id).await
+    }
+
+    /// 取消小说、有声专辑或漫画收藏。
+    ///
+    /// # 参数
+    /// - `kind`：`novel`、`audio` 或 `comic`。
+    /// - `novel_id`：小说编号；漫画使用漫画编号。
+    /// - `media_id`：有声专辑编号。
+    ///
+    /// # 错误
+    /// 类型不支持、编号非法或上游请求失败时返回错误。
+    pub(crate) async fn remove_favorite(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+    ) -> AppResult<()> {
+        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
+        match kind {
+            "novel" | "comic" => {}
+            "audio" => {
+                validate_novel_id(
+                    media_id.ok_or_else(|| AppError::invalid_input("有声作品缺少专辑编号"))?,
+                )
+                .map_err(AppError::invalid_input)?;
+            }
+            _ => return Err(AppError::invalid_input("不支持的收藏类型")),
+        }
+        self.remote.remove_favorite(kind, novel_id, media_id).await
+    }
 }
