@@ -65,7 +65,7 @@ impl AppClient {
     ) -> Result<Vec<ChapterVolume>, String> {
         validate_novel_id(novel_id)?;
         let response = self
-            .get_public_data(&format!("/novels/{novel_id}/dirs"), &[])
+            .get_data(&format!("/novels/{novel_id}/dirs"), &[])
             .await?;
         parse_chapter_catalog(&response)
     }

@@ -3,7 +3,7 @@ use serde_json::Value;
 
 /// 将 App 小说目录响应转换为领域分卷列表。
 ///
-/// 保留章节编号、标题和 VIP 标记；访问状态初始化为未知，下载状态初始化为未下载。
+/// 保留章节编号、标题、VIP 标记和火券价格；当前会话已购的 VIP 章节价格为 0。
 ///
 /// # 参数
 /// - `response`：包含 `volumeList` 或 `volumes` 的 App 目录 JSON。
@@ -41,6 +41,15 @@ pub(super) fn parse_chapter_catalog(response: &Value) -> Result<Vec<ChapterVolum
                             .get("isVip")
                             .and_then(Value::as_bool)
                             .unwrap_or(false);
+                        let need_fire_money = chapter
+                            .get("needFireMoney")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(0);
+                        let access_state = if !is_vip || need_fire_money == 0 {
+                            TextAccessState::Available
+                        } else {
+                            TextAccessState::Unavailable
+                        };
                         Some(ChapterSummary {
                             chap_id,
                             title: chapter
@@ -50,12 +59,13 @@ pub(super) fn parse_chapter_catalog(response: &Value) -> Result<Vec<ChapterVolum
                                 .unwrap_or("未命名章节")
                                 .to_string(),
                             is_vip,
+                            need_fire_money,
                             content_kind: if is_vip {
                                 TextContentKind::ImageVip
                             } else {
                                 TextContentKind::Text
                             },
-                            access_state: TextAccessState::Unknown,
+                            access_state,
                             downloaded: false,
                         })
                     })
@@ -100,13 +110,12 @@ mod tests {
             volumes[0].chapters[0].content_kind,
             TextContentKind::Text
         ));
-        assert!(volumes
-            .iter()
-            .flat_map(|volume| &volume.chapters)
-            .all(
-                |chapter| matches!(chapter.access_state, TextAccessState::Unknown)
-                    && !chapter.downloaded
-            ));
+        assert!(matches!(
+            volumes[0].chapters[0].access_state,
+            TextAccessState::Available
+        ));
+        assert!(volumes[0].chapters[0].need_fire_money == 0);
+        assert!(!volumes[0].chapters[0].downloaded);
 
         let vip_chapter = volumes
             .iter()
@@ -117,6 +126,31 @@ mod tests {
             vip_chapter.content_kind,
             TextContentKind::ImageVip
         ));
+        assert!(matches!(
+            vip_chapter.access_state,
+            TextAccessState::Unavailable
+        ));
+        assert!(vip_chapter.need_fire_money > 0);
+    }
+
+    #[test]
+    fn treats_zero_price_vip_chapter_as_available() {
+        let volumes = parse_chapter_catalog(&json!({
+            "volumeList": [{
+                "volumeId": 1,
+                "title": "正文",
+                "chapterList": [{
+                    "chapId": 2,
+                    "title": "已购章节",
+                    "isVip": true,
+                    "needFireMoney": 0
+                }]
+            }]
+        }))
+        .unwrap();
+        let chapter = &volumes[0].chapters[0];
+        assert_eq!(chapter.need_fire_money, 0);
+        assert!(matches!(chapter.access_state, TextAccessState::Available));
     }
 
     #[test]

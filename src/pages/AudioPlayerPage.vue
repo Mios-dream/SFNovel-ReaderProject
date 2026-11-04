@@ -29,6 +29,7 @@ import {
   X,
 } from "@lucide/vue";
 import AudioPlayerDrawer from "../components/AudioPlayerDrawer.vue";
+import { useVirtualRows } from "../composables/useVirtualRows";
 import { reportError, showToast } from "../composables/useToast";
 import { deskInjectionKey } from "../deskContext";
 
@@ -169,7 +170,19 @@ const autoPlayNext = ref(savedAudioPreferences.autoPlayNext);
 const timerMenuOpen = ref(false);
 const desktopSettingsOpen = ref(false);
 const desktopPlaylistOpen = ref(false);
-const trackList = ref<HTMLElement>();
+const trackRows = computed(() =>
+  tracks.value.map((track, index) => ({
+    key: track.key,
+    index,
+    track,
+    height: 54,
+  })),
+);
+const {
+  container: trackList,
+  windowed: trackWindow,
+  handleScroll: handleTrackListScroll,
+} = useVirtualRows(() => trackRows.value, 8);
 const desktopSettingsButton = ref<HTMLButtonElement>();
 const desktopSettingsPanel = ref<HTMLElement>();
 const desktopSettingsStyle = ref<Record<string, string>>({
@@ -399,14 +412,12 @@ async function revealCurrentTrack() {
   if (!playlistOpen.value && !desktopPlaylistOpen.value) return;
   await nextTick();
   const list = trackList.value;
-  const active = list?.querySelector<HTMLElement>("button.active");
-  if (!list || !active) return;
-  const listRect = list.getBoundingClientRect();
-  const activeRect = active.getBoundingClientRect();
-  list.scrollTop +=
-    activeRect.top +
-    activeRect.height / 2 -
-    (listRect.top + list.clientHeight / 2);
+  if (!list) return;
+  list.scrollTop = Math.max(
+    0,
+    trackIndex.value * 54 - (list.clientHeight - 54) / 2,
+  );
+  handleTrackListScroll();
 }
 
 function toggleAutoPlay() {
@@ -1085,40 +1096,54 @@ async function retryOnlineAudio(shouldPlay = true) {
           ><small>{{ tracks.length }} 章</small
           ><X class="drawer-close" :size="19" />
         </button>
-        <div ref="trackList" class="track-list">
+        <div
+          ref="trackList"
+          class="track-list"
+          @scroll.passive="handleTrackListScroll"
+        >
+          <div
+            :style="{ height: `${trackWindow.top}px` }"
+            aria-hidden="true"
+          ></div>
           <button
-            v-for="(track, index) in tracks"
-            :key="track.key"
-            :class="{ active: index === trackIndex }"
+            v-for="row in trackWindow.rows"
+            :key="row.key"
+            :class="{ active: row.index === trackIndex }"
             :disabled="playbackLoading"
-            @click="selectTrack(index, true)"
+            @click="selectTrack(row.index, true)"
           >
-            <span>{{ String(index + 1).padStart(3, "0") }}</span
-            ><strong>{{ track.title }}</strong
+            <span>{{ String(row.index + 1).padStart(3, "0") }}</span
+            ><strong>{{ row.track.title }}</strong
             ><span
               class="track-access"
-              :class="{ unlocked: track.isUnlocked === true }"
+              :class="{ unlocked: row.track.isUnlocked === true }"
               :title="
-                track.isVip
-                  ? track.isUnlocked === true
+                row.track.isVip
+                  ? row.track.isUnlocked === true
                     ? '已解锁'
                     : 'VIP 章节'
                   : undefined
               "
               ><LockKeyholeOpen
-                v-if="track.isVip && track.isUnlocked === true"
+                v-if="row.track.isVip && row.track.isUnlocked === true"
                 :size="14"
                 aria-label="已解锁"
               /><LockKeyhole
-                v-else-if="track.isVip"
+                v-else-if="row.track.isVip"
                 :size="14"
                 aria-label="VIP 章节"
-              /><small v-if="track.isVip">VIP</small></span
-            ><Play v-if="index === trackIndex && !playing" :size="16" /><Pause
-              v-else-if="index === trackIndex"
+              /><small v-if="row.track.isVip">VIP</small></span
+            ><Play
+              v-if="row.index === trackIndex && !playing"
+              :size="16" /><Pause
+              v-else-if="row.index === trackIndex"
               :size="16"
             />
           </button>
+          <div
+            :style="{ height: `${trackWindow.bottom}px` }"
+            aria-hidden="true"
+          ></div>
         </div>
       </aside>
     </AudioPlayerDrawer>
@@ -1417,6 +1442,7 @@ async function retryOnlineAudio(shouldPlay = true) {
   align-items: center;
   gap: 8px;
   width: 100%;
+  height: 54px;
   min-height: 54px;
   padding: 0 18px;
   border: 0;

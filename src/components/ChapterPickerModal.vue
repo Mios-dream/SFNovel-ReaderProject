@@ -58,146 +58,66 @@
             selectedCount
           }}/{{ selectableIds.length }}）
         </button>
-        <div class="chapter-list">
-          <template v-if="mode === 'text'"
-            ><div
-              v-for="volume in volumes"
-              :key="volume.volumeId"
-              class="chapter-volume"
-            >
-              <div class="volume-heading">
-                <strong>{{ volume.title }}</strong>
-                <button
-                  class="volume-select-all"
-                  :disabled="!selectableVolumeIds(volume).length"
-                  @click="toggleVolume(volume)"
-                >
-                  {{ isVolumeSelected(volume) ? "取消全选" : "全选本卷" }}（{{
-                    selectedVolumeCount(volume)
-                  }}/{{ selectableVolumeIds(volume).length }}）
-                </button>
-              </div>
-              <label
-                v-for="chapter in volume.chapters"
-                :key="chapter.chapId"
-                :class="{
-                  downloaded: chapter.downloaded,
-                }"
-                ><input
-                  :checked="selectedIds.includes(chapter.chapId)"
-                  :disabled="!canDownload(chapter)"
-                  type="checkbox"
-                  :value="chapter.chapId"
-                  @change="
-                    toggleChapter(
-                      chapter.chapId,
-                      ($event.target as HTMLInputElement).checked,
-                    )
-                  "
-                /><span class="chapter-title">{{ chapter.title }}</span
-                ><span
-                  v-if="chapter.downloaded"
-                  class="chapter-state downloaded"
-                  ><CheckCircle2 :size="15" />已下载</span
-                ><span v-else-if="chapter.isVip" class="chapter-state vip">
-                  <LockKeyhole :size="15" />{{
-                    textContentLabel(chapter.contentKind)
-                  }}</span
-                ></label
+        <div
+          ref="chapterList"
+          class="chapter-list"
+          @scroll.passive="handleChapterScroll"
+        >
+          <div
+            :style="{ height: `${chapterWindow.top}px` }"
+            aria-hidden="true"
+          ></div>
+          <template v-for="row in chapterWindow.rows" :key="row.key">
+            <div v-if="row.kind === 'volume'" class="picker-volume-row">
+              <strong>{{ row.title }}</strong>
+              <button
+                class="volume-select-all"
+                :disabled="!row.ids.length"
+                @click="togglePickerVolume(row)"
               >
-            </div></template
-          ><template v-else-if="mode === 'audio'"
-            ><div
-              v-for="volume in audioVolumes"
-              :key="volume.title"
-              class="chapter-volume"
-            >
-              <div class="volume-heading">
-                <strong>{{ volume.title }}</strong>
-                <button
-                  class="volume-select-all"
-                  :disabled="!selectableAudioIds(volume).length"
-                  @click="toggleAudioVolume(volume)"
-                >
-                  {{
-                    isAudioVolumeSelected(volume) ? "取消全选" : "全选本卷"
-                  }}（{{ selectedAudioVolumeCount(volume) }}/{{
-                    selectableAudioIds(volume).length
-                  }}）
-                </button>
-              </div>
-              <label
-                v-for="chapter in volume.chapters"
-                :key="chapter.id"
-                :class="{ downloaded: chapter.downloaded }"
-                ><input
-                  :checked="selectedIds.includes(chapter.id)"
-                  :disabled="chapter.downloaded"
-                  type="checkbox"
-                  :value="chapter.id"
-                  @change="
-                    toggleChapter(
-                      chapter.id,
-                      ($event.target as HTMLInputElement).checked,
-                    )
-                  "
-                /><span class="chapter-title">{{ chapter.title }}</span
-                ><span
-                  v-if="chapter.downloaded"
-                  class="chapter-state downloaded"
-                  ><CheckCircle2 :size="15" />已下载</span
-                ><span
-                  v-else-if="chapter.isVip"
-                  class="chapter-state vip"
-                  :class="{ unlocked: chapter.isUnlocked === true }"
-                  :title="chapter.isUnlocked === true ? '已解锁' : 'VIP 章节'"
-                  ><LockKeyholeOpen
-                    v-if="chapter.isUnlocked === true"
-                    :size="15"
-                    aria-label="已解锁"
-                  /><LockKeyhole
-                    v-else
-                    :size="15"
-                    aria-label="VIP 章节"
-                  />VIP</span
-                ></label
-              >
-            </div></template
-          ><template v-else
-            ><label
-              v-for="chapter in comicChapters"
-              :key="chapter.id"
-              :class="{
-                downloaded: chapter.downloaded,
-                locked: chapter.isVip && chapter.isUnlocked === false,
-              }"
+                {{ row.allSelected ? "取消全选" : "全选本卷" }}（{{
+                  row.selectedCount
+                }}/{{ row.ids.length }}）
+              </button>
+            </div>
+            <label
+              v-else
+              class="picker-chapter-row"
+              :class="{ downloaded: row.downloaded }"
               ><input
-                :checked="selectedIds.includes(chapter.id)"
-                :disabled="!canDownload(chapter)"
+                :checked="selectedIdSet.has(row.id)"
+                :disabled="!row.canSelect"
                 type="checkbox"
-                :value="chapter.id"
+                :value="row.id"
                 @change="
                   toggleChapter(
-                    chapter.id,
+                    row.id,
                     ($event.target as HTMLInputElement).checked,
                   )
                 "
-              /><span class="chapter-title">{{ chapter.title }}</span
-              ><span v-if="chapter.downloaded" class="chapter-state downloaded"
+              /><span class="chapter-title">{{ row.title }}</span
+              ><span v-if="row.downloaded" class="chapter-state downloaded"
                 ><CheckCircle2 :size="15" />已下载</span
               ><span
-                v-else-if="chapter.isVip"
+                v-else-if="row.isVip"
                 class="chapter-state vip"
-                :class="{ unlocked: chapter.isUnlocked === true }"
+                :class="{ unlocked: row.unlocked }"
                 ><LockKeyholeOpen
-                  v-if="chapter.isUnlocked === true"
+                  v-if="row.unlocked"
                   :size="15"
-                /><LockKeyhole v-else :size="15" />{{
-                  chapter.isUnlocked === true ? "已解锁" : "VIP 章节"
-                }}</span
+                  aria-label="已解锁"
+                /><LockKeyhole
+                  v-else
+                  :size="15"
+                  aria-label="VIP 章节"
+                />{{ row.lockLabel }}</span
               ></label
-            ></template
-          >
+            >
+          </template>
+          <div
+            :style="{ height: `${chapterWindow.bottom}px` }"
+            aria-hidden="true"
+          ></div>
         </div>
         <button
           class="primary-button full"
@@ -217,7 +137,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, watch } from "vue";
 import {
   BookOpen,
   CheckCircle2,
@@ -227,6 +147,7 @@ import {
   LockKeyhole,
   LockKeyholeOpen,
 } from "@lucide/vue";
+import { useVirtualRows } from "../composables/useVirtualRows";
 import type { Chapter, ChapterMode, ChapterVolume, Novel } from "../types";
 
 const props = defineProps<{
@@ -253,10 +174,34 @@ type SelectableChapter = (TextChapter | Chapter) & {
   downloaded?: boolean;
   isVip?: boolean;
   isUnlocked?: boolean | "unknown";
-  contentKind?: TextChapter["contentKind"];
   accessState?: TextChapter["accessState"];
 };
 type AudioVolume = { title: string; chapters: Chapter[] };
+type PickerVolumeRow = {
+  kind: "volume";
+  key: string;
+  height: number;
+  title: string;
+  ids: number[];
+  selectedCount: number;
+  allSelected: boolean;
+};
+type PickerChapterRow = {
+  kind: "chapter";
+  key: string;
+  height: number;
+  id: number;
+  title: string;
+  downloaded: boolean;
+  isVip: boolean;
+  unlocked: boolean;
+  lockLabel: string;
+  canSelect: boolean;
+};
+type PickerRow = PickerVolumeRow | PickerChapterRow;
+
+const PICKER_VOLUME_HEIGHT = 44;
+const PICKER_CHAPTER_HEIGHT = 38;
 
 // 文本、有声和漫画章节统一转换为可选择结构，模板无需区分目录来源。
 /**
@@ -266,17 +211,9 @@ type AudioVolume = { title: string; chapters: Chapter[] };
  */
 function canDownload(chapter: SelectableChapter) {
   if (chapter.downloaded) return false;
+  if (props.mode === "text") return chapter.accessState === "available";
   if (props.mode === "comic") return chapter.isUnlocked !== false;
-  // `contentKind` identifies a website text entry. Its `unknown` access state
-  // is intentional: a catalogue cannot determine whether the account owns it.
-  if (chapter.contentKind) return chapter.accessState !== "unavailable";
   return !chapter.isVip || chapter.isUnlocked === true;
-}
-
-function textContentLabel(_kind: TextChapter["contentKind"]) {
-  // if (kind === "imageVip") return "图片 OCR";
-  // if (kind === "encryptedVip") return "加密 OCR";
-  return "VIP";
 }
 
 const allChapters = computed<SelectableChapter[]>(() =>
@@ -302,14 +239,19 @@ const downloadModes = computed(() => {
   if (props.audioChapters.length) modes.push({ mode: "audio", label: "有声" });
   return modes;
 });
+const selectedIdSet = computed(() => new Set(props.selectedIds));
 const selectableIds = computed(() =>
   allChapters.value
     .filter(canDownload)
     .map((chapter) => ("chapId" in chapter ? chapter.chapId : chapter.id)),
 );
+const selectableIdSet = computed(() => new Set(selectableIds.value));
 const selectedCount = computed(
   () =>
-    props.selectedIds.filter((id) => selectableIds.value.includes(id)).length,
+    props.selectedIds.reduce(
+      (count, id) => count + (selectableIdSet.value.has(id) ? 1 : 0),
+      0,
+    ),
 );
 const allSelected = computed(
   () =>
@@ -317,87 +259,138 @@ const allSelected = computed(
     selectedCount.value === selectableIds.value.length,
 );
 
-/**
- * 获取卷内所有可下载章节 ID。
- * @param volume 要检查的章节卷。
- * @returns 该卷中可下载章节的 ID 数组。
- */
-function selectableVolumeIds(volume: ChapterVolume) {
-  return volume.chapters.filter(canDownload).map((chapter) => chapter.chapId);
+function pickerVolumeRow(
+  key: string,
+  title: string,
+  ids: number[],
+  selected: Set<number>,
+): PickerVolumeRow {
+  const selectedCount = ids.reduce(
+    (count, id) => count + (selected.has(id) ? 1 : 0),
+    0,
+  );
+  return {
+    kind: "volume",
+    key,
+    height: PICKER_VOLUME_HEIGHT,
+    title,
+    ids,
+    selectedCount,
+    allSelected: ids.length > 0 && selectedCount === ids.length,
+  };
 }
 
-/**
- * 统计卷内已选章节数量。
- * @param volume 要统计的章节卷。
- * @returns 当前已选章节数。
- */
-function selectedVolumeCount(volume: ChapterVolume) {
-  const ids = selectableVolumeIds(volume);
-  return props.selectedIds.filter((id) => ids.includes(id)).length;
+function pickerChapterRow(
+  key: string,
+  id: number,
+  title: string,
+  chapter: SelectableChapter,
+): PickerChapterRow {
+  const unlocked =
+    props.mode === "text"
+      ? chapter.accessState === "available"
+      : chapter.isUnlocked === true;
+  return {
+    kind: "chapter",
+    key,
+    height: PICKER_CHAPTER_HEIGHT,
+    id,
+    title,
+    downloaded: chapter.downloaded === true,
+    isVip: chapter.isVip === true,
+    unlocked,
+    lockLabel:
+      props.mode === "comic"
+        ? unlocked
+          ? "已解锁"
+          : "VIP 章节"
+        : props.mode === "text" && unlocked
+          ? "已解锁"
+          : "VIP",
+    canSelect: canDownload(chapter),
+  };
 }
 
-/**
- * 判断章节卷是否已全选。
- * @param volume 要判断的章节卷。
- * @returns 卷内存在可选章节且全部已选时返回 true。
- */
-function isVolumeSelected(volume: ChapterVolume) {
-  const ids = selectableVolumeIds(volume);
-  return ids.length > 0 && selectedVolumeCount(volume) === ids.length;
-}
+const pickerRows = computed<PickerRow[]>(() => {
+  const selected = selectedIdSet.value;
+  const rows: PickerRow[] = [];
+  if (props.mode === "text") {
+    props.volumes.forEach((volume) => {
+      const ids = volume.chapters
+        .filter(canDownload)
+        .map((chapter) => chapter.chapId);
+      rows.push(
+        pickerVolumeRow(
+          `text-volume-${volume.volumeId}`,
+          volume.title,
+          ids,
+          selected,
+        ),
+      );
+      for (const chapter of volume.chapters)
+        rows.push(
+          pickerChapterRow(
+            `text-chapter-${chapter.chapId}`,
+            chapter.chapId,
+            chapter.title,
+            chapter,
+          ),
+        );
+    });
+  } else if (props.mode === "audio") {
+    audioVolumes.value.forEach((volume, index) => {
+      const ids = volume.chapters
+        .filter(canDownload)
+        .map((chapter) => chapter.id);
+      rows.push(
+        pickerVolumeRow(`audio-volume-${index}`, volume.title, ids, selected),
+      );
+      for (const chapter of volume.chapters)
+        rows.push(
+          pickerChapterRow(
+            `audio-chapter-${chapter.id}`,
+            chapter.id,
+            chapter.title,
+            chapter,
+          ),
+        );
+    });
+  } else {
+    for (const chapter of props.comicChapters)
+      rows.push(
+        pickerChapterRow(
+          `comic-chapter-${chapter.id}`,
+          chapter.id,
+          chapter.title,
+          chapter,
+        ),
+      );
+  }
+  return rows;
+});
 
-/**
- * 获取有声卷中所有可下载章节 ID。
- * @param volume 要检查的有声卷。
- * @returns 该卷中可下载的有声章节 ID 数组。
- */
-function selectableAudioIds(volume: AudioVolume) {
-  return volume.chapters.filter(canDownload).map((chapter) => chapter.id);
-}
+const {
+  container: chapterList,
+  windowed: chapterWindow,
+  handleScroll: handleChapterScroll,
+  reset: resetChapterList,
+} = useVirtualRows(() => pickerRows.value);
 
-/**
- * 统计有声卷内已选章节数量。
- * @param volume 要统计的有声卷。
- * @returns 当前已选的有声章节数量。
- */
-function selectedAudioVolumeCount(volume: AudioVolume) {
-  const ids = selectableAudioIds(volume);
-  return props.selectedIds.filter((id) => ids.includes(id)).length;
-}
+watch(
+  () => [props.open, props.mode, props.loading],
+  async () => {
+    if (!props.open || props.loading) return;
+    await nextTick();
+    if (chapterList.value) resetChapterList();
+  },
+  { flush: "post" },
+);
 
-/**
- * 判断有声卷是否已全选。
- * @param volume 要判断的有声卷。
- * @returns 有声卷中存在可选章节且全部已选时返回 true。
- */
-function isAudioVolumeSelected(volume: AudioVolume) {
-  const ids = selectableAudioIds(volume);
-  return ids.length > 0 && selectedAudioVolumeCount(volume) === ids.length;
-}
-
-/**
- * 切换整卷有声章节的选择状态。
- * @param volume 要切换的有声卷。
- * @returns 无返回值；通过事件通知父组件更新选中 ID。
- */
-function toggleAudioVolume(volume: AudioVolume) {
-  const ids = selectableAudioIds(volume);
-  const nextIds = isAudioVolumeSelected(volume)
-    ? props.selectedIds.filter((id) => !ids.includes(id))
-    : [...new Set([...props.selectedIds, ...ids])];
-  emit("update:selectedIds", nextIds);
-}
-
-/**
- * 切换整卷章节的选择状态。
- * @param volume 要切换的章节卷。
- * @returns 无返回值；通过事件通知父组件更新选中 ID。
- */
-function toggleVolume(volume: ChapterVolume) {
-  const ids = selectableVolumeIds(volume);
-  const nextIds = isVolumeSelected(volume)
-    ? props.selectedIds.filter((id) => !ids.includes(id))
-    : [...new Set([...props.selectedIds, ...ids])];
+function togglePickerVolume(row: PickerVolumeRow) {
+  const ids = new Set(row.ids);
+  const nextIds = row.allSelected
+    ? props.selectedIds.filter((id) => !ids.has(id))
+    : [...new Set([...props.selectedIds, ...row.ids])];
   emit("update:selectedIds", nextIds);
 }
 
@@ -590,11 +583,8 @@ function toggleChapter(id: number, checked: boolean) {
 }
 
 .chapter-list {
-  display: flex;
   flex: 1;
-  flex-direction: column;
   height: auto;
-  /* height: 50vh; */
   max-height: 260px;
   min-height: 100px;
   padding-right: 5px;
@@ -603,19 +593,21 @@ function toggleChapter(id: number, checked: boolean) {
   scrollbar-color: #edb18d transparent;
 }
 
-.chapter-volume {
-  padding: 13px 0;
-  border-bottom: 1px solid #efd8ce;
-}
-.volume-heading {
+.picker-volume-row {
   display: flex;
+  height: 44px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  border-bottom: 1px solid #efd8ce;
 }
-.volume-heading > strong {
+.picker-volume-row > strong {
+  min-width: 0;
+  overflow: hidden;
   color: #80594f;
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .volume-select-all {
   flex: 0 0 auto;
@@ -635,23 +627,26 @@ function toggleChapter(id: number, checked: boolean) {
   cursor: not-allowed;
   opacity: 0.5;
 }
-.chapter-list label {
+.picker-chapter-row {
   display: flex;
+  height: 38px;
   align-items: center;
   gap: 8px;
-  margin: 9px 0;
+  margin: 0;
   font-size: 13px;
 }
-.chapter-list label.downloaded,
-.chapter-list label.locked {
+.picker-chapter-row.downloaded {
   color: #b5968b;
 }
-.chapter-list label:has(input:disabled) {
+.picker-chapter-row:has(input:disabled) {
   cursor: not-allowed;
 }
 .chapter-title {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chapter-state {
   display: inline-flex;

@@ -15,6 +15,7 @@ import {
   ZoomOut,
 } from "@lucide/vue";
 import { useRouter } from "vue-router";
+import { useVirtualRows } from "../composables/useVirtualRows";
 import { deskInjectionKey } from "../deskContext";
 
 function requireDesk() {
@@ -58,6 +59,21 @@ const chapters = computed<ComicChapterEntry[]>(() => {
     cover: chapter.cover,
   }));
 });
+const directoryRows = computed(() => [
+  { kind: "header" as const, key: "header", height: 44 },
+  ...chapters.value.map((item, index) => ({
+    kind: "chapter" as const,
+    key: `chapter-${item.id}`,
+    index,
+    item,
+    height: 68,
+  })),
+]);
+const {
+  container: directoryList,
+  windowed: directoryWindow,
+  handleScroll: handleDirectoryScroll,
+} = useVirtualRows(() => directoryRows.value);
 const chapterIndex = computed(() =>
   chapters.value.findIndex((item) => item.id === comicChapter.value?.id),
 );
@@ -65,7 +81,6 @@ const previousChapter = computed(() => chapters.value[chapterIndex.value - 1]);
 const nextChapter = computed(() => chapters.value[chapterIndex.value + 1]);
 const controlsVisible = ref(true);
 const directoryOpen = ref(false);
-const directoryList = ref<HTMLElement>();
 const displayMode = ref<DisplayMode>("vertical");
 const pageIndex = ref(0);
 const chapterLoading = ref(false);
@@ -379,14 +394,15 @@ async function revealCurrentChapter() {
   if (!directoryOpen.value || desk.directoryLoading.value) return;
   await nextTick();
   const list = directoryList.value;
-  const active = list?.querySelector<HTMLElement>(".directory-item.active");
-  if (!list || !active) return;
-  const listRect = list.getBoundingClientRect();
-  const activeRect = active.getBoundingClientRect();
-  list.scrollTop +=
-    activeRect.top +
-    activeRect.height / 2 -
-    (listRect.top + list.clientHeight / 2);
+  if (!list) return;
+  if (chapterIndex.value >= 0)
+    list.scrollTop = Math.max(
+      0,
+      44 +
+        chapterIndex.value * 68 -
+        (list.clientHeight - 68) / 2,
+    );
+  handleDirectoryScroll();
 }
 
 onMounted(async () => {
@@ -739,34 +755,44 @@ watch(
           v-else-if="chapters.length"
           ref="directoryList"
           class="directory-list"
+          @scroll.passive="handleDirectoryScroll"
         >
-          <section class="directory-volume">
-            <h3>全部章节</h3>
+          <div
+            :style="{ height: `${directoryWindow.top}px` }"
+            aria-hidden="true"
+          ></div>
+          <template v-for="row in directoryWindow.rows" :key="row.key">
+            <h3 v-if="row.kind === 'header'" class="directory-section-title">
+              全部章节
+            </h3>
             <button
-              v-for="item in chapters"
-              :key="item.id"
+              v-else
               class="directory-item directory-chapter"
-              :class="{ active: item.id === comicChapter?.id }"
-              @click="openChapter(item.id)"
+              :class="{ active: row.item.id === comicChapter?.id }"
+              @click="openChapter(row.item.id)"
             >
               <img
-                v-if="item.cover"
+                v-if="row.item.cover"
                 class="directory-cover"
-                :src="item.cover"
-                :alt="`${item.title} 首图`"
+                :src="row.item.cover"
+                :alt="`${row.item.title} 首图`"
               />
-              <strong>{{ item.title }}</strong>
+              <strong>{{ row.item.title }}</strong>
               <span class="directory-row-meta">
-                <small v-if="item.isVip" class="vip-badge">VIP</small>
+                <small v-if="row.item.isVip" class="vip-badge">VIP</small>
                 <MapPin
-                  v-if="item.id === comicChapter?.id"
+                  v-if="row.item.id === comicChapter?.id"
                   class="directory-current-icon"
                   :size="16"
                   aria-hidden="true"
                 />
               </span>
             </button>
-          </section>
+          </template>
+          <div
+            :style="{ height: `${directoryWindow.bottom}px` }"
+            aria-hidden="true"
+          ></div>
         </div>
         <div v-else class="directory-state">暂无目录内容</div>
       </section>
@@ -1087,6 +1113,7 @@ watch(
 .directory-item {
   display: flex;
   width: 100%;
+  height: 68px;
   min-height: 68px;
   align-items: center;
   gap: 12px;
@@ -1140,12 +1167,12 @@ watch(
   flex: 0 0 auto;
   color: #d87a56;
 }
-.directory-volume {
-  padding: 8px 0 10px;
-}
-.directory-volume h3 {
+.directory-section-title {
+  display: flex;
+  height: 44px;
+  align-items: center;
   margin: 0;
-  padding: 14px 20px 8px;
+  padding: 0 20px;
   color: #887f70;
   font-size: 12px;
   font-weight: 600;

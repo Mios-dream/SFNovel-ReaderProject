@@ -114,6 +114,8 @@ pub(crate) struct ChapterSummary {
     pub(crate) title: String,
     /// 章节是否为 VIP 内容。
     pub(crate) is_vip: bool,
+    /// 当前会话购买该章节仍需支付的火券数量。
+    pub(crate) need_fire_money: i64,
     /// 目录标记的正文形态。
     pub(crate) content_kind: TextContentKind,
     /// 当前会话可确认的访问状态。

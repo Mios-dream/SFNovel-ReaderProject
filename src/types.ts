@@ -70,6 +70,7 @@ export type ChapterVolume = {
     chapId: number;
     title: string;
     isVip: boolean;
+    needFireMoney: number;
     /** Web-visible text shape; this is not an entitlement result. */
     contentKind: "text" | "imageVip" | "encryptedVip" | "unknown";
     /** Only chapter-resource requests can change this from unknown. */

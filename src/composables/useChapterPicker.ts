@@ -118,39 +118,43 @@ export function useChapterPicker({
     }
   }
 
-  function allChapterIds(): number[] {
-    return chapterMode.value === "text"
-      ? chapterVolumes.value.flatMap((volume) =>
-          volume.chapters.map((chapter) => chapter.chapId),
+  function downloadableChapterIds(mode = chapterMode.value): number[] {
+    if (mode === "text")
+      return chapterVolumes.value.flatMap((volume) =>
+        volume.chapters
+          .filter(
+            (chapter) =>
+              !chapter.downloaded && chapter.accessState === "available",
+          )
+          .map((chapter) => chapter.chapId),
+      );
+    if (mode === "audio")
+      return audioChapters.value
+        .filter(
+          (chapter) =>
+            !chapter.downloaded &&
+            (!chapter.isVip || chapter.isUnlocked === true),
         )
-      : chapterMode.value === "audio"
-        ? audioChapters.value.map((chapter) => chapter.id)
-        : comicChapters.value.map((chapter) => chapter.id);
-  }
-
-  function isDownloadable(id: number, mode = chapterMode.value) {
-    const chapter = mode === "text"
-      ? chapterVolumes.value
-          .flatMap((volume) => volume.chapters)
-          .find((item) => item.chapId === id)
-      : mode === "audio"
-        ? audioChapters.value.find((item) => item.id === id)
-        : comicChapters.value.find((item) => item.id === id);
-    if (!chapter || chapter.downloaded) return false;
-    // Text and comic directory sales markers do not prove account entitlement.
-    // The native downloader validates access only when it requests the resource.
-    return mode === "text" || (mode === "comic" && "isUnlocked" in chapter && chapter.isUnlocked !== false) || !chapter.isVip ||
-      ("isUnlocked" in chapter && chapter.isUnlocked === true);
+        .map((chapter) => chapter.id);
+    return comicChapters.value
+      .filter(
+        (chapter) =>
+          !chapter.downloaded && chapter.isUnlocked !== false,
+      )
+      .map((chapter) => chapter.id);
   }
 
   function selectDownloadableChapters() {
-    selectedChapterIds.value = allChapterIds().filter((id) => isDownloadable(id));
+    selectedChapterIds.value = downloadableChapterIds();
   }
 
   function toggleAllChapters() {
-    const selectable = allChapterIds().filter((id) => isDownloadable(id));
+    const selectable = downloadableChapterIds();
+    const selected = new Set(selectedChapterIds.value);
     selectedChapterIds.value =
-      selectedChapterIds.value.length === selectable.length ? [] : selectable;
+      selectable.length > 0 && selectable.every((id) => selected.has(id))
+        ? []
+        : selectable;
   }
 
   function switchChapterMode(mode: ChapterMode) {
@@ -158,7 +162,7 @@ export function useChapterPicker({
     if (mode === "audio" && !audioChapters.value.length) return;
     if (mode === "comic" && !comicChapters.value.length) return;
     chapterMode.value = mode;
-    selectedChapterIds.value = allChapterIds().filter((id) => isDownloadable(id));
+    selectedChapterIds.value = downloadableChapterIds(mode);
   }
 
   async function confirmChapterDownload() {

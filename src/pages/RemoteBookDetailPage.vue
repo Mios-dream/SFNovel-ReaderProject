@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { computed, inject, nextTick, ref, watch } from "vue";
+import {
+  computed,
+  inject,
+  nextTick,
+  ref,
+  watch,
+  type ComponentPublicInstance,
+} from "vue";
 import {
   BookOpen,
   Bookmark,
@@ -21,8 +28,9 @@ import {
   X,
 } from "@lucide/vue";
 import { deskInjectionKey } from "../deskContext";
+import { useVirtualRows } from "../composables/useVirtualRows";
 import { reportError } from "../composables/useToast";
-import type { Chapter, ChapterMode, ChapterVolume } from "../types";
+import type { Chapter, ChapterMode } from "../types";
 
 function requireDesk() {
   const value = inject(deskInjectionKey);
@@ -77,6 +85,150 @@ const currentMediaLabel = computed(() =>
       ? "漫画"
       : "小说",
 );
+type RemoteDirectoryChapter = {
+  id: number;
+  title: string;
+  isVip?: boolean;
+  isUnlocked?: boolean | "unknown";
+};
+type RemoteDesktopRow =
+  | { kind: "gap"; key: string; height: number }
+  | { kind: "volume"; key: string; title: string; height: number }
+  | {
+      kind: "chapters";
+      key: string;
+      chapters: RemoteDirectoryChapter[];
+      height: number;
+    };
+type RemoteDrawerRow =
+  | { kind: "gap"; key: string; height: number }
+  | { kind: "volume"; key: string; title: string; height: number }
+  | {
+      kind: "chapter";
+      key: string;
+      id: number;
+      title: string;
+      isVip?: boolean;
+      isUnlocked?: boolean | "unknown";
+      index?: number;
+      height: number;
+    };
+const desktopDirectoryRows = computed<RemoteDesktopRow[]>(() => {
+  const volumes =
+    mode.value === "text"
+      ? textVolumes.value.map((volume) => ({
+          title: volume.title,
+          chapters: volume.chapters.map((chapter) => ({
+            id: chapter.chapId,
+            title: chapter.title,
+            isVip: chapter.isVip,
+            isUnlocked: chapter.accessState === "available",
+          })),
+        }))
+      : (mode.value === "audio" ? audioVolumes.value : comicVolumes.value).map(
+          (volume) => ({
+            title: volume.title,
+            chapters: volume.chapters.map((chapter) => ({
+              id: chapter.id,
+              title: chapter.title,
+              isVip: chapter.isVip,
+              isUnlocked: chapter.isUnlocked,
+            })),
+          }),
+        );
+  const rows: RemoteDesktopRow[] = [];
+  volumes.forEach((volume, volumeIndex) => {
+    if (volumeIndex > 0)
+      rows.push({
+        kind: "gap",
+        key: `desktop-gap-${volumeIndex}`,
+        height: 12,
+      });
+    rows.push({
+      kind: "volume",
+      key: `desktop-volume-${volumeIndex}`,
+      title: volume.title,
+      height: 40,
+    });
+    for (let index = 0; index < volume.chapters.length; index += 3)
+      rows.push({
+        kind: "chapters",
+        key: `desktop-chapters-${volumeIndex}-${index}`,
+        chapters: volume.chapters.slice(index, index + 3),
+        height: 41,
+      });
+  });
+  return rows;
+});
+const drawerDirectoryRows = computed<RemoteDrawerRow[]>(() => {
+  const rows: RemoteDrawerRow[] = [];
+  if (mode.value === "text") {
+    textVolumes.value.forEach((volume, volumeIndex) => {
+      if (volumeIndex > 0)
+        rows.push({
+          kind: "gap",
+          key: `drawer-gap-${volumeIndex}`,
+          height: 9,
+        });
+      rows.push({
+        kind: "volume",
+        key: `drawer-volume-${volumeIndex}`,
+        title: volume.title,
+        height: 42,
+      });
+      for (const chapter of volume.chapters)
+        rows.push({
+          kind: "chapter",
+          key: `drawer-text-${volumeIndex}-${chapter.chapId}`,
+          id: chapter.chapId,
+          title: chapter.title,
+          isVip: chapter.isVip,
+          isUnlocked: chapter.accessState === "available",
+          height: 48,
+        });
+    });
+  } else {
+    const chapters =
+      mode.value === "audio" ? audioChapters.value : comicChapters.value;
+    chapters.forEach((chapter, index) =>
+      rows.push({
+        kind: "chapter",
+        key: `drawer-${mode.value}-${chapter.id}`,
+        id: chapter.id,
+        title: chapter.title,
+        isVip: chapter.isVip,
+        isUnlocked: chapter.isUnlocked,
+        index: mode.value === "audio" ? index : undefined,
+        height: 48,
+      }),
+    );
+  }
+  return rows;
+});
+const {
+  container: desktopDirectoryList,
+  windowed: desktopDirectoryWindow,
+  handleScroll: handleDesktopDirectoryScroll,
+  reset: resetDesktopDirectory,
+} = useVirtualRows(() => desktopDirectoryRows.value);
+const {
+  container: drawerDirectoryList,
+  windowed: drawerDirectoryWindow,
+  handleScroll: handleDrawerDirectoryScroll,
+  reset: resetDrawerDirectory,
+} = useVirtualRows(() => drawerDirectoryRows.value);
+function setDesktopDirectoryElement(
+  element: Element | ComponentPublicInstance | null,
+) {
+  desktopDirectoryList.value =
+    element instanceof HTMLElement ? element : undefined;
+}
+function setDrawerDirectoryElement(
+  element: Element | ComponentPublicInstance | null,
+) {
+  drawerDirectoryList.value =
+    element instanceof HTMLElement ? element : undefined;
+}
 const isFavorite = computed(() => desk.isRemoteFavorite(novel.value));
 const favoriteBusy = computed(() => desk.isRemoteFavoriteLoading(novel.value));
 const remoteStatusLabel = computed(() =>
@@ -153,6 +305,7 @@ async function ensureDirectory(force = false) {
 
 async function showDirectory() {
   const isMobile = window.matchMedia("(max-width: 900px)").matches;
+  resetDrawerDirectory();
   directoryOpen.value = isMobile;
   if (isMobile) return;
   await nextTick();
@@ -188,6 +341,8 @@ watch(
     descriptionExpanded.value = false;
     descriptionModalOpen.value = false;
     directoryOpen.value = false;
+    resetDesktopDirectory();
+    resetDrawerDirectory();
     void ensureDirectory();
   },
   { immediate: true },
@@ -232,14 +387,6 @@ function groupChaptersByVolume(chapters: Chapter[]) {
     title,
     chapters: groupedChapters,
   }));
-}
-
-function textChapterBadge(
-  _kind: ChapterVolume["chapters"][number]["contentKind"],
-) {
-  // if (kind === "imageVip") return "图片 OCR";
-  // if (kind === "encryptedVip") return "加密 OCR";
-  return "VIP";
 }
 </script>
 
@@ -560,61 +707,52 @@ function textChapterBadge(
             <button @click="ensureDirectory(true)">重试</button>
           </div>
         </div>
-        <div v-else-if="currentDirectoryCount" class="remote-directory-list">
-          <template v-if="mode === 'text'">
-            <section
-              v-for="volume in textVolumes"
-              :key="volume.volumeId"
-              class="remote-volume"
-            >
-              <h4>{{ volume.title }}</h4>
-              <div class="remote-volume-chapters">
-                <button
-                  v-for="chapter in volume.chapters"
-                  :key="chapter.chapId"
-                  class="remote-chapter-row"
-                  @click="startOnline(chapter.chapId)"
+        <div
+          v-else-if="currentDirectoryCount"
+          :ref="setDesktopDirectoryElement"
+          class="remote-directory-list"
+          @scroll.passive="handleDesktopDirectoryScroll"
+        >
+          <div
+            :style="{ height: `${desktopDirectoryWindow.top}px` }"
+            aria-hidden="true"
+          ></div>
+          <template v-for="row in desktopDirectoryWindow.rows" :key="row.key">
+            <div
+              v-if="row.kind === 'gap'"
+              :style="{ height: `${row.height}px` }"
+              aria-hidden="true"
+            ></div>
+            <h4 v-else-if="row.kind === 'volume'" class="remote-volume-heading">
+              {{ row.title }}
+            </h4>
+            <div v-else class="remote-volume-chapters">
+              <button
+                v-for="chapter in row.chapters"
+                :key="chapter.id"
+                class="remote-chapter-row"
+                @click="startOnline(chapter.id)"
+              >
+                <strong>{{ chapter.title }}</strong>
+                <span
+                  v-if="chapter.isVip"
+                  class="chapter-badge vip"
+                  :class="{ unlocked: chapter.isUnlocked === true }"
+                  :title="chapter.isUnlocked === true ? '已解锁' : 'VIP 章节'"
+                  ><LockKeyholeOpen
+                    v-if="chapter.isUnlocked === true"
+                    :size="12"
+                    aria-label="已解锁"
+                  />VIP</span
                 >
-                  <strong>{{ chapter.title }}</strong>
-                  <span v-if="chapter.isVip" class="chapter-badge vip">{{
-                    textChapterBadge(chapter.contentKind)
-                  }}</span>
-                  <Play :size="13" />
-                </button>
-              </div>
-            </section>
+                <Play :size="13" />
+              </button>
+            </div>
           </template>
-          <template v-else>
-            <section
-              v-for="volume in mode === 'audio' ? audioVolumes : comicVolumes"
-              :key="volume.title"
-              class="remote-volume"
-            >
-              <h4>{{ volume.title }}</h4>
-              <div class="remote-volume-chapters">
-                <button
-                  v-for="chapter in volume.chapters"
-                  :key="chapter.id"
-                  class="remote-chapter-row"
-                  @click="startOnline(chapter.id)"
-                >
-                  <strong>{{ chapter.title }}</strong>
-                  <span
-                    v-if="chapter.isVip"
-                    class="chapter-badge vip"
-                    :class="{ unlocked: chapter.isUnlocked === true }"
-                    :title="chapter.isUnlocked === true ? '已解锁' : 'VIP 章节'"
-                    ><LockKeyholeOpen
-                      v-if="chapter.isUnlocked === true"
-                      :size="12"
-                      aria-label="已解锁"
-                    />VIP</span
-                  >
-                  <Play :size="13" />
-                </button>
-              </div>
-            </section>
-          </template>
+          <div
+            :style="{ height: `${desktopDirectoryWindow.bottom}px` }"
+            aria-hidden="true"
+          ></div>
         </div>
         <div v-else class="remote-directory-empty">
           <ListTree :size="22" /><span>暂无目录内容</span>
@@ -679,55 +817,52 @@ function textChapterBadge(
           </div>
         </div>
         <div
-          v-else-if="currentDirectoryCount && mode === 'text'"
+          v-else-if="currentDirectoryCount"
+          :ref="setDrawerDirectoryElement"
           class="drawer-list"
+          @scroll.passive="handleDrawerDirectoryScroll"
         >
-          <section
-            v-for="volume in textVolumes"
-            :key="volume.volumeId"
-            class="chapter-volume"
-          >
-            <h4>{{ volume.title }}</h4>
+          <div
+            :style="{ height: `${drawerDirectoryWindow.top}px` }"
+            aria-hidden="true"
+          ></div>
+          <template v-for="row in drawerDirectoryWindow.rows" :key="row.key">
+            <div
+              v-if="row.kind === 'gap'"
+              class="remote-volume-gap"
+              :style="{ height: `${row.height}px` }"
+              aria-hidden="true"
+            ></div>
+            <h4 v-else-if="row.kind === 'volume'">{{ row.title }}</h4>
             <button
-              v-for="chapter in volume.chapters"
-              :key="chapter.chapId"
+              v-else
               class="remote-drawer-row"
-              @click="startOnline(chapter.chapId)"
+              @click="startOnline(row.id)"
             >
-              <strong>{{ chapter.title }}</strong>
-              <span v-if="chapter.isVip" class="chapter-badge vip">{{
-                textChapterBadge(chapter.contentKind)
-              }}</span>
+              <span
+                v-if="row.index !== undefined"
+                class="remote-drawer-index"
+                >{{ String(row.index + 1).padStart(3, "0") }}</span
+              >
+              <strong>{{ row.title }}</strong>
+              <span
+                v-if="row.isVip"
+                class="chapter-badge vip"
+                :class="{ unlocked: row.isUnlocked === true }"
+                :title="row.isUnlocked === true ? '已解锁' : 'VIP 章节'"
+                ><LockKeyholeOpen
+                  v-if="row.isUnlocked === true"
+                  :size="12"
+                  aria-label="已解锁"
+                />VIP</span
+              >
               <Play :size="16" />
             </button>
-          </section>
-        </div>
-        <div v-else-if="currentDirectoryCount" class="drawer-list">
-          <button
-            v-for="(chapter, index) in mode === 'audio'
-              ? audioChapters
-              : comicChapters"
-            :key="chapter.id"
-            class="remote-drawer-row"
-            @click="startOnline(chapter.id)"
-          >
-            <span v-if="mode === 'audio'" class="remote-drawer-index">{{
-              String(index + 1).padStart(3, "0")
-            }}</span>
-            <strong>{{ chapter.title }}</strong>
-            <span
-              v-if="chapter.isVip"
-              class="chapter-badge vip"
-              :class="{ unlocked: chapter.isUnlocked === true }"
-              :title="chapter.isUnlocked === true ? '已解锁' : 'VIP 章节'"
-              ><LockKeyholeOpen
-                v-if="chapter.isUnlocked === true"
-                :size="12"
-                aria-label="已解锁"
-              />VIP</span
-            >
-            <Play :size="16" />
-          </button>
+          </template>
+          <div
+            :style="{ height: `${drawerDirectoryWindow.bottom}px` }"
+            aria-hidden="true"
+          ></div>
         </div>
         <div v-else class="drawer-empty">
           <ListTree :size="27" />暂无目录内容
@@ -735,8 +870,15 @@ function textChapterBadge(
       </section>
     </div>
   </section>
-  <main v-else class="detail-loading">
-    {{ desk.remoteBookLoading.value ? "正在读取作品详情" : "未找到远程作品" }}
+  <main v-else class="detail-page detail-state">
+    <header class="detail-navigation">
+      <button class="nav-circle" title="返回上一页" @click="goBack">
+        <ChevronLeft :size="22" /><span class="desktop-nav-label">返回</span>
+      </button>
+    </header>
+    <div class="detail-loading">
+      {{ desk.remoteBookLoading.value ? "正在读取作品详情" : "未找到远程作品" }}
+    </div>
   </main>
 </template>
 
@@ -794,11 +936,15 @@ function textChapterBadge(
 .section-title h3 {
   font-family: KaTongFont, "Microsoft YaHei", sans-serif;
 }
+.detail-state {
+  display: flex;
+  flex-direction: column;
+}
 .detail-loading {
   display: grid;
-  min-height: 100dvh;
+  min-height: 0;
+  flex: 1;
   color: #a27a6f;
-  background: var(--background-color);
   place-items: center;
 }
 .desktop-content-tabs {
@@ -907,30 +1053,34 @@ function textChapterBadge(
   font-size: 10px;
 }
 .remote-directory-list {
-  display: flex;
   max-height: 500px;
-  flex-direction: column;
   overflow-y: auto;
   padding: 0 20px 16px;
 }
-.remote-volume {
-  width: 100%;
-  padding: 16px 0 9px;
-  border-bottom: 1px solid #eee5d9;
-}
-.remote-volume h4 {
-  margin: 0 0 10px;
+.remote-volume-heading {
+  display: block;
+  height: 40px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
   color: #9b7b6c;
+  border-bottom: 1px solid #eee5d9;
   font-size: 12px;
   font-weight: 600;
+  line-height: 40px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .remote-volume-chapters {
   display: grid;
+  height: 41px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px 12px;
+  align-content: start;
 }
 .remote-chapter-row {
   display: flex;
+  height: 34px;
   min-width: 0;
   min-height: 34px;
   align-items: center;
@@ -1021,6 +1171,7 @@ function textChapterBadge(
 .remote-drawer-row {
   display: flex;
   width: 100%;
+  height: 48px;
   min-height: 48px;
   align-items: center;
   gap: 8px;
@@ -2055,14 +2206,20 @@ function textChapterBadge(
   padding-bottom: env(safe-area-inset-bottom);
   background: #fffdf8;
 }
-.chapter-volume + .chapter-volume {
-  border-top: 9px solid #f7f3ea;
+.remote-volume-gap {
+  background: #f7f3ea;
 }
-.chapter-volume h4 {
+.drawer-list h4 {
+  display: block;
+  height: 42px;
   margin: 0;
-  padding: 12px 20px 9px;
+  padding: 0 20px;
+  overflow: hidden;
   color: #887f70;
   font-size: 12px;
+  line-height: 42px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .drawer-empty {
   display: flex;

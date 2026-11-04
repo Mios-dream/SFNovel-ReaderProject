@@ -171,7 +171,7 @@ async fn load_text(
             }
         }
     };
-    let images = if content.contains("[img=]") {
+    let images = if content.contains("[img=") {
         let (next, images) = cache_text_images(
             &source,
             &image_directory,
@@ -378,7 +378,7 @@ async fn cache_remote_image(
 /// - `novel_id`：小说编号，用于日志。
 /// - `chapter_id`：章节编号，用于文件名和日志。
 /// - `referer`：请求图片所需的 Referer。
-/// - `content`：包含 `[img=]...[/img]` 标记的正文。
+/// - `content`：包含 `[img=...]...[/img]` 标记的正文。
 ///
 /// # 返回
 /// 替换后的正文和成功缓存的图片路径。
@@ -397,9 +397,12 @@ async fn cache_text_images(
     let mut output = String::with_capacity(content.len());
     let mut images = Vec::new();
     let mut cursor = 0;
-    while let Some(marker_offset) = content[cursor..].find("[img=]") {
+    while let Some(marker_offset) = content[cursor..].find("[img=") {
         let marker_start = cursor + marker_offset;
-        let url_start = marker_start + "[img=]".len();
+        let Some(metadata_end_offset) = content[marker_start..].find(']') else {
+            break;
+        };
+        let url_start = marker_start + metadata_end_offset + 1;
         let Some(url_end_offset) = content[url_start..].find("[/img]") else {
             break;
         };

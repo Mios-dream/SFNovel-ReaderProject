@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  inject,
+  onMounted,
+  ref,
+  watch,
+  type ComponentPublicInstance,
+} from "vue";
 import type { LocalWorkMetadata } from "../types";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -21,6 +28,7 @@ import {
   X,
 } from "@lucide/vue";
 import ExportModal from "../components/ExportModal.vue";
+import { useVirtualRows } from "../composables/useVirtualRows";
 import { deskInjectionKey } from "../deskContext";
 
 function requireDesk() {
@@ -85,6 +93,153 @@ const desktopDirectoryCount = computed(() =>
       ? audioChapterCount.value
       : comicChapterCount.value,
 );
+type LocalDirectoryRow =
+  | { kind: "gap"; key: string; height: number }
+  | { kind: "volume"; key: string; title: string; height: number }
+  | { kind: "text"; key: string; id: number; title: string; height: number }
+  | {
+      kind: "audio";
+      key: string;
+      index: number;
+      title: string;
+      height: number;
+    }
+  | {
+      kind: "comic";
+      key: string;
+      id: number;
+      title: string;
+      cover?: string;
+      height: number;
+    };
+const desktopDirectoryRows = computed<LocalDirectoryRow[]>(() => {
+  const localBook = book.value;
+  if (!localBook) return [];
+  const rows: LocalDirectoryRow[] = [];
+  if (desktopContentTab.value === "novel") {
+    localBook.chapterVolumes.forEach((volume, volumeIndex) => {
+      if (volumeIndex > 0)
+        rows.push({
+          kind: "gap",
+          key: `desktop-gap-${volumeIndex}`,
+          height: 8,
+        });
+      rows.push({
+        kind: "volume",
+        key: `desktop-volume-${volumeIndex}`,
+        title: volume.volume,
+        height: 40,
+      });
+      for (const chapter of volume.chapters)
+        rows.push({
+          kind: "text",
+          key: `desktop-text-${volumeIndex}-${chapter.id}`,
+          id: chapter.id,
+          title: chapter.title,
+          height: 40,
+        });
+    });
+  } else if (desktopContentTab.value === "audio") {
+    localBook.audioTracks.forEach((track, index) =>
+      rows.push({
+        kind: "audio",
+        key: `desktop-audio-${track.href}`,
+        index,
+        title: track.title,
+        height: 40,
+      }),
+    );
+  } else {
+    localBook.comicChapters.forEach((chapter) =>
+      rows.push({
+        kind: "comic",
+        key: `desktop-comic-${chapter.id}`,
+        id: chapter.id,
+        title: chapter.title,
+        cover: chapter.cover,
+        height: 62,
+      }),
+    );
+  }
+  return rows;
+});
+const mobileDirectoryRows = computed<LocalDirectoryRow[]>(() => {
+  const localBook = book.value;
+  if (!localBook) return [];
+  const rows: LocalDirectoryRow[] = [];
+  if (chapterMode.value === "text") {
+    localBook.chapterVolumes.forEach((volume, volumeIndex) => {
+      if (volumeIndex > 0)
+        rows.push({
+          kind: "gap",
+          key: `mobile-gap-${volumeIndex}`,
+          height: 9,
+        });
+      rows.push({
+        kind: "volume",
+        key: `mobile-volume-${volumeIndex}`,
+        title: volume.volume,
+        height: 42,
+      });
+      for (const chapter of volume.chapters)
+        rows.push({
+          kind: "text",
+          key: `mobile-text-${volumeIndex}-${chapter.id}`,
+          id: chapter.id,
+          title: chapter.title,
+          height: 48,
+        });
+    });
+  } else if (chapterMode.value === "audio") {
+    localBook.audioTracks.forEach((track, index) =>
+      rows.push({
+        kind: "audio",
+        key: `mobile-audio-${track.href}`,
+        index,
+        title: track.title,
+        height: 48,
+      }),
+    );
+  } else {
+    localBook.comicChapters.forEach((chapter) =>
+      rows.push({
+        kind: "comic",
+        key: `mobile-comic-${chapter.id}`,
+        id: chapter.id,
+        title: chapter.title,
+        cover: chapter.cover,
+        height: 66,
+      }),
+    );
+  }
+  return rows;
+});
+const {
+  container: desktopDirectoryList,
+  windowed: desktopDirectoryWindow,
+  handleScroll: handleDesktopDirectoryScroll,
+  reset: resetDesktopDirectory,
+} = useVirtualRows(() => desktopDirectoryRows.value);
+const {
+  container: mobileDirectoryList,
+  windowed: mobileDirectoryWindow,
+  handleScroll: handleMobileDirectoryScroll,
+  reset: resetMobileDirectory,
+} = useVirtualRows(() => mobileDirectoryRows.value);
+watch([desktopContentTab, chapterMode], () => {
+  resetDesktopDirectory();
+  resetMobileDirectory();
+});
+function setDesktopDirectoryElement(
+  element: Element | ComponentPublicInstance | null,
+) {
+  desktopDirectoryList.value = element instanceof HTMLElement ? element : undefined;
+}
+function setMobileDirectoryElement(
+  element: Element | ComponentPublicInstance | null,
+) {
+  mobileDirectoryList.value = element instanceof HTMLElement ? element : undefined;
+}
 const mobileSwitchMediaTypes = computed(() =>
   mediaTypes.filter((media) => media !== selectedMediaType.value),
 );
@@ -598,53 +753,51 @@ watch(
           <span>{{ desktopDirectoryCount }} 项</span>
         </header>
         <div
-          v-if="desktopContentTab === 'novel' && textChapterCount"
+          v-if="desktopDirectoryRows.length"
+          :ref="setDesktopDirectoryElement"
           class="desktop-directory-list"
+          :class="{
+            'audio-directory-list': desktopContentTab === 'audio',
+            'comic-directory-list': desktopContentTab === 'comic',
+          }"
+          @scroll.passive="handleDesktopDirectoryScroll"
         >
-          <section v-for="volume in book.chapterVolumes" :key="volume.volume">
-            <h4>{{ volume.volume }}</h4>
-            <button
-              v-for="chapter in volume.chapters"
-              :key="chapter.id"
-              @click="readChapter(chapter.id)"
-            >
-              <span>{{ chapter.title }}</span
+          <div
+            :style="{ height: `${desktopDirectoryWindow.top}px` }"
+            aria-hidden="true"
+          ></div>
+          <template v-for="row in desktopDirectoryWindow.rows" :key="row.key">
+            <div
+              v-if="row.kind === 'gap'"
+              class="directory-volume-gap"
+              :style="{ height: `${row.height}px` }"
+              aria-hidden="true"
+            ></div>
+            <h4 v-else-if="row.kind === 'volume'">{{ row.title }}</h4>
+            <button v-else-if="row.kind === 'text'" @click="readChapter(row.id)">
+              <span>{{ row.title }}</span
               ><ChevronRight :size="15" />
             </button>
-          </section>
-        </div>
-        <div
-          v-else-if="desktopContentTab === 'audio' && audioChapterCount"
-          class="desktop-directory-list audio-directory-list"
-        >
-          <button
-            v-for="(track, index) in book.audioTracks"
-            :key="track.href"
-            @click="playAudio(index)"
-          >
-            <small>{{ String(index + 1).padStart(3, "0") }}</small
-            ><span>{{ track.title }}</span
-            ><Play :size="14" fill="currentColor" />
-          </button>
-        </div>
-        <div
-          v-else-if="desktopContentTab === 'comic' && comicChapterCount"
-          class="desktop-directory-list comic-directory-list"
-        >
-          <button
-            v-for="chapter in book.comicChapters"
-            :key="chapter.id"
-            @click="readComicChapter(chapter.id)"
-          >
-            <img
-              v-if="chapter.cover"
-              :src="chapter.cover"
-              :alt="`${chapter.title} 首图`"
-            />
-            <Images v-else :size="18" />
-            <span>{{ chapter.title }}</span
-            ><ChevronRight :size="15" />
-          </button>
+            <button v-else-if="row.kind === 'audio'" @click="playAudio(row.index)">
+              <small>{{ String(row.index + 1).padStart(3, "0") }}</small
+              ><span>{{ row.title }}</span
+              ><Play :size="14" fill="currentColor" />
+            </button>
+            <button v-else @click="readComicChapter(row.id)">
+              <img
+                v-if="row.cover"
+                :src="row.cover"
+                :alt="`${row.title} 首图`"
+              />
+              <Images v-else :size="18" />
+              <span>{{ row.title }}</span
+              ><ChevronRight :size="15" />
+            </button>
+          </template>
+          <div
+            :style="{ height: `${desktopDirectoryWindow.bottom}px` }"
+            aria-hidden="true"
+          ></div>
         </div>
         <div v-else class="desktop-directory-empty">
           <Images v-if="desktopContentTab === 'comic'" :size="27" />
@@ -863,59 +1016,59 @@ watch(
           </button>
         </header>
         <div
-          v-if="chapterMode === 'text' && textChapterCount"
+          v-if="mobileDirectoryRows.length"
+          :ref="setMobileDirectoryElement"
           class="drawer-list"
+          @scroll.passive="handleMobileDirectoryScroll"
         >
-          <section
-            v-for="volume in book.chapterVolumes"
-            :key="volume.volume"
-            class="chapter-volume"
-          >
-            <h4>{{ volume.volume }}</h4>
+          <div
+            :style="{ height: `${mobileDirectoryWindow.top}px` }"
+            aria-hidden="true"
+          ></div>
+          <template v-for="row in mobileDirectoryWindow.rows" :key="row.key">
+            <div
+              v-if="row.kind === 'gap'"
+              class="directory-volume-gap"
+              :style="{ height: `${row.height}px` }"
+              aria-hidden="true"
+            ></div>
+            <h4 v-else-if="row.kind === 'volume'">{{ row.title }}</h4>
             <button
-              v-for="chapter in volume.chapters"
-              :key="chapter.id"
-              @click="readChapter(chapter.id)"
+              v-else-if="row.kind === 'text'"
+              class="drawer-text-row"
+              @click="readChapter(row.id)"
             >
-              <strong>{{ chapter.title }}</strong
+              <strong>{{ row.title }}</strong
               ><ChevronRight :size="16" />
             </button>
-          </section>
-        </div>
-        <div
-          v-else-if="chapterMode === 'audio' && audioChapterCount"
-          class="drawer-list"
-        >
-          <button
-            v-for="(track, index) in book.audioTracks"
-            :key="track.href"
-            class="audio-row"
-            @click="playAudio(index)"
-          >
-            <span>{{ String(index + 1).padStart(3, "0") }}</span
-            ><strong>{{ track.title }}</strong
-            ><Headphones :size="16" />
-          </button>
-        </div>
-        <div
-          v-else-if="chapterMode === 'comic' && comicChapterCount"
-          class="drawer-list"
-        >
-          <button
-            v-for="chapter in book.comicChapters"
-            :key="chapter.id"
-            class="comic-directory-row"
-            @click="readComicChapter(chapter.id)"
-          >
-            <img
-              v-if="chapter.cover"
-              :src="chapter.cover"
-              :alt="`${chapter.title} 首图`"
-            />
-            <Images v-else :size="21" />
-            <strong>{{ chapter.title }}</strong
-            ><ChevronRight :size="16" />
-          </button>
+            <button
+              v-else-if="row.kind === 'audio'"
+              class="audio-row"
+              @click="playAudio(row.index)"
+            >
+              <span>{{ String(row.index + 1).padStart(3, "0") }}</span
+              ><strong>{{ row.title }}</strong
+              ><Headphones :size="16" />
+            </button>
+            <button
+              v-else
+              class="comic-directory-row"
+              @click="readComicChapter(row.id)"
+            >
+              <img
+                v-if="row.cover"
+                :src="row.cover"
+                :alt="`${row.title} 首图`"
+              />
+              <Images v-else :size="21" />
+              <strong>{{ row.title }}</strong
+              ><ChevronRight :size="16" />
+            </button>
+          </template>
+          <div
+            :style="{ height: `${mobileDirectoryWindow.bottom}px` }"
+            aria-hidden="true"
+          ></div>
         </div>
         <div v-else class="drawer-empty">
           <ListTree :size="27" />暂无已下载内容
@@ -1538,20 +1691,27 @@ watch(
     scrollbar-color: #e9b697 transparent;
   }
 
-  .desktop-directory-list section + section {
-    border-top: 8px solid #f8f3eb;
-  }
-
   .desktop-directory-list h4 {
+    display: block;
+    height: 40px;
     margin: 0;
-    padding: 12px 18px 7px;
+    padding: 0 18px;
+    overflow: hidden;
     color: #9c8d7d;
     font-size: 11px;
+    line-height: 40px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .directory-volume-gap {
+    background: #f8f3eb;
   }
 
   .desktop-directory-list button {
     display: flex;
     width: 100%;
+    height: 40px;
     min-height: 40px;
     align-items: center;
     gap: 8px;
@@ -2728,21 +2888,28 @@ watch(
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-.chapter-volume + .chapter-volume {
-  border-top: 9px solid #f7f3ea;
+.drawer-list .directory-volume-gap {
+  background: #f7f3ea;
 }
 
-.chapter-volume h4 {
+.drawer-list h4 {
+  display: block;
+  height: 42px;
   margin: 0;
-  padding: 12px 20px 9px;
+  padding: 0 20px;
+  overflow: hidden;
   color: #887f70;
   font-size: 12px;
+  line-height: 42px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.chapter-volume button,
+.drawer-text-row,
 .audio-row {
   display: flex;
   width: 100%;
+  height: 48px;
   min-height: 48px;
   align-items: center;
   gap: 8px;
@@ -2754,13 +2921,13 @@ watch(
   text-align: left;
 }
 
-.chapter-volume button:hover,
+.drawer-text-row:hover,
 .audio-row:hover {
   color: #bd6548;
   background: #fff9f1;
 }
 
-.chapter-volume strong,
+.drawer-text-row strong,
 .audio-row strong {
   min-width: 0;
   flex: 1 1 auto;
@@ -2771,7 +2938,7 @@ watch(
   white-space: nowrap;
 }
 
-.chapter-volume button svg,
+.drawer-text-row svg,
 .audio-row svg {
   flex: 0 0 auto;
   margin-left: auto;
@@ -2786,6 +2953,7 @@ watch(
 
 .comic-directory-list button,
 .comic-directory-row {
+  height: 62px;
   min-height: 62px;
 }
 
@@ -2801,6 +2969,7 @@ watch(
 .comic-directory-row {
   display: flex;
   width: 100%;
+  height: 66px;
   min-height: 66px;
   align-items: center;
   gap: 11px;
