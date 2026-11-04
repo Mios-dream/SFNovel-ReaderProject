@@ -81,6 +81,7 @@ export type ChapterVolume = {
 
 export type Book = {
   name: string;
+  author?: string;
   novelId?: number;
   href?: string;
   audioHref?: string;

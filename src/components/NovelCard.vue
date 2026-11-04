@@ -50,13 +50,13 @@ const emit = defineEmits<{
           <Headphones v-if="novel.bookshelfType === 'audio'" :size="12" />
           <ImageIcon v-else-if="novel.bookshelfType === 'comic'" :size="12" />
           <FileText v-else :size="12" />
-          {{
+          <span class="media-type-label">{{
             novel.bookshelfType === "audio"
               ? "有声"
               : novel.bookshelfType === "comic"
                 ? "漫画"
                 : "文字"
-          }}
+          }}</span>
         </p>
         <p class="updated">更新于 {{ formatDate(novel.lastUpdateTime) }}</p>
       </div>

@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct LibraryEntry {
     /// 书库目录名，同时也是展示名称。
     pub(crate) name: String,
+    /// 书籍清单中的作者名称。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) author: Option<String>,
     /// 本地书籍内容的最后更新时间。
     pub(crate) updated_at: String,
     /// 本地封面访问路径。

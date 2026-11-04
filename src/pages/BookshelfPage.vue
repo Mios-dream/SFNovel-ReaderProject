@@ -470,7 +470,96 @@ function jumpToPage(event: Event) {
     overflow: visible;
   }
   .novel-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px 12px;
+  }
+  .shelf-grid :deep(.novel-card) {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 7px;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .shelf-grid :deep(.novel-card:hover) {
+    box-shadow: none;
+    transform: none;
+  }
+  .shelf-grid :deep(.novel-card img),
+  .shelf-grid :deep(.novel-cover-placeholder) {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 3 / 4;
+    border-radius: 10px;
+  }
+  .shelf-grid :deep(.novel-card img) {
+    display: block;
+    object-fit: cover;
+  }
+  .shelf-grid :deep(.novel-cover-placeholder svg) {
+    width: 22px;
+    height: 22px;
+  }
+  .shelf-grid :deep(.novel-info) {
+    display: block;
+    height: auto;
+  }
+  .shelf-grid :deep(.novel-name) {
+    min-height: 2.7em;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .shelf-grid :deep(.author) {
+    overflow: hidden;
+    margin-top: 2px;
+    font-size: 12px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .shelf-grid :deep(.media-type) {
+    position: absolute;
+    top: 7px;
+    left: 7px;
+    z-index: 2;
+    display: grid;
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    border-radius: 8px;
+    box-shadow: 0 3px 10px rgba(94, 61, 49, 0.16);
+    gap: 0;
+    place-items: center;
+  }
+  .shelf-grid :deep(.media-type svg) {
+    width: 16px;
+    height: 16px;
+  }
+  .shelf-grid :deep(.media-type-audio) {
+    color: #a6535c;
+    background: #fdf1f0;
+  }
+  .shelf-grid :deep(.media-type-comic) {
+    color: #8b6a9b;
+    background: #faf4fc;
+  }
+  .shelf-grid :deep(.media-type-novel) {
+    display: none;
+  }
+  .shelf-grid :deep(.media-type-label) {
+    display: none;
+  }
+  .shelf-grid :deep(.updated),
+  .shelf-grid :deep(.novel-actions) {
+    display: none;
   }
 }
 

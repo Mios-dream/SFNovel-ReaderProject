@@ -371,7 +371,7 @@ fn shelf_album(value: &Value) -> Option<PublicShelfItem> {
         media_id: json_i64_field(value, &["albumId"]).filter(|id| *id > 0),
         title: json_text_field(value, &["name"]).unwrap_or_else(|| "未命名有声专辑".to_string()),
         author: json_text_field(value, &["authorName"]).unwrap_or_else(|| "未知作者".to_string()),
-        cover: json_text_field(value, &["coverBig", "coverMedium", "coverSmall"])
+        cover: json_text_field(value, &["coverMedium", "coverBig", "coverSmall"])
             .unwrap_or_default(),
         source_path: None,
     })

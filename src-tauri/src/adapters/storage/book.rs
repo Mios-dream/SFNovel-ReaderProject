@@ -86,8 +86,21 @@ pub(crate) fn list(app: &tauri::AppHandle) -> Result<Vec<LibraryEntry>, String> 
             entry.path().join(CHAPTERS_FILE).exists() || entry.path().join("book.md").exists();
         let audio = entry.path().join("audio").is_dir();
         let comic = entry.path().join("comic").is_dir();
+        let author = read_book_manifest(&entry.path())
+            .ok()
+            .and_then(|manifest| {
+                [manifest.novel, manifest.audio, manifest.comic]
+                    .into_iter()
+                    .flatten()
+                    .find_map(|work| {
+                        let author = work.author?;
+                        let author = author.trim();
+                        (!author.is_empty()).then(|| author.to_string())
+                    })
+            });
         books.push(LibraryEntry {
             name,
+            author,
             updated_at: metadata
                 .modified()
                 .ok()

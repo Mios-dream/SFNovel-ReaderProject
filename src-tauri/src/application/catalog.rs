@@ -230,6 +230,12 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
                 source_path: record.source_path,
             });
         }
+        items.sort_by_key(|item| match item.bookshelf_type.as_deref() {
+            Some("novel") => 0,
+            Some("audio") => 1,
+            Some("comic") => 2,
+            _ => 3,
+        });
         Ok(BookshelfCollection { categories, items })
     }
 

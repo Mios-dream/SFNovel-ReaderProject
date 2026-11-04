@@ -149,7 +149,12 @@ async function openDiscover() {
           <div class="library-info">
             <div>
               <strong>{{ book.name }}</strong
-              ><small>最近写入 {{ desk.formatDate(book.updatedAt) }}</small>
+              ><small v-if="book.author" class="library-author">{{
+                book.author
+              }}</small
+              ><small class="library-updated"
+                >最近写入 {{ desk.formatDate(book.updatedAt) }}</small
+              >
             </div>
             <div class="format-icons" aria-label="已下载格式">
               <span
@@ -380,6 +385,9 @@ async function openDiscover() {
   color: #b18b7e;
   font-size: 11px;
 }
+.library-author {
+  display: none;
+}
 .format-icons {
   display: flex;
   align-items: center;
@@ -461,7 +469,83 @@ async function openDiscover() {
   }
 
   .library-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px 12px;
+  }
+  .library-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 7px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .library-cover {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 3 / 4;
+    border-radius: 10px;
+    box-shadow: none;
+  }
+  .library-cover svg {
+    width: 22px;
+    height: 22px;
+  }
+  .library-info {
+    display: block;
+    height: auto;
+  }
+  .library-info strong {
+    min-height: 2.7em;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .library-author {
+    display: block;
+    overflow: hidden;
+    margin-top: 2px;
+    font-size: 12px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .library-updated {
+    display: none;
+  }
+  .format-icons {
+    position: absolute;
+    top: 7px;
+    left: 7px;
+    z-index: 2;
+    gap: 3px;
+    margin: 0;
+  }
+  .format-icons span {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    box-shadow: 0 3px 10px rgba(94, 61, 49, 0.16);
+  }
+  .format-icons svg {
+    width: 16px;
+    height: 16px;
+  }
+  .format-icons .format-text {
+    display: none;
+  }
+  .format-icons .format-audio {
+    color: #a6535c;
+    background: #fdf1f0;
+  }
+  .format-icons .format-comic {
+    color: #8b6a9b;
+    background: #faf4fc;
   }
   .library-head {
     align-items: center;
