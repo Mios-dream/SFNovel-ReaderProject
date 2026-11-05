@@ -190,7 +190,11 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_opener::Builder::default()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .register_asynchronous_uri_scheme_protocol(
             adapters::media::ONLINE_MEDIA_SCHEME,
             adapters::media::handle_online_media_request,

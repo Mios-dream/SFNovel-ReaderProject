@@ -7,12 +7,17 @@ use crate::domain::auth::AuthSession;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tauri::{webview::NewWindowResponse, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// SF 官方网页登录入口。
-const OFFICIAL_LOGIN_URL: &str = "https://m.sfacg.com/login";
+const OFFICIAL_LOGIN_URL: &str = "https://passport.sfacg.com/";
 /// 官方登录 WebView 窗口的唯一标签。
 const OFFICIAL_LOGIN_WINDOW_LABEL: &str = "sfacg-official-login";
+/// 第三方 OAuth 子窗口标签前缀。
+const OAUTH_LOGIN_WINDOW_PREFIX: &str = "sfacg-oauth-login-";
+/// 第三方 OAuth 子窗口编号。
+static OAUTH_LOGIN_WINDOW_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 /// 当前用户登录后自动启动应用的注册表位置。
 const AUTOSTART_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 /// 开机启动项名称。
@@ -368,6 +373,8 @@ pub(super) async fn start_official_login(app: &tauri::AppHandle) -> Result<AuthS
     let login_url: tauri::Url = OFFICIAL_LOGIN_URL
         .parse()
         .map_err(|error| format!("官方登录地址无效：{error}"))?;
+    let oauth_app = app.clone();
+    let close_app = app.clone();
     let login_window = if let Some(window) = app.get_webview_window(OFFICIAL_LOGIN_WINDOW_LABEL) {
         window
             .set_focus()
@@ -380,13 +387,48 @@ pub(super) async fn start_official_login(app: &tauri::AppHandle) -> Result<AuthS
             WebviewUrl::External(login_url.clone()),
         )
         .title("SF 官方登录")
-        .inner_size(480.0, 760.0)
-        .min_inner_size(360.0, 560.0)
+        .inner_size(1020.0, 760.0)
+        .min_inner_size(820.0, 600.0)
         .resizable(true)
+        .on_new_window(move |url, features| {
+            if url.scheme() != "https" {
+                return NewWindowResponse::Deny;
+            }
+            let Ok(blank) = "about:blank".parse::<tauri::Url>() else {
+                return NewWindowResponse::Deny;
+            };
+            let label = format!(
+                "{OAUTH_LOGIN_WINDOW_PREFIX}{}",
+                OAUTH_LOGIN_WINDOW_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            );
+            match WebviewWindowBuilder::new(
+                &oauth_app,
+                label,
+                WebviewUrl::External(blank),
+            )
+            .window_features(features)
+            .title("QQ / 微信登录")
+            .inner_size(520.0, 760.0)
+            .resizable(true)
+            .center()
+            .build()
+            {
+                Ok(window) => NewWindowResponse::Create { window },
+                Err(_) => NewWindowResponse::Deny,
+            }
+        })
         .center()
         .build()
         .map_err(|error| format!("无法创建官方登录窗口：{error}"))?
     };
+    login_window.on_window_event(move |event| {
+        if matches!(
+            event,
+            tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+        ) {
+            close_oauth_windows(&close_app);
+        }
+    });
     login_window
         .clear_all_browsing_data()
         .map_err(|error| format!("无法清除官方登录状态：{error}"))?;
@@ -403,11 +445,13 @@ pub(super) async fn start_official_login(app: &tauri::AppHandle) -> Result<AuthS
     loop {
         if std::time::Instant::now() >= deadline {
             let _ = login_window.close();
+            close_oauth_windows(app);
             return Err("官方登录等待超时，请重新打开登录窗口".to_string());
         }
         let mut session_cookie = None;
         for cookie_url in cookie_urls {
             let Some(window) = app.get_webview_window(OFFICIAL_LOGIN_WINDOW_LABEL) else {
+                close_oauth_windows(app);
                 return Err("官方登录窗口已关闭，未检测到登录会话".to_string());
             };
             let url = cookie_url
@@ -425,6 +469,7 @@ pub(super) async fn start_official_login(app: &tauri::AppHandle) -> Result<AuthS
                 .any(|part| part.trim().starts_with(".SFCommunity="))
         }) {
             let _ = login_window.close();
+            close_oauth_windows(app);
             return Ok(AuthSession {
                 app_cookie: None,
                 web_cookie: Some(cookie),
@@ -432,6 +477,15 @@ pub(super) async fn start_official_login(app: &tauri::AppHandle) -> Result<AuthS
             });
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+}
+
+/// 关闭本次登录产生的第三方 OAuth 子窗口。
+fn close_oauth_windows(app: &tauri::AppHandle) {
+    for (label, window) in app.webview_windows() {
+        if label.starts_with(OAUTH_LOGIN_WINDOW_PREFIX) {
+            let _ = window.close();
+        }
     }
 }
 
