@@ -6,13 +6,15 @@ mod export;
 mod jobs;
 pub(crate) mod paths;
 mod settings;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use crate::application::ports::{LibraryStore, SettingsStore};
-use crate::domain::error::AppResult;
+use crate::domain::error::{AppError, AppResult};
 use async_trait::async_trait;
 use tauri::AppHandle;
 
-pub(crate) use atomic::write_bytes_atomically;
+pub(crate) use atomic::replace_file;
 pub(crate) use book::{
     downloaded_text_chapter_ids, read_book_manifest, read_chapter_store, write_book_manifest,
     write_chapter_store,
@@ -39,7 +41,7 @@ impl NativeStorage {
     ///
     /// # 错误
     /// 应用目录无法解析或书库目录无法创建时返回错误消息。
-    pub(crate) fn library_directory(&self) -> Result<std::path::PathBuf, String> {
+    pub(crate) fn library_directory(&self) -> AppResult<std::path::PathBuf> {
         paths::library_directory(&self.app)
     }
 
@@ -50,10 +52,10 @@ impl NativeStorage {
     ///
     /// # 错误
     /// 书库目录无法解析或书籍目录无法创建时返回错误消息。
-    pub(crate) fn new_book_directory(&self, title: &str) -> Result<std::path::PathBuf, String> {
+    pub(crate) fn new_book_directory(&self, title: &str) -> AppResult<std::path::PathBuf> {
         let directory = self.library_directory()?.join(safe_library_name(title));
         std::fs::create_dir_all(&directory)
-            .map_err(|error| format!("无法创建本地书籍目录：{error}"))?;
+            .map_err(|error| AppError::storage(format!("无法创建本地书籍目录：{error}")))?;
         Ok(directory)
     }
 
@@ -68,7 +70,7 @@ impl NativeStorage {
         &self,
         content: &str,
         is_content_encrypted: bool,
-    ) -> Result<String, String> {
+    ) -> AppResult<String> {
         settings::decode_api_content(&self.app, content, is_content_encrypted)
     }
 
@@ -76,7 +78,7 @@ impl NativeStorage {
     ///
     /// # 错误
     /// 设置文件无法读取或解析失败时返回错误消息。
-    pub(crate) fn settings(&self) -> Result<crate::domain::settings::AppSettings, String> {
+    pub(crate) fn settings(&self) -> AppResult<crate::domain::settings::AppSettings> {
         settings::load_settings(&self.app)
     }
 
@@ -84,7 +86,7 @@ impl NativeStorage {
     ///
     /// # 错误
     /// 平台权限查询失败时返回错误消息。
-    pub(crate) async fn ensure_external_storage_access(&self) -> Result<bool, String> {
+    pub(crate) async fn ensure_external_storage_access(&self) -> AppResult<bool> {
         settings::ensure_external_storage_access(&self.app).await
     }
 }
@@ -93,12 +95,12 @@ impl NativeStorage {
 impl LibraryStore for NativeStorage {
     /// 列出书库中的本地书籍摘要。
     fn list(&self) -> AppResult<Vec<crate::domain::library::LibraryEntry>> {
-        book::list(&self.app).map_err(storage_error)
+        book::list(&self.app)
     }
 
     /// 读取指定本地书籍详情。
     fn get_book(&self, name: &str) -> AppResult<crate::domain::library::BookDetail> {
-        book::detail(&self.app, name).map_err(storage_error)
+        book::detail(&self.app, name)
     }
 
     /// 读取本地文字章节。
@@ -107,7 +109,7 @@ impl LibraryStore for NativeStorage {
         name: &str,
         chapter_id: i64,
     ) -> AppResult<crate::domain::library::StoredChapter> {
-        book::chapter(&self.app, name, chapter_id).map_err(storage_error)
+        book::chapter(&self.app, name, chapter_id)
     }
 
     /// 读取本地漫画章节。
@@ -116,30 +118,30 @@ impl LibraryStore for NativeStorage {
         name: &str,
         chapter_id: i64,
     ) -> AppResult<crate::domain::library::LibraryComicChapter> {
-        book::comic_chapter(&self.app, name, chapter_id).map_err(storage_error)
+        book::comic_chapter(&self.app, name, chapter_id)
     }
 
     /// 删除本地书籍目录。
     fn delete(&self, name: &str) -> AppResult<()> {
-        book::delete(&self.app, name).map_err(storage_error)
+        book::delete(&self.app, name)
     }
 
     /// 读取某类媒体的已下载章节编号。
     fn downloaded_ids(
         &self,
-        kind: &str,
-        title: Option<&str>,
+        kind: crate::domain::download::MediaKind,
+        scope: crate::domain::library::BookScope<'_>,
     ) -> AppResult<std::collections::HashSet<i64>> {
-        book::downloaded_ids(&self.app, kind, title).map_err(storage_error)
+        book::downloaded_ids(&self.app, kind, scope)
     }
 
     /// 在文件管理器或系统下载界面打开书库目录。
     async fn open_download_directory(&self) -> AppResult<()> {
         #[cfg(target_os = "android")]
         {
-            paths::library_directory(&self.app).map_err(storage_error)?;
+            paths::library_directory(&self.app)?;
             if !settings::load_settings(&self.app)
-                .map_err(storage_error)?
+                ?
                 .storage
                 .use_external_storage
             {
@@ -149,11 +151,11 @@ impl LibraryStore for NativeStorage {
             }
             crate::adapters::platform::android::open_download_directory(&self.app)
                 .await
-                .map_err(storage_error)
+                
         }
         #[cfg(not(target_os = "android"))]
         {
-            let directory = paths::library_directory(&self.app).map_err(storage_error)?;
+            let directory = paths::library_directory(&self.app)?;
             tauri_plugin_opener::open_path(&directory, None::<&str>).map_err(|error| {
                 crate::domain::error::AppError::storage(format!("无法打开下载目录：{error}"))
             })
@@ -164,7 +166,7 @@ impl LibraryStore for NativeStorage {
     async fn ensure_external_storage_access(&self) -> AppResult<bool> {
         settings::ensure_external_storage_access(&self.app)
             .await
-            .map_err(storage_error)
+            
     }
 
     /// 将本地书籍导出为指定格式。
@@ -176,24 +178,24 @@ impl LibraryStore for NativeStorage {
     ) -> AppResult<crate::domain::library::ExportFile> {
         export::export(&self.app, name, format, output_path)
             .await
-            .map_err(storage_error)
+            
     }
 }
 
 impl SettingsStore for NativeStorage {
     /// 读取应用设置。
     fn load_settings(&self) -> AppResult<crate::domain::settings::AppSettings> {
-        settings::load_settings(&self.app).map_err(storage_error)
+        settings::load_settings(&self.app)
     }
 
     /// 保存应用设置。
     fn save_settings(&self, settings: &crate::domain::settings::AppSettings) -> AppResult<()> {
-        settings::save_settings(&self.app, settings).map_err(storage_error)
+        settings::save_settings(&self.app, settings)
     }
 
     /// 读取正文恢复字典。
     fn load_dictionary(&self) -> AppResult<std::collections::HashMap<String, String>> {
-        settings::load_content_dictionary(&self.app).map_err(storage_error)
+        settings::load_content_dictionary(&self.app)
     }
 
     /// 覆盖写入正文恢复字典。
@@ -201,19 +203,12 @@ impl SettingsStore for NativeStorage {
         &self,
         dictionary: &std::collections::HashMap<String, String>,
     ) -> AppResult<()> {
-        settings::write_content_dictionary(&self.app, dictionary).map_err(storage_error)
+        settings::write_content_dictionary(&self.app, dictionary)
     }
 
     /// 返回正文恢复字典条目数。
     fn dictionary_size(&self) -> AppResult<crate::domain::settings::ContentDictionaryResult> {
-        settings::dictionary_size(&self.app).map_err(storage_error)
+        settings::dictionary_size(&self.app)
     }
 }
 
-/// 将存储层字符串错误转换为稳定的存储错误分类。
-///
-/// # 参数
-/// - `message`：存储层错误消息。
-fn storage_error(message: String) -> crate::domain::error::AppError {
-    crate::domain::error::AppError::storage(message)
-}

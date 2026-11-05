@@ -80,7 +80,7 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
         }
         self.state.clear_profile_cache();
         if let Err(error) = self.remote.register_device(&cookie).await {
-            eprintln!("[sfacg] device registration after login failed: {error}");
+            log_warn!("[sfacg] device registration after login failed: {error}");
         }
         self.status_snapshot()
     }
@@ -154,11 +154,7 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
     pub(crate) async fn verify(&self) -> AppResult<AuthStatus> {
         if let Err(error) = self.remote.verify_account().await {
             if error.is_unauthenticated()
-                && self
-                    .state
-                    .status()
-                    .map_err(AppError::internal)?
-                    .app_authenticated
+                && self.state.status()?.app_authenticated
             {
                 self.clear_app_session().await?;
             }
@@ -180,11 +176,7 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
             Ok(profile) => profile,
             Err(error) => {
                 if error.is_unauthenticated()
-                    && self
-                        .state
-                        .status()
-                        .map_err(AppError::internal)?
-                        .app_authenticated
+                    && self.state.status()?.app_authenticated
                 {
                     self.clear_app_session().await?;
                 }
@@ -237,7 +229,7 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
     /// # 错误
     /// 会话互斥锁不可用时返回内部错误。
     fn status_snapshot(&self) -> AppResult<AuthStatus> {
-        self.state.status().map_err(AppError::internal)
+        self.state.status()
     }
 
     /// 整体替换进程内会话。

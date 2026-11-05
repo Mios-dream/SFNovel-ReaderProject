@@ -3,5 +3,6 @@
 pub(crate) mod app;
 pub(crate) mod cookie;
 pub(crate) mod device;
+pub(crate) mod http;
 pub(crate) mod source;
 pub(crate) mod web;

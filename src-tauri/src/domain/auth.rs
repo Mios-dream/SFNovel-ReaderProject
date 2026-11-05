@@ -17,6 +17,17 @@ pub(crate) struct AuthStatus {
     pub(crate) user_name: Option<String>,
 }
 
+/// 把可选会话转换为不泄露 Cookie 的认证状态。
+pub(crate) fn status_from_session(session: Option<&AuthSession>) -> AuthStatus {
+    AuthStatus {
+        authenticated: session
+            .is_some_and(|value| value.app_cookie.is_some() || value.web_cookie.is_some()),
+        app_authenticated: session.is_some_and(|value| value.app_cookie.is_some()),
+        web_authenticated: session.is_some_and(|value| value.web_cookie.is_some()),
+        user_name: session.map(|value| value.user_name.clone()),
+    }
+}
+
 /// 已登录 SF 账户资料的安全快照。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +55,7 @@ pub(crate) struct UserProfile {
 }
 
 /// App 与 Web Cookie 刻意分离，不能相互转换。
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct AuthSession {
     /// 仅供 App 签名接口使用的 Cookie。
     pub(crate) app_cookie: Option<String>,

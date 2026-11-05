@@ -1,5 +1,6 @@
 //! `sfmedia` 本地媒体协议与 Range 音频转发。
 
+use crate::domain::error::{AppError, AppResult};
 use super::{OnlineMediaResource, OnlineMediaState};
 use crate::adapters::sfacg::source::SfSource;
 use std::fs;
@@ -113,14 +114,14 @@ async fn read_response_window(
     mut response: reqwest::Response,
     skip: u64,
     limit: usize,
-) -> Result<Vec<u8>, String> {
+) -> AppResult<Vec<u8>> {
     let mut body = Vec::with_capacity(limit.min(256 * 1024));
     let mut remaining_skip = skip;
     while remaining_skip > 0 {
         let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|error| format!("无法读取在线音频数据：{error}"))?
+            .map_err(|error| AppError::upstream(format!("无法读取在线音频数据：{error}")))?
         else {
             return Ok(body);
         };
@@ -141,7 +142,7 @@ async fn read_response_window(
         let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|error| format!("无法读取在线音频数据：{error}"))?
+            .map_err(|error| AppError::upstream(format!("无法读取在线音频数据：{error}")))?
         else {
             break;
         };
@@ -153,45 +154,6 @@ async fn read_response_window(
         }
     }
     Ok(body)
-}
-
-/// 根据文件签名推断图片 MIME 类型。
-///
-/// # 参数
-/// - `bytes`：图片文件头或完整内容。
-fn image_content_type(bytes: &[u8]) -> &'static str {
-    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        "image/gif"
-    } else if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        "image/png"
-    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
-        "image/webp"
-    } else if bytes.get(4..8) == Some(b"ftyp")
-        && bytes
-            .get(8..12)
-            .is_some_and(|brand| brand == b"avif" || brand == b"avis")
-    {
-        "image/avif"
-    } else {
-        "image/jpeg"
-    }
-}
-
-/// 通过临时文件替换方式写入在线媒体缓存。
-///
-/// # 参数
-/// - `target`：最终缓存文件路径。
-/// - `bytes`：需要写入的媒体内容。
-///
-/// # 错误
-/// 临时文件写入、旧文件删除或重命名失败时返回错误消息。
-fn write_online_media_cache(target: &Path, bytes: &[u8]) -> Result<(), String> {
-    let temporary = target.with_extension("part");
-    fs::write(&temporary, bytes).map_err(|error| format!("无法写入在线媒体缓存：{error}"))?;
-    if target.exists() {
-        fs::remove_file(target).map_err(|error| format!("无法替换在线媒体缓存：{error}"))?;
-    }
-    fs::rename(&temporary, target).map_err(|error| format!("无法完成在线媒体缓存写入：{error}"))
 }
 
 /// 将受保护的上游音频转换为本地 Range 媒体响应。
@@ -211,7 +173,7 @@ async fn serve_audio_stream<R: Runtime>(
 ) -> Response<Vec<u8>> {
     let client = match SfSource::new(app) {
         Ok(client) => client,
-        Err(error) => return media_error_response(StatusCode::BAD_GATEWAY, &error),
+        Err(error) => return media_error_response(StatusCode::BAD_GATEWAY, &error.to_string()),
     };
     let is_head = *method == Method::HEAD;
     let (start, requested_end) = parse_requested_range(range_header);
@@ -272,7 +234,7 @@ async fn serve_audio_stream<R: Runtime>(
     };
     let body = match read_response_window(response, skip, body_limit).await {
         Ok(body) => body,
-        Err(error) => return media_error_response(StatusCode::BAD_GATEWAY, &error),
+        Err(error) => return media_error_response(StatusCode::BAD_GATEWAY, &error.to_string()),
     };
     if body.is_empty() {
         return media_error_response(StatusCode::BAD_GATEWAY, "在线音频内容为空");
@@ -313,50 +275,33 @@ async fn serve_comic_page<R: Runtime>(
         Err(_) => {
             let client = match SfSource::new(app) {
                 Ok(client) => client,
-                Err(error) => return media_error_response(StatusCode::BAD_GATEWAY, &error),
+                Err(error) => {
+                    return media_error_response(StatusCode::BAD_GATEWAY, &error.to_string())
+                }
             };
-            let bytes = match client
-                .asset_request(
-                    source,
-                    referer,
-                    "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-                )
-                .timeout(ONLINE_MEDIA_REQUEST_TIMEOUT)
-                .send()
-                .await
+            match super::fetch::fetch_remote_image(
+                &client,
+                source,
+                referer,
+                Some(ONLINE_MEDIA_REQUEST_TIMEOUT),
+            )
+            .await
             {
-                Ok(response) if response.status().is_success() => match response.bytes().await {
-                    Ok(bytes) if !bytes.is_empty() => bytes.to_vec(),
-                    Ok(_) => {
-                        return media_error_response(StatusCode::BAD_GATEWAY, "在线漫画页面为空")
+                Ok(image) => {
+                    if let Err(error) =
+                        crate::adapters::storage::replace_file(cache_path, &image.bytes, "在线媒体缓存")
+                    {
+                        log_debug!("[sfacg] online comic page cache skipped: {error}");
                     }
-                    Err(error) => {
-                        return media_error_response(
-                            StatusCode::BAD_GATEWAY,
-                            &format!("无法读取在线漫画页面：{error}"),
-                        )
-                    }
-                },
-                Ok(response) => {
-                    return media_error_response(
-                        StatusCode::BAD_GATEWAY,
-                        &format!("在线漫画页面请求被拒绝：{}", response.status()),
-                    )
+                    image.bytes
                 }
                 Err(error) => {
-                    return media_error_response(
-                        StatusCode::BAD_GATEWAY,
-                        &format!("无法连接在线漫画页面：{error}"),
-                    )
+                    return media_error_response(StatusCode::BAD_GATEWAY, &error.to_string())
                 }
-            };
-            if let Err(error) = write_online_media_cache(cache_path, &bytes) {
-                eprintln!("[sfacg] online comic page cache skipped: {error}");
             }
-            bytes
         }
     };
-    let content_type = image_content_type(&bytes);
+    let content_type = super::fetch::image_content_type(&bytes);
     let content_length = bytes.len();
     let body = if *method == Method::HEAD {
         Vec::new()
@@ -441,19 +386,20 @@ pub(crate) fn handle_online_media_request<R: Runtime>(
 ///
 /// # 错误
 /// URL 无法解析、域名不属于 `sfacg.com` 或协议无法升级到 HTTPS 时返回错误。
-pub(super) fn validate_sfacg_asset_url(value: &str) -> Result<reqwest::Url, String> {
-    let mut url = reqwest::Url::parse(value).map_err(|_| "上游资源地址无效".to_string())?;
+pub(super) fn validate_sfacg_asset_url(value: &str) -> AppResult<reqwest::Url> {
+    let mut url = reqwest::Url::parse(value)
+        .map_err(|_| AppError::upstream("上游资源地址无效"))?;
     let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
     if host != "sfacg.com" && !host.ends_with(".sfacg.com") {
-        return Err("上游资源域名不受支持".to_string());
+        return Err(AppError::invalid_input("上游资源域名不受支持"));
     }
     match url.scheme() {
         "https" => {}
         "http" => {
             url.set_scheme("https")
-                .map_err(|_| "上游资源地址无法升级为 HTTPS".to_string())?;
+                .map_err(|_| AppError::upstream("上游资源地址无法升级为 HTTPS"))?;
         }
-        _ => return Err("上游资源必须使用 HTTPS".to_string()),
+        _ => return Err(AppError::invalid_input("上游资源必须使用 HTTPS")),
     }
     Ok(url)
 }

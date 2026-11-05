@@ -1,4 +1,5 @@
 use super::html::html_tag_attribute;
+use crate::domain::error::{AppError, AppResult};
 use super::placeholder::is_vip_subscription_placeholder;
 use super::WebClient;
 use crate::domain::ids::validate_novel_id;
@@ -31,7 +32,7 @@ impl WebClient {
         novel_id: i64,
         volume_id: i64,
         chapter_id: i64,
-    ) -> Result<String, String> {
+    ) -> AppResult<String> {
         let html = self
             .page_request(
                 format!("https://book.sfacg.com/Novel/{novel_id}/{volume_id}/{chapter_id}/"),
@@ -41,24 +42,24 @@ impl WebClient {
             )
             .send()
             .await
-            .map_err(|error| format!("无法读取 SF 网页章节：{error}"))?
+            .map_err(|error| AppError::upstream(format!("无法读取 SF 网页章节：{error}")))?
             .error_for_status()
-            .map_err(|error| format!("SF 网页章节请求被拒绝：{error}"))?
+            .map_err(|error| AppError::upstream(format!("SF 网页章节请求被拒绝：{error}")))?
             .text()
             .await
-            .map_err(|error| format!("SF 网页章节格式无效：{error}"))?;
+            .map_err(|error| AppError::upstream(format!("SF 网页章节格式无效：{error}")))?;
         let start = html
             .find("id=\"ChapterBody\"")
             .or_else(|| html.find("id='ChapterBody'"))
-            .ok_or_else(|| "SF 网页响应中没有找到 #ChapterBody".to_string())?;
+            .ok_or_else(|| AppError::upstream("SF 网页响应中没有找到 #ChapterBody"))?;
         let body_start = html[start..]
             .find('>')
             .map(|offset| start + offset + 1)
-            .ok_or_else(|| "SF 章节正文结构无效".to_string())?;
+            .ok_or_else(|| AppError::upstream("SF 章节正文结构无效"))?;
         let body_end = html[body_start..]
             .find("</div>")
             .map(|offset| body_start + offset)
-            .ok_or_else(|| "SF 章节正文结构无效".to_string())?;
+            .ok_or_else(|| AppError::upstream("SF 章节正文结构无效"))?;
         let body = html[body_start..body_end]
             .replace("<br>", "\n")
             .replace("<br/>", "\n")
@@ -71,7 +72,7 @@ impl WebClient {
         let plain = chapter_html_to_markdown(&body);
         let plain = plain.replace("\r\n", "\n").replace('\r', "\n");
         if plain.trim().is_empty() {
-            return Err("SF 网页章节正文为空".to_string());
+            return Err(AppError::upstream("SF 网页章节正文为空"));
         }
         Ok(plain.trim().to_string())
     }
@@ -84,10 +85,10 @@ impl WebClient {
         &self,
         novel_id: i64,
         chapter_id: i64,
-    ) -> Result<VipChapterImage, String> {
+    ) -> AppResult<VipChapterImage> {
         validate_novel_id(novel_id)?;
         if chapter_id <= 0 {
-            return Err("VIP 章节参数无效".to_string());
+            return Err(AppError::upstream("VIP 章节参数无效"));
         }
         self.require_session()?;
         let referer = format!("https://book.sfacg.com/vip/c/{chapter_id}/");
@@ -109,15 +110,15 @@ impl WebClient {
             )
             .send()
             .await
-            .map_err(|error| format!("无法读取 VIP 章节图片：{error}"))?;
+            .map_err(|error| AppError::upstream(format!("无法读取 VIP 章节图片：{error}")))?;
         if response.status() == reqwest::StatusCode::UNAUTHORIZED
             || response.status() == reqwest::StatusCode::FORBIDDEN
         {
-            return Err("网页登录会话已失效".to_string());
+            return Err(AppError::upstream("网页登录会话已失效"));
         }
         let response = response
             .error_for_status()
-            .map_err(|error| format!("VIP 章节图片请求被拒绝：{error}"))?;
+            .map_err(|error| AppError::upstream(format!("VIP 章节图片请求被拒绝：{error}")))?;
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -127,7 +128,7 @@ impl WebClient {
         let bytes = response
             .bytes()
             .await
-            .map_err(|error| format!("无法读取 VIP 章节图片数据：{error}"))?
+            .map_err(|error| AppError::upstream(format!("无法读取 VIP 章节图片数据：{error}")))?
             .to_vec();
         let extension = if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
             "gif"
@@ -138,17 +139,17 @@ impl WebClient {
         } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
             "webp"
         } else {
-            return Err(if content_type.contains("text/html") {
-                "VIP 章节未返回图片内容，请确认网页登录会话和购买状态".to_string()
+            return Err(AppError::upstream(if content_type.contains("text/html") {
+                "VIP 章节未返回图片内容，请确认网页登录会话和购买状态"
             } else {
-                "VIP 章节资源格式无效".to_string()
-            });
+                "VIP 章节资源格式无效"
+            }));
         };
         if bytes.len() < 512 {
-            return Err("VIP 章节图片数据无效或为空".to_string());
+            return Err(AppError::upstream("VIP 章节图片数据无效或为空"));
         }
         if is_vip_subscription_placeholder(&bytes) {
-            return Err("VIP 章节未授权访问：网页返回了订阅提示图，请确认本章已订阅".to_string());
+            return Err(AppError::upstream("VIP 章节未授权访问：网页返回了订阅提示图，请确认本章已订阅"));
         }
         Ok(VipChapterImage { bytes, extension })
     }

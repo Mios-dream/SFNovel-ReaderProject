@@ -3,7 +3,8 @@
 use crate::adapters::media::OnlineReaderAdapter;
 use crate::application::reading::ReadingService;
 use crate::domain::content::{OnlineAudioTrack, OnlineComicChapter, OnlineTextChapter};
-use crate::domain::error::AppError;
+use crate::domain::error::AppResult;
+use crate::domain::ids::NovelId;
 
 #[tauri::command]
 /// 读取在线文字章节。
@@ -19,12 +20,12 @@ pub(crate) async fn load_online_text_chapter(
     app: tauri::AppHandle,
     novel_id: i64,
     chapter_id: i64,
-) -> Result<OnlineTextChapter, String> {
+) -> AppResult<OnlineTextChapter> {
     let reader = OnlineReaderAdapter::new(app);
+    let novel_id = NovelId::new(novel_id)?;
     ReadingService::new(&reader)
         .text(novel_id, chapter_id)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -45,12 +46,11 @@ pub(crate) async fn load_online_comic_chapter(
     chapter_id: i64,
     chapter_title: String,
     source_path: Option<String>,
-) -> Result<OnlineComicChapter, String> {
+) -> AppResult<OnlineComicChapter> {
     let reader = OnlineReaderAdapter::new(app);
     ReadingService::new(&reader)
         .comic(comic_id, chapter_id, chapter_title, source_path)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -69,10 +69,9 @@ pub(crate) async fn load_online_audio_track(
     chapter_id: i64,
     chapter_title: String,
     chapter_volume: String,
-) -> Result<OnlineAudioTrack, String> {
+) -> AppResult<OnlineAudioTrack> {
     let reader = OnlineReaderAdapter::new(app);
     ReadingService::new(&reader)
         .audio(chapter_id, chapter_title, chapter_volume)
         .await
-        .map_err(AppError::into_message)
 }

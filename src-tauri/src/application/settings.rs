@@ -2,18 +2,8 @@
 
 use crate::application::ports::{RemoteGateway, SettingsStore};
 use crate::domain::error::{AppError, AppResult};
-use crate::domain::settings::{AppSettings, ContentDictionaryResult};
-
-/// 判断字符是否属于正文比对可使用的汉字区间。
-///
-/// # 参数
-/// - `character`：待判断的 Unicode 字符。
-fn is_han_character(character: char) -> bool {
-    matches!(
-        character,
-        '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}'
-    )
-}
+use crate::domain::ids::NovelId;
+use crate::domain::settings::{is_han_character, AppSettings, ContentDictionaryResult};
 
 /// 负责应用设置校验和正文恢复字典更新的应用服务。
 pub(crate) struct SettingsService<'a, S: SettingsStore> {
@@ -80,8 +70,9 @@ impl<'a, S: SettingsStore> SettingsService<'a, S> {
         chapter_id: i64,
     ) -> AppResult<ContentDictionaryResult> {
         let api = remote.app_chapter_content(chapter_id).await?;
+        let novel_id = NovelId::new(api.novel_id)?;
         let web = remote
-            .web_chapter_content(api.novel_id, api.volume_id, chapter_id)
+            .web_chapter_content(novel_id, api.volume_id, chapter_id)
             .await?;
         let source: Vec<char> = api
             .content

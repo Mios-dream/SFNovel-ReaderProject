@@ -35,3 +35,4 @@ src-tauri/ocr-worker/segments/*
 *.pyc
 __pycache__
 uv.lock
+.workbuddy/

@@ -3,7 +3,7 @@
 use crate::application::ports::OnlineReader;
 use crate::domain::content::{OnlineAudioTrack, OnlineComicChapter, OnlineTextChapter};
 use crate::domain::error::{AppError, AppResult};
-use crate::domain::ids::validate_novel_id;
+use crate::domain::ids::{validate_chapter_id, validate_comic_id, NovelId};
 
 /// 对在线文字、漫画和音频读取执行统一参数校验的服务。
 pub(crate) struct ReadingService<'a, R: OnlineReader> {
@@ -30,11 +30,10 @@ impl<'a, R: OnlineReader> ReadingService<'a, R> {
     /// 任一编号非法或上游读取失败时返回错误。
     pub(crate) async fn text(
         &self,
-        novel_id: i64,
+        novel_id: NovelId,
         chapter_id: i64,
     ) -> AppResult<OnlineTextChapter> {
-        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
-        validate_novel_id(chapter_id).map_err(AppError::invalid_input)?;
+        validate_chapter_id(chapter_id)?;
         self.reader.load_text(novel_id, chapter_id).await
     }
 
@@ -55,8 +54,8 @@ impl<'a, R: OnlineReader> ReadingService<'a, R> {
         chapter_title: String,
         source_path: Option<String>,
     ) -> AppResult<OnlineComicChapter> {
-        validate_novel_id(comic_id).map_err(AppError::invalid_input)?;
-        validate_novel_id(chapter_id).map_err(AppError::invalid_input)?;
+        validate_comic_id(comic_id)?;
+        validate_chapter_id(chapter_id)?;
         let title = chapter_title.trim();
         if title.is_empty() || title.chars().count() > 300 {
             return Err(AppError::invalid_input("漫画章节标题无效"));
@@ -81,7 +80,7 @@ impl<'a, R: OnlineReader> ReadingService<'a, R> {
         chapter_title: String,
         chapter_volume: String,
     ) -> AppResult<OnlineAudioTrack> {
-        validate_novel_id(chapter_id).map_err(AppError::invalid_input)?;
+        validate_chapter_id(chapter_id)?;
         let chapter_title = chapter_title.trim();
         if chapter_title.is_empty() || chapter_title.chars().count() > 300 {
             return Err(AppError::invalid_input("有声章节标题无效"));

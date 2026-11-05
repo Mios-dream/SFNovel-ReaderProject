@@ -6,8 +6,10 @@ mod registry;
 use crate::adapters::sfacg::source::SfSource;
 use crate::adapters::storage::NativeStorage;
 use crate::application::ports::DownloadGateway;
-use crate::domain::download::DownloadJob;
+use crate::application::ports::RemoteGateway;
+use crate::domain::download::{DownloadJob, MediaKind};
 use crate::domain::error::{AppError, AppResult};
+use crate::domain::ids::NovelId;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tauri::Manager;
@@ -45,11 +47,7 @@ impl NativeDownloadGateway {
     /// 外部存储权限不可用或平台查询失败时返回错误。
     async fn ensure_storage(&self) -> AppResult<()> {
         let storage = NativeStorage::new(self.app.clone());
-        if storage
-            .ensure_external_storage_access()
-            .await
-            .map_err(AppError::storage)?
-        {
+        if storage.ensure_external_storage_access().await? {
             Ok(())
         } else {
             Err(AppError::permission_denied(
@@ -72,7 +70,7 @@ impl NativeDownloadGateway {
     /// 任务注册或快照持久化失败时返回错误。
     fn enqueue(
         &self,
-        kind: &str,
+        kind: MediaKind,
         novel_id: i64,
         source_id: Option<i64>,
         source_path: Option<String>,
@@ -88,9 +86,8 @@ impl NativeDownloadGateway {
             source_path,
             title,
             chapter_ids,
-        )
-        .map_err(AppError::storage)?;
-        registry::persist(&self.app, &state).map_err(AppError::storage)?;
+        )?;
+        registry::persist(&self.app, &state)?;
         Ok(created)
     }
 }
@@ -100,13 +97,21 @@ impl DownloadGateway for NativeDownloadGateway {
     /// 创建文字下载任务并启动后台执行器。
     async fn create_text(
         &self,
-        novel_id: i64,
+        novel_id: NovelId,
         title: String,
         chapter_ids: Vec<i64>,
     ) -> AppResult<DownloadJob> {
         self.ensure_storage().await?;
-        let (job, cancelled) =
-            self.enqueue("text", novel_id, None, None, title, chapter_ids.clone())?;
+        // 任务快照只保存基础整数编号，进入队列前统一取回。
+        let novel_id = novel_id.get();
+        let (job, cancelled) = self.enqueue(
+            MediaKind::Text,
+            novel_id,
+            None,
+            None,
+            title,
+            chapter_ids.clone(),
+        )?;
         engine::spawn_text(
             self.app.clone(),
             job.id.clone(),
@@ -124,27 +129,21 @@ impl DownloadGateway for NativeDownloadGateway {
     /// 有声会话不可用、专辑无法解析或任务创建失败时返回错误。
     async fn create_audio(
         &self,
-        novel_id: i64,
+        novel_id: NovelId,
         album_id: Option<i64>,
         title: String,
         chapter_ids: Vec<i64>,
     ) -> AppResult<DownloadJob> {
         self.ensure_storage().await?;
-        let source = SfSource::connect(&self.app)
-            .await
-            .map_err(AppError::upstream)?;
-        source
-            .ensure_audio_access()
-            .map_err(AppError::unauthenticated)?;
+        let source = SfSource::connect(&self.app).await?;
+        source.ensure_audio_access()?;
         let album_id = match album_id {
             Some(album_id) => album_id,
-            None => source
-                .audio_album_id(novel_id, Some(&title))
-                .await
-                .map_err(AppError::upstream)?,
+            None => source.audio_album_id(novel_id, Some(&title)).await?,
         };
+        let novel_id = novel_id.get();
         let (job, cancelled) = self.enqueue(
-            "audio",
+            MediaKind::Audio,
             novel_id,
             Some(album_id),
             None,
@@ -173,7 +172,7 @@ impl DownloadGateway for NativeDownloadGateway {
     ) -> AppResult<DownloadJob> {
         self.ensure_storage().await?;
         let (job, cancelled) = self.enqueue(
-            "comic",
+            MediaKind::Comic,
             comic_id,
             Some(comic_id),
             source_path.clone(),
@@ -194,32 +193,30 @@ impl DownloadGateway for NativeDownloadGateway {
 
     /// 列出全部下载任务。
     fn list(&self) -> AppResult<Vec<DownloadJob>> {
-        registry::list(&self.state()).map_err(AppError::storage)
+        registry::list(&self.state())
     }
 
     /// 请求暂停任务并持久化状态。
     fn pause(&self, job_id: &str) -> AppResult<DownloadJob> {
         let state = self.state();
-        let job = registry::pause(&self.app, &state, job_id).map_err(AppError::storage)?;
-        Ok(job)
+        registry::pause(&self.app, &state, job_id)
     }
 
     /// 恢复已暂停任务并重新启动对应媒体执行器。
     fn resume(&self, job_id: &str) -> AppResult<DownloadJob> {
         let state = self.state();
-        let (job, spec, cancelled) =
-            registry::prepare_resume(&self.app, &state, job_id).map_err(AppError::storage)?;
+        let (job, spec, cancelled) = registry::prepare_resume(&self.app, &state, job_id)?;
         engine::spawn_from_spec(self.app.clone(), job.id.clone(), spec, cancelled);
-        registry::get(&state, &job.id).map_err(AppError::storage)
+        registry::get(&state, &job.id)
     }
 
     /// 删除任务及恢复参数。
     fn delete(&self, job_id: &str) -> AppResult<()> {
-        registry::delete(&self.app, &self.state(), job_id).map_err(AppError::storage)
+        registry::delete(&self.app, &self.state(), job_id)
     }
 
     /// 从磁盘快照恢复任务列表。
     fn restore(&self) -> AppResult<()> {
-        registry::restore(&self.app).map_err(AppError::storage)
+        registry::restore(&self.app)
     }
 }

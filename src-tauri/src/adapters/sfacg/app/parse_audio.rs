@@ -245,3 +245,171 @@ fn normalize_audio_source(value: &str) -> Option<String> {
     };
     (source.starts_with("https://") || source.starts_with("http://")).then_some(source)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::{HashMap, HashSet};
+
+    /// 用空上下文遍历一次目录。
+    fn walk(value: &Value) -> Vec<AudioChapter> {
+        let mut chapters = Vec::new();
+        walk_audio_catalog(
+            value,
+            None,
+            None,
+            &HashMap::new(),
+            &mut HashSet::new(),
+            &mut chapters,
+        );
+        chapters
+    }
+
+    #[test]
+    fn catalog_title_prefers_album_name_and_skips_chapter_objects() {
+        assert_eq!(
+            audio_catalog_title(&json!({ "albumName": " 专辑名 ", "name": "书名" })),
+            Some("专辑名".to_string())
+        );
+        assert_eq!(
+            audio_catalog_title(&json!({ "albumChapId": 1, "albumName": "章节" })),
+            None,
+            "带章节字段的对象不能当作专辑标题"
+        );
+        assert_eq!(audio_catalog_title(&json!({ "albumName": "   " })), None);
+    }
+
+    #[test]
+    fn volume_entries_keep_order_and_dedupe_by_id() {
+        let payload = json!({
+            "data": [
+                { "volumeId": 2, "volumeTitle": "第二卷" },
+                { "volumeId": 1, "volumeTitle": "第一卷" },
+                { "volumeId": 2, "volumeTitle": "重复的第二卷" }
+            ]
+        });
+
+        let volumes = audio_volume_entries(&payload);
+
+        assert_eq!(
+            volumes,
+            vec![(2, "第二卷".to_string()), (1, "第一卷".to_string())],
+            "应保持上游顺序并去掉重复编号"
+        );
+    }
+
+    #[test]
+    fn volume_entries_ignore_chapter_objects() {
+        let payload = json!({
+            "volumes": [{ "volumeId": 5, "title": "卷" }],
+            "chapterList": [{ "volumeId": 9, "chapId": 99, "title": "章节" }]
+        });
+
+        let volumes = audio_volume_entries(&payload);
+
+        assert_eq!(volumes, vec![(5, "卷".to_string())]);
+    }
+
+    #[test]
+    fn walk_assigns_inherited_volume_to_nested_chapters() {
+        let payload = json!({
+            "volumeList": [{
+                "volumeId": 1,
+                "title": "第一卷",
+                "chapterList": [
+                    { "chapId": 11, "title": "第一章" },
+                    { "chapId": 12, "title": "第二章" }
+                ]
+            }]
+        });
+
+        let chapters = walk(&payload);
+
+        assert_eq!(
+            chapters
+                .iter()
+                .map(|chapter| chapter.id)
+                .collect::<Vec<_>>(),
+            vec![11, 12]
+        );
+        assert!(chapters.iter().all(|chapter| chapter.volume == "第一卷"));
+        assert_eq!(chapters[0].title, "第一章");
+    }
+
+    #[test]
+    fn walk_marks_vip_and_unlock_state() {
+        let payload = json!({
+            "chapterList": [
+                { "chapId": 1, "title": "免费" },
+                { "chapId": 2, "title": "限免已购", "needFireMoney": 20 },
+                { "chapId": 3, "title": "已解锁", "isVip": true, "isUnlocked": true },
+                { "chapId": 4, "title": "有音频源", "isVip": true, "fileName": "a.mp3" },
+                { "chapId": 5, "title": "未购", "isVip": true }
+            ]
+        });
+
+        let chapters = walk(&payload);
+        let unlocked: Vec<_> = chapters
+            .iter()
+            .map(|chapter| (chapter.id, chapter.is_vip, chapter.is_unlocked))
+            .collect();
+
+        assert_eq!(
+            unlocked,
+            vec![
+                (1, false, true),
+                (2, true, false),
+                (3, true, true),
+                (4, true, true),
+                (5, true, false)
+            ],
+            "有价章节按 VIP 处理；仅当显式解锁或能拿到音频源时才算已解锁"
+        );
+    }
+
+    #[test]
+    fn walk_dedupes_repeated_chapter_ids() {
+        let payload = json!({
+            "chapterList": [{ "chapId": 7, "title": "第一次" }],
+            "expand": { "chapterList": [{ "chapId": 7, "title": "重复" }, { "chapId": 8 }] }
+        });
+
+        let chapters = walk(&payload);
+
+        assert_eq!(
+            chapters
+                .iter()
+                .map(|chapter| chapter.id)
+                .collect::<Vec<_>>(),
+            vec![7, 8],
+            "同一章节编号只保留第一次出现"
+        );
+        assert_eq!(chapters[0].title, "第一次");
+    }
+
+    #[test]
+    fn audio_source_normalizes_protocol_relative_url() {
+        let source = audio_source_from_payload(&json!({
+            "data": { "fileName": "//cdn.example.com/a.mp3" }
+        }));
+
+        assert_eq!(source.as_deref(), Some("https://cdn.example.com/a.mp3"));
+    }
+
+    #[test]
+    fn audio_source_ignores_non_http_values() {
+        assert!(
+            audio_source_from_payload(&json!({ "fileName": "/relative/a.mp3" })).is_none(),
+            "相对路径不能当作可播放地址"
+        );
+        assert!(audio_source_from_payload(&json!({ "title": "无音频字段" })).is_none());
+    }
+
+    #[test]
+    fn audio_source_finds_audio_like_keys() {
+        let source = audio_source_from_payload(&json!({ "audioUrlV2": "https://x/a.mp3" }));
+
+        assert_eq!(source.as_deref(), Some("https://x/a.mp3"));
+    }
+}

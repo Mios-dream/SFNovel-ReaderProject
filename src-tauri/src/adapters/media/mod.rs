@@ -1,13 +1,19 @@
 //! 在线正文、漫画页面与音频流适配。
 
+mod fetch;
+mod inline_image;
 mod protocol;
 mod reader;
+mod vip;
 
+use crate::domain::error::{AppError, AppResult};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+pub(crate) use inline_image::{split as split_inline_images, InlineSegment};
 pub(crate) use protocol::{handle_online_media_request, ONLINE_MEDIA_SCHEME};
+pub(crate) use vip::recognize_vip_chapter;
 pub(crate) use reader::OnlineReaderAdapter;
 
 #[derive(Clone)]
@@ -46,11 +52,11 @@ impl OnlineMediaState {
     ///
     /// # 错误
     /// 媒体状态互斥锁不可用时返回错误消息。
-    fn register(&self, resource: OnlineMediaResource) -> Result<String, String> {
+    fn register(&self, resource: OnlineMediaResource) -> AppResult<String> {
         let token = uuid::Uuid::new_v4().simple().to_string();
         self.resources
             .lock()
-            .map_err(|_| "在线媒体状态不可用".to_string())?
+            .map_err(|_| AppError::internal("在线媒体状态不可用"))?
             .insert(token.clone(), resource);
         Ok(token)
     }

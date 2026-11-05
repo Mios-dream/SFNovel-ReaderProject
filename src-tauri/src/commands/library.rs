@@ -1,10 +1,9 @@
 //! 本地书库与导出命令。
 
-use crate::adapters::sfacg::source::SfSource;
 use crate::adapters::storage::NativeStorage;
 use crate::application::library::LibraryService;
 use crate::application::settings::SettingsService;
-use crate::domain::error::AppError;
+use crate::domain::error::AppResult;
 use crate::domain::library::{
     BookDetail, ExportFile, LibraryComicChapter, LibraryEntry, StoredChapter,
 };
@@ -18,11 +17,9 @@ use crate::domain::settings::ContentDictionaryResult;
 ///
 /// # 错误
 /// 书库目录无法读取时返回错误消息。
-pub(crate) fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryEntry>, String> {
+pub(crate) fn list_local_library(app: tauri::AppHandle) -> AppResult<Vec<LibraryEntry>> {
     let storage = NativeStorage::new(app);
-    LibraryService::new(&storage)
-        .list()
-        .map_err(AppError::into_message)
+    LibraryService::new(&storage).list()
 }
 
 #[tauri::command]
@@ -33,12 +30,11 @@ pub(crate) fn list_local_library(app: tauri::AppHandle) -> Result<Vec<LibraryEnt
 ///
 /// # 错误
 /// 目录无法创建或系统打开操作失败时返回错误消息。
-pub(crate) async fn open_download_directory(app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) async fn open_download_directory(app: tauri::AppHandle) -> AppResult<()> {
     let storage = NativeStorage::new(app);
     LibraryService::new(&storage)
         .open_download_directory()
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -50,11 +46,9 @@ pub(crate) async fn open_download_directory(app: tauri::AppHandle) -> Result<(),
 ///
 /// # 错误
 /// 书籍不存在或清单无法解析时返回错误消息。
-pub(crate) fn get_local_book(app: tauri::AppHandle, name: String) -> Result<BookDetail, String> {
+pub(crate) fn get_local_book(app: tauri::AppHandle, name: String) -> AppResult<BookDetail> {
     let storage = NativeStorage::new(app);
-    LibraryService::new(&storage)
-        .book(&name)
-        .map_err(AppError::into_message)
+    LibraryService::new(&storage).book(&name)
 }
 
 #[tauri::command]
@@ -71,11 +65,9 @@ pub(crate) fn get_local_chapter(
     app: tauri::AppHandle,
     name: String,
     chapter_id: i64,
-) -> Result<StoredChapter, String> {
+) -> AppResult<StoredChapter> {
     let storage = NativeStorage::new(app);
-    LibraryService::new(&storage)
-        .chapter(&name, chapter_id)
-        .map_err(AppError::into_message)
+    LibraryService::new(&storage).chapter(&name, chapter_id)
 }
 
 #[tauri::command]
@@ -92,11 +84,9 @@ pub(crate) fn get_local_comic_chapter(
     app: tauri::AppHandle,
     name: String,
     chapter_id: i64,
-) -> Result<LibraryComicChapter, String> {
+) -> AppResult<LibraryComicChapter> {
     let storage = NativeStorage::new(app);
-    LibraryService::new(&storage)
-        .comic_chapter(&name, chapter_id)
-        .map_err(AppError::into_message)
+    LibraryService::new(&storage).comic_chapter(&name, chapter_id)
 }
 
 #[tauri::command]
@@ -108,11 +98,9 @@ pub(crate) fn get_local_comic_chapter(
 ///
 /// # 错误
 /// 书籍不存在或文件系统删除失败时返回错误消息。
-pub(crate) fn delete_local_book(app: tauri::AppHandle, name: String) -> Result<(), String> {
+pub(crate) fn delete_local_book(app: tauri::AppHandle, name: String) -> AppResult<()> {
     let storage = NativeStorage::new(app);
-    LibraryService::new(&storage)
-        .delete(&name)
-        .map_err(AppError::into_message)
+    LibraryService::new(&storage).delete(&name)
 }
 
 #[tauri::command]
@@ -126,12 +114,11 @@ pub(crate) fn delete_local_book(app: tauri::AppHandle, name: String) -> Result<(
 ///
 /// # 错误
 /// 平台权限查询失败时返回错误消息。
-pub(crate) async fn ensure_external_storage_access(app: tauri::AppHandle) -> Result<bool, String> {
+pub(crate) async fn ensure_external_storage_access(app: tauri::AppHandle) -> AppResult<bool> {
     let storage = NativeStorage::new(app);
     LibraryService::new(&storage)
         .ensure_external_storage_access()
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -150,12 +137,11 @@ pub(crate) async fn export_local_book(
     name: String,
     format: String,
     output_path: String,
-) -> Result<ExportFile, String> {
+) -> AppResult<ExportFile> {
     let storage = NativeStorage::new(app);
     LibraryService::new(&storage)
         .export(&name, &format, &output_path)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -166,13 +152,9 @@ pub(crate) async fn export_local_book(
 ///
 /// # 错误
 /// 字典文件无法读取时返回错误消息。
-pub(crate) fn get_content_dictionary(
-    app: tauri::AppHandle,
-) -> Result<ContentDictionaryResult, String> {
+pub(crate) fn get_content_dictionary(app: tauri::AppHandle) -> AppResult<ContentDictionaryResult> {
     let storage = NativeStorage::new(app);
-    SettingsService::new(&storage)
-        .content_dictionary()
-        .map_err(AppError::into_message)
+    SettingsService::new(&storage).content_dictionary()
 }
 
 #[tauri::command]
@@ -187,14 +169,10 @@ pub(crate) fn get_content_dictionary(
 pub(crate) async fn update_content_dictionary(
     app: tauri::AppHandle,
     chapter_id: i64,
-) -> Result<ContentDictionaryResult, String> {
-    let remote = SfSource::connect(&app)
-        .await
-        .map_err(AppError::upstream)
-        .map_err(AppError::into_message)?;
+) -> AppResult<ContentDictionaryResult> {
+    let remote = super::remote(&app).await?;
     let storage = NativeStorage::new(app);
     SettingsService::new(&storage)
         .update_content_dictionary(&remote, chapter_id)
         .await
-        .map_err(AppError::into_message)
 }

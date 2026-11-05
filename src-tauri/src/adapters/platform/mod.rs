@@ -2,13 +2,12 @@
 
 use crate::application::ports::AuthGateway;
 use crate::domain::auth::AuthSession;
-use crate::domain::error::{AppError, AppResult};
+use crate::domain::error::AppResult;
 use async_trait::async_trait;
-#[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
-use tauri::Manager;
-
 #[cfg(target_os = "android")]
 pub(crate) mod android;
+#[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
+mod desktop;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -21,7 +20,7 @@ pub(crate) use windows::{restore_app_session, restore_web_session, set_autostart
 /// 初始化当前进程的设备身份。
 #[cfg(target_os = "windows")]
 pub(crate) fn initialize_device_identity(app: &tauri::AppHandle) -> AppResult<()> {
-    windows::initialize_device_identity(app).map_err(AppError::storage)
+    windows::initialize_device_identity(app)
 }
 
 /// Android 插件只有异步接口，因此在启动阶段单独等待初始化完成。
@@ -29,22 +28,12 @@ pub(crate) fn initialize_device_identity(app: &tauri::AppHandle) -> AppResult<()
 pub(crate) async fn initialize_device_identity(app: &tauri::AppHandle) -> AppResult<()> {
     android::initialize_device_identity(app)
         .await
-        .map_err(AppError::storage)
+        
 }
 
 /// 其他桌面平台生成临时设备身份，并保存设备登记结果。
 #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
-pub(crate) fn initialize_device_identity(app: &tauri::AppHandle) -> AppResult<()> {
-    if let Ok(directory) = app.path().app_data_dir() {
-        crate::adapters::sfacg::device::install_device_state_path(
-            directory.join("device-state.json"),
-        );
-    }
-    crate::adapters::sfacg::device::install_device_profile(
-        crate::adapters::sfacg::device::DeviceProfile::generate(),
-    );
-    Ok(())
-}
+pub(crate) use desktop::initialize_device_identity;
 
 /// 平台会话适配器。
 pub(crate) struct NativeAuthGateway {
@@ -70,7 +59,7 @@ impl AuthGateway for NativeAuthGateway {
         {
             return android::synchronize_session(&self.app)
                 .await
-                .map_err(AppError::storage);
+                ;
         }
         #[cfg(not(target_os = "android"))]
         {
@@ -84,14 +73,13 @@ impl AuthGateway for NativeAuthGateway {
         let _ = user_name;
         #[cfg(target_os = "windows")]
         {
-            windows::persist_app_session(&self.app, cookie, user_name)
-                .map_err(AppError::storage)?;
+            windows::persist_app_session(&self.app, cookie, user_name)?;
         }
         #[cfg(target_os = "android")]
         {
             android::persist_app_session(&self.app, cookie)
                 .await
-                .map_err(AppError::storage)?;
+                ?;
         }
         Ok(())
     }
@@ -99,7 +87,7 @@ impl AuthGateway for NativeAuthGateway {
     /// 将 Web Cookie 保存到当前平台的安全存储。
     async fn persist_web_session(&self, cookie: &str) -> AppResult<()> {
         #[cfg(target_os = "windows")]
-        windows::persist_web_session(&self.app, cookie).map_err(AppError::storage)?;
+        windows::persist_web_session(&self.app, cookie)?;
         #[cfg(not(target_os = "windows"))]
         let _ = cookie;
         Ok(())
@@ -112,16 +100,16 @@ impl AuthGateway for NativeAuthGateway {
             return windows::start_official_login(&self.app)
                 .await
                 .map(Some)
-                .map_err(AppError::upstream);
+                ;
         }
         #[cfg(target_os = "android")]
         {
             android::start_official_login(&self.app)
                 .await
-                .map_err(AppError::upstream)?;
+                ?;
             return android::synchronize_session(&self.app)
                 .await
-                .map_err(AppError::storage);
+                ;
         }
         #[cfg(all(not(target_os = "android"), not(target_os = "windows")))]
         Err(AppError::internal(
@@ -134,11 +122,11 @@ impl AuthGateway for NativeAuthGateway {
         #[cfg(target_os = "android")]
         android::clear_session(&self.app)
             .await
-            .map_err(AppError::storage)?;
+            ?;
         #[cfg(target_os = "windows")]
         {
-            windows::clear_app_session(&self.app).map_err(AppError::storage)?;
-            windows::clear_web_session(&self.app).map_err(AppError::storage)?;
+            windows::clear_app_session(&self.app)?;
+            windows::clear_web_session(&self.app)?;
         }
         Ok(())
     }
@@ -148,9 +136,9 @@ impl AuthGateway for NativeAuthGateway {
         #[cfg(target_os = "android")]
         android::clear_app_session(&self.app)
             .await
-            .map_err(AppError::storage)?;
+            ?;
         #[cfg(target_os = "windows")]
-        windows::clear_app_session(&self.app).map_err(AppError::storage)?;
+        windows::clear_app_session(&self.app)?;
         Ok(())
     }
 
@@ -159,9 +147,9 @@ impl AuthGateway for NativeAuthGateway {
         #[cfg(target_os = "android")]
         android::clear_web_session(&self.app)
             .await
-            .map_err(AppError::storage)?;
+            ?;
         #[cfg(target_os = "windows")]
-        windows::clear_web_session(&self.app).map_err(AppError::storage)?;
+        windows::clear_web_session(&self.app)?;
         Ok(())
     }
 }

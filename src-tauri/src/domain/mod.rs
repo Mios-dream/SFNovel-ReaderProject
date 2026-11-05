@@ -9,4 +9,5 @@ pub(crate) mod ids;
 pub(crate) mod library;
 pub(crate) mod signin;
 pub(crate) mod settings;
+pub(crate) mod time;
 pub(crate) mod update;

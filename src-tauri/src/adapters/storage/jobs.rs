@@ -1,5 +1,6 @@
 //! 下载任务快照文件。
 
+use crate::domain::error::AppResult;
 use super::atomic::{read_or_default, write_atomically};
 use super::paths::job_snapshot_path;
 use crate::domain::download::JobSnapshot;
@@ -8,7 +9,7 @@ use crate::domain::download::JobSnapshot;
 ///
 /// # 错误
 /// 路径解析、文件读取或 JSON 解析失败时返回错误消息。
-pub(crate) fn read_job_snapshot(app: &tauri::AppHandle) -> Result<JobSnapshot, String> {
+pub(crate) fn read_job_snapshot(app: &tauri::AppHandle) -> AppResult<JobSnapshot> {
     let path = job_snapshot_path(app)?;
     if !path.exists() {
         return Ok(JobSnapshot::default());
@@ -23,6 +24,6 @@ pub(crate) fn read_job_snapshot(app: &tauri::AppHandle) -> Result<JobSnapshot, S
 pub(crate) fn write_job_snapshot(
     app: &tauri::AppHandle,
     snapshot: &JobSnapshot,
-) -> Result<(), String> {
+) -> AppResult<()> {
     write_atomically(&job_snapshot_path(app)?, snapshot, "下载任务")
 }

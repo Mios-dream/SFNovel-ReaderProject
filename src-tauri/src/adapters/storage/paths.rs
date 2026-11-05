@@ -1,5 +1,6 @@
 //! 应用自有目录的解析与名称约束。
 
+use crate::domain::error::{AppError, AppResult};
 use super::settings::load_settings;
 use std::fs;
 use std::path::PathBuf;
@@ -12,10 +13,10 @@ use tauri::Manager;
 ///
 /// # 错误
 /// 平台无法解析应用数据目录时返回错误消息。
-pub(crate) fn app_data_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn app_data_directory(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     app.path()
         .app_data_dir()
-        .map_err(|error| format!("无法解析应用数据目录：{error}"))
+        .map_err(|error| AppError::storage(format!("无法解析应用数据目录：{error}")))
 }
 
 /// 按存储设置返回书库目录并确保其存在。
@@ -25,14 +26,14 @@ pub(crate) fn app_data_directory(app: &tauri::AppHandle) -> Result<PathBuf, Stri
 ///
 /// # 错误
 /// 设置读取失败或目录无法创建时返回错误消息。
-pub(crate) fn library_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn library_directory(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     let settings = load_settings(app)?;
     let directory = if cfg!(target_os = "android") && settings.storage.use_external_storage {
         PathBuf::from("/storage/emulated/0/Download/SF Novel Flow")
     } else {
         app_data_directory(app)?.join("library")
     };
-    fs::create_dir_all(&directory).map_err(|error| format!("无法创建本地书库目录：{error}"))?;
+    fs::create_dir_all(&directory).map_err(|error| AppError::storage(format!("无法创建本地书库目录：{error}")))?;
     Ok(directory)
 }
 
@@ -46,7 +47,7 @@ pub(crate) fn library_directory(app: &tauri::AppHandle) -> Result<PathBuf, Strin
 ///
 /// # 错误
 /// 名称为空、包含路径片段、书籍不存在或解析后越出书库根目录时返回错误消息。
-pub(crate) fn local_book_directory(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
+pub(crate) fn local_book_directory(app: &tauri::AppHandle, name: &str) -> AppResult<PathBuf> {
     let trimmed = name.trim();
     if trimmed.is_empty()
         || trimmed == "."
@@ -54,17 +55,17 @@ pub(crate) fn local_book_directory(app: &tauri::AppHandle, name: &str) -> Result
         || trimmed.contains(['/', '\\', ':'])
         || trimmed.contains("..")
     {
-        return Err("本地书籍目录无效".to_string());
+        return Err(AppError::storage("本地书籍目录无效"));
     }
     let root = library_directory(app)?
         .canonicalize()
-        .map_err(|error| format!("无法解析书库目录：{error}"))?;
+        .map_err(|error| AppError::storage(format!("无法解析书库目录：{error}")))?;
     let canonical = root
         .join(trimmed)
         .canonicalize()
-        .map_err(|_| "本地书籍不存在".to_string())?;
+        .map_err(|_| AppError::not_found("本地书籍不存在"))?;
     if !canonical.starts_with(&root) || !canonical.is_dir() {
-        return Err("本地书籍目录无效".to_string());
+        return Err(AppError::storage("本地书籍目录无效"));
     }
     Ok(canonical)
 }
@@ -73,7 +74,7 @@ pub(crate) fn local_book_directory(app: &tauri::AppHandle, name: &str) -> Result
 ///
 /// # 错误
 /// 应用数据目录无法解析时返回错误消息。
-pub(crate) fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn settings_path(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     Ok(app_data_directory(app)?.join("settings.json"))
 }
 
@@ -81,7 +82,7 @@ pub(crate) fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 ///
 /// # 错误
 /// 应用数据目录无法解析时返回错误消息。
-pub(crate) fn content_dictionary_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn content_dictionary_path(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     Ok(app_data_directory(app)?.join("sfacg-content-dictionary.json"))
 }
 
@@ -89,7 +90,7 @@ pub(crate) fn content_dictionary_path(app: &tauri::AppHandle) -> Result<PathBuf,
 ///
 /// # 错误
 /// 应用数据目录无法解析时返回错误消息。
-pub(crate) fn job_snapshot_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn job_snapshot_path(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     Ok(app_data_directory(app)?.join("download-jobs.json"))
 }
 
@@ -97,7 +98,7 @@ pub(crate) fn job_snapshot_path(app: &tauri::AppHandle) -> Result<PathBuf, Strin
 ///
 /// # 错误
 /// 应用数据目录无法解析时返回错误消息。
-pub(crate) fn online_cache_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn online_cache_directory(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     Ok(app_data_directory(app)?.join("online-cache"))
 }
 

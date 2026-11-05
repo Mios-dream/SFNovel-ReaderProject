@@ -1,4 +1,5 @@
-use super::super::device::{replace_device_profile, DeviceProfile};
+use super::super::device::{device_profile, update_device_profile, DeviceProfile};
+use crate::domain::error::AppResult;
 use super::cache;
 use super::constants::{
     APP_ACCEPT, COMIC_ANONYMOUS_DEVICE_ID, SF_API_HOST, SF_API_PASSWORD, SF_API_USER,
@@ -6,9 +7,9 @@ use super::constants::{
 use super::error::AppApiError;
 use super::signing::security_header;
 use crate::adapters::sfacg::cookie::{filter_cookie_header, has_cookie_name};
+use crate::adapters::sfacg::http;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::RwLock;
 use uuid::Uuid;
 
 /// 自动设备登记在整个进程内最多尝试一次，避免多个下载客户端重复登记。
@@ -20,29 +21,16 @@ pub(crate) struct AppClient {
     pub(super) client: reqwest::Client,
     /// 仅保留 SF App 会话所需 Cookie 的请求头值。
     pub(super) app_cookie: Option<String>,
-    /// 本次安装稳定复用的设备身份；登记后会更新渠道和 OAID。
-    pub(super) device: RwLock<DeviceProfile>,
 }
 
 impl AppClient {
-    /// 使用设备身份和 App 会话快照创建 API 客户端。
-    ///
-    /// # 错误
-    /// HTTP 客户端无法创建时返回错误。
-    pub(crate) fn new(device: DeviceProfile, app_cookie: Option<String>) -> Result<Self, String> {
-        let user_agent = device.user_agent();
+    /// 使用全局设备身份和 App 会话快照创建 API 客户端。
+    pub(crate) fn new(app_cookie: Option<String>) -> Result<Self, AppApiError> {
+        let user_agent = device_profile().map_err(AppApiError::from)?.user_agent();
         let app_cookie = app_cookie
             .and_then(|cookie| filter_cookie_header(&cookie, &[".SFCommunity", "session_APP"]));
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .user_agent(user_agent)
-            .build()
-            .map_err(|error| format!("无法创建 SF App 网络客户端：{error}"))?;
-        Ok(Self {
-            client,
-            app_cookie,
-            device: RwLock::new(device),
-        })
+        let client = http::app_client(&user_agent);
+        Ok(Self { client, app_cookie })
     }
 
     /// 判断此客户端是否持有包含 `session_APP` 的 App 会话。
@@ -53,28 +41,16 @@ impl AppClient {
     }
 
     /// 读取当前设备身份快照。
-    pub(super) fn device_snapshot(&self) -> Result<DeviceProfile, String> {
-        self.device
-            .read()
-            .map(|guard| guard.clone())
-            .map_err(|_| "设备身份状态不可用".to_string())
+    pub(super) fn device_snapshot(&self) -> AppResult<DeviceProfile> {
+        device_profile()
     }
 
-    /// 更新当前设备身份，并同步到进程内其他客户端。
+    /// 更新全局设备身份。
     pub(super) fn update_device(
         &self,
         update: impl FnOnce(&mut DeviceProfile),
-    ) -> Result<(), String> {
-        let snapshot = {
-            let mut guard = self
-                .device
-                .write()
-                .map_err(|_| "设备身份状态不可用".to_string())?;
-            update(&mut guard);
-            guard.clone()
-        };
-        replace_device_profile(snapshot);
-        Ok(())
+    ) -> AppResult<()> {
+        update_device_profile(update)
     }
 
     /// 创建需要 App 会话的资源请求。
@@ -105,8 +81,8 @@ impl AppClient {
         method: reqwest::Method,
         path: &str,
         include_session: bool,
-    ) -> Result<reqwest::RequestBuilder, String> {
-        let device = self.device_snapshot()?;
+    ) -> Result<reqwest::RequestBuilder, AppApiError> {
+        let device = self.device_snapshot().map_err(AppApiError::from)?;
         self.signed_request_with_device(method, path, include_session, &device)
     }
 
@@ -117,10 +93,9 @@ impl AppClient {
         path: &str,
         include_session: bool,
         device: &DeviceProfile,
-    ) -> Result<reqwest::RequestBuilder, String> {
+    ) -> Result<reqwest::RequestBuilder, AppApiError> {
         let nonce = Uuid::new_v4().to_string().to_uppercase();
-        let has_json_body =
-            method == reqwest::Method::POST || method == reqwest::Method::PUT;
+        let has_json_body = method == reqwest::Method::POST || method == reqwest::Method::PUT;
         let mut request = self
             .client
             .request(method, format!("{SF_API_HOST}{path}"))
@@ -128,7 +103,10 @@ impl AppClient {
             .header("Accept-Charset", "UTF-8")
             .header("Accept", APP_ACCEPT)
             .header(reqwest::header::USER_AGENT, device.user_agent())
-            .header("SFSecurity", security_header(device, &nonce)?);
+            .header(
+                "SFSecurity",
+                security_header(device, &nonce).map_err(AppApiError::from)?,
+            );
         if has_json_body {
             request = request.header("Content-Type", "application/json; charset=UTF-8");
         }
@@ -143,8 +121,8 @@ impl AppClient {
     /// 构建漫画兼容接口请求。
     ///
     /// 未登录时没有本机设备登记，使用已验证可匿名的设备身份。
-    fn comic_signed_request(&self, path: &str) -> Result<reqwest::RequestBuilder, String> {
-        let mut device = self.device_snapshot()?;
+    fn comic_signed_request(&self, path: &str) -> Result<reqwest::RequestBuilder, AppApiError> {
+        let mut device = self.device_snapshot().map_err(AppApiError::from)?;
         if !self.has_session() {
             device.device_id = COMIC_ANONYMOUS_DEVICE_ID.to_string();
             device.manufacturer = "tencent".to_string();
@@ -168,7 +146,7 @@ impl AppClient {
         &self,
         path: &str,
         query: &[(&str, String)],
-    ) -> Result<Value, String> {
+    ) -> Result<Value, AppApiError> {
         let key = self.cache_key(path, query, true);
         if let Some(data) = cache::get(&key) {
             return Ok(data);
@@ -180,19 +158,17 @@ impl AppClient {
                 .query(query)
                 .send()
                 .await
-                .map_err(|error| format!("SF 漫画接口请求失败：{error}"))?;
+                .map_err(AppApiError::transport)?;
             match Self::parse_response(response, path).await {
                 Ok(data) => {
                     cache::insert(key, data.clone());
                     return Ok(data);
                 }
                 Err(error) if error.is_client_version_gated() => last_error = Some(error),
-                Err(error) => return Err(error.describe(path)),
+                Err(error) => return Err(error),
             }
         }
-        Err(last_error
-            .map(|error| error.describe(path))
-            .unwrap_or_else(|| "SF 漫画接口请求失败".to_string()))
+        Err(last_error.unwrap_or_else(|| AppApiError::local("SF 漫画接口请求失败".to_string())))
     }
 
     /// 请求一个已签名的 SF App API 资源，并拆开其 `data` 数据包。
@@ -206,15 +182,12 @@ impl AppClient {
         &self,
         path: &str,
         query: &[(&str, String)],
-    ) -> Result<Value, String> {
+    ) -> Result<Value, AppApiError> {
         let key = self.cache_key(path, query, true);
         if let Some(data) = cache::get(&key) {
             return Ok(data);
         }
-        let data = self
-            .get_data_inner(path, query, true)
-            .await
-            .map_err(|error| error.describe(path))?;
+        let data = self.get_data_inner(path, query, true).await?;
         cache::insert(key, data.clone());
         Ok(data)
     }
@@ -224,13 +197,10 @@ impl AppClient {
         &self,
         path: &str,
         query: &[(&str, String)],
-    ) -> Result<Value, String> {
+    ) -> Result<Value, AppApiError> {
         let key = self.cache_key(path, query, true);
         cache::remove(&key);
-        let data = self
-            .get_data_inner(path, query, true)
-            .await
-            .map_err(|error| error.describe(path))?;
+        let data = self.get_data_inner(path, query, true).await?;
         cache::insert(key, data.clone());
         Ok(data)
     }
@@ -278,8 +248,7 @@ impl AppClient {
         query: &[(&str, String)],
     ) -> Result<Value, AppApiError> {
         let response = self
-            .signed_request(reqwest::Method::GET, path, true)
-            .map_err(AppApiError::local)?
+            .signed_request(reqwest::Method::GET, path, true)?
             .query(query)
             .send()
             .await
@@ -292,15 +261,14 @@ impl AppClient {
     /// App 通过 `HEAD /user/tickets` 的 `X-Total-Count` 响应头返回数量。
     pub(super) async fn get_user_ticket_count(&self) -> Result<Option<i64>, AppApiError> {
         let response = self
-            .signed_request(reqwest::Method::HEAD, "/user/tickets", true)
-            .map_err(AppApiError::local)?
+            .signed_request(reqwest::Method::HEAD, "/user/tickets", true)?
             .send()
             .await
             .map_err(AppApiError::transport)?;
         let status = response.status();
         if !status.is_success() {
             let error = AppApiError::from_response(status.as_u16(), &Value::Null);
-            eprintln!(
+            log_debug!(
                 "[sfacg] App request rejected: path=/user/tickets, http={}, api_code={:?}, error_code={:?}",
                 status.as_u16(),
                 error.api_http_code,
@@ -342,7 +310,7 @@ impl AppClient {
             && api_http_code.is_none_or(|code| (200..300).contains(&code));
         if !successful {
             let error = AppApiError::from_response(http_status, &body);
-            eprintln!(
+            log_debug!(
                 "[sfacg] App request rejected: path={path}, http={http_status}, api_code={:?}, error_code={:?}",
                 error.api_http_code, error.api_error_code,
             );
@@ -359,7 +327,7 @@ impl AppClient {
         &self,
         path: &str,
         query: &[(&str, String)],
-    ) -> Result<Value, String> {
+    ) -> Result<Value, AppApiError> {
         let key = self.cache_key(path, query, false);
         if let Some(data) = cache::get(&key) {
             return Ok(data);
@@ -369,10 +337,8 @@ impl AppClient {
             .query(query)
             .send()
             .await
-            .map_err(|error| format!("SF 匿名 App 请求失败：{error}"))?;
-        let data = Self::parse_response(response, path)
-            .await
-            .map_err(|error| error.describe(path))?;
+            .map_err(AppApiError::transport)?;
+        let data = Self::parse_response(response, path).await?;
         cache::insert(key, data.clone());
         Ok(data)
     }
@@ -380,38 +346,34 @@ impl AppClient {
     /// 发送已签名 JSON POST 请求，并返回拆开的数据载荷。
     ///
     /// 此方法仅供请求体由 App 协议定义的原生层集成调用，任意渲染进程载荷不能到达此处。
-    pub(crate) async fn post_data(&self, path: &str, body: &Value) -> Result<Value, String> {
+    pub(crate) async fn post_data(&self, path: &str, body: &Value) -> Result<Value, AppApiError> {
         self.post_data_inner(path, body, true).await
     }
 
     /// 发送已签名 JSON PUT 请求，并返回拆开的数据载荷。
-    pub(crate) async fn put_data(&self, path: &str, body: &Value) -> Result<Value, String> {
+    pub(crate) async fn put_data(&self, path: &str, body: &Value) -> Result<Value, AppApiError> {
         let response = self
             .signed_request(reqwest::Method::PUT, path, true)?
             .json(body)
             .send()
             .await
-            .map_err(|error| format!("SF App 请求失败：{error}"))?;
-        Self::parse_response(response, path)
-            .await
-            .map_err(|error| error.describe(path))
+            .map_err(AppApiError::transport)?;
+        Self::parse_response(response, path).await
     }
 
     /// 发送已签名 DELETE 请求，并接受空响应体。
-    pub(crate) async fn delete_data(&self, path: &str) -> Result<(), String> {
+    pub(crate) async fn delete_data(&self, path: &str) -> Result<(), AppApiError> {
         let response = self
             .signed_request(reqwest::Method::DELETE, path, true)?
             .send()
             .await
-            .map_err(|error| format!("SF App 请求失败：{error}"))?;
-        Self::parse_response(response, path)
-            .await
-            .map_err(|error| error.describe(path))?;
+            .map_err(AppApiError::transport)?;
+        Self::parse_response(response, path).await?;
         Ok(())
     }
 
     /// 发送不带 App 会话的 JSON POST 请求，用于冷启动设备登记。
-    pub(crate) async fn post_public_data(&self, path: &str, body: &Value) -> Result<Value, String> {
+    pub(crate) async fn post_public_data(&self, path: &str, body: &Value) -> Result<Value, AppApiError> {
         self.post_data_inner(path, body, false).await
     }
 
@@ -421,15 +383,13 @@ impl AppClient {
         path: &str,
         body: &Value,
         include_session: bool,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, AppApiError> {
         let response = self
             .signed_request(reqwest::Method::POST, path, include_session)?
             .json(body)
             .send()
             .await
-            .map_err(|error| format!("SF App 请求失败：{error}"))?;
-        Self::parse_response(response, path)
-            .await
-            .map_err(|error| error.describe(path))
+            .map_err(AppApiError::transport)?;
+        Self::parse_response(response, path).await
     }
 }

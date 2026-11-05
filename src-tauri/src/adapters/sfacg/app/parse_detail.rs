@@ -156,9 +156,95 @@ pub(super) fn detail_from_audio_payload(detail: &Value, novel_id: i64) -> NovelD
     }
 }
 
+/// 将漫画详情响应转换为统一的详情结构。
+///
+/// 漫画的字段名与小说、有声都不同（`comicName`、`comicCover`、`folderName`），
+/// 但结构与兜底规则一致，因此与另外两种载荷放在同一模块，便于对照维护。
+///
+/// # 参数
+/// - `detail`：`/comics/{id}` 响应体。
+/// - `comic_id`：漫画编号，作为详情的主编号返回。
+pub(super) fn detail_from_comic_payload(detail: &Value, comic_id: i64) -> NovelDetail {
+    let text = |keys: &[&str]| payload_text(detail, keys);
+    let expand = detail.get("expand");
+    let latest = expand.and_then(|value| {
+        value
+            .get("latestChapter")
+            .or_else(|| value.get("latestchapter"))
+    });
+    NovelDetail {
+        novel_id: comic_id,
+        novel_name: text(&["comicName", "novelName", "name"])
+            .unwrap_or_else(|| "未命名漫画".to_string()),
+        author_name: text(&["authorName", "author"]).unwrap_or_else(|| "未知作者".to_string()),
+        novel_cover: text(&[
+            "coverBig",
+            "comicCover",
+            "coverMedium",
+            "coverSmall",
+            "novelCover",
+            "cover",
+        ])
+        .unwrap_or_default(),
+        last_update_time: text(&["lastUpdateTime", "updateTime"]).unwrap_or_default(),
+        description: text(&["intro", "description", "content"])
+            .unwrap_or_else(|| "暂无简介".to_string()),
+        is_finish: detail
+            .get("isFinished")
+            .or_else(|| detail.get("isFinish"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        type_name: Some(text(&["typeName", "categoryName"]).unwrap_or_else(|| "漫画".to_string())),
+        tags: parse_tags(
+            detail
+                .get("sysTags")
+                .or_else(|| detail.get("tags"))
+                .or_else(|| expand.and_then(|value| value.get("sysTags"))),
+        ),
+        score: detail.get("point").and_then(Value::as_f64),
+        chapter_count: detail
+            .get("chapterCount")
+            .or_else(|| expand.and_then(|value| value.get("chapterCount")))
+            .and_then(Value::as_i64),
+        character_count: detail.get("charCount").and_then(Value::as_i64),
+        view_count: detail
+            .get("visitTimes")
+            .or_else(|| detail.get("viewTimes"))
+            .and_then(Value::as_i64),
+        mark_count: detail.get("markCount").and_then(Value::as_i64),
+        point_count: detail
+            .get("pointCount")
+            .or_else(|| expand.and_then(|value| value.get("pointCount")))
+            .and_then(Value::as_i64),
+        favorite_count: detail
+            .get("favoriteCount")
+            .or_else(|| detail.get("fav"))
+            .or_else(|| expand.and_then(|value| value.get("fav")))
+            .and_then(Value::as_i64),
+        ticket_count: detail
+            .get("ticket")
+            .or_else(|| expand.and_then(|value| value.get("ticket")))
+            .and_then(Value::as_i64),
+        latest_chapter_title: latest
+            .and_then(|value| value.get("title"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        latest_chapter_time: latest
+            .and_then(|value| value.get("addTime"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        allow_download: None,
+        source_path: text(&["folderName"]).filter(|value| {
+            !value.is_empty()
+                && value.len() <= 100
+                && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::detail_from_novel_payload;
+    use super::{detail_from_comic_payload, detail_from_novel_payload};
     use serde_json::{json, Map, Value};
 
     fn novel_payload() -> Value {
@@ -198,5 +284,73 @@ mod tests {
         );
         assert!(detail.description.starts_with("这个大陆，医者为尊"));
         assert!(!detail.is_finish);
+    }
+
+    #[test]
+    fn comic_payload_prefers_comic_fields() {
+        let detail = detail_from_comic_payload(
+            &json!({
+                "comicName": "漫画名",
+                "authorName": "作者",
+                "comicCover": "https://img/cover.jpg",
+                "folderName": "comic2024",
+                "sysTags": ["热血", { "tagName": "校园" }]
+            }),
+            77,
+        );
+
+        assert_eq!(detail.novel_id, 77);
+        assert_eq!(detail.novel_name, "漫画名");
+        assert_eq!(detail.novel_cover, "https://img/cover.jpg");
+        assert_eq!(detail.source_path.as_deref(), Some("comic2024"));
+        assert_eq!(
+            detail.type_name.as_deref(),
+            Some("漫画"),
+            "缺少分类时回退到漫画"
+        );
+        assert_eq!(
+            detail.tags,
+            Some(vec!["热血".to_string(), "校园".to_string()]),
+            "字符串标签与对象标签都应解析"
+        );
+    }
+
+    #[test]
+    fn comic_payload_drops_unsafe_folder_name() {
+        let detail = detail_from_comic_payload(&json!({ "folderName": "../escape" }), 1);
+
+        assert!(
+            detail.source_path.is_none(),
+            "含路径分隔符的来源标识不能透传给下游"
+        );
+        assert_eq!(detail.novel_name, "未命名漫画");
+        assert_eq!(detail.description, "暂无简介");
+        assert_eq!(detail.author_name, "未知作者");
+    }
+
+    #[test]
+    fn comic_payload_reads_counters_from_expand() {
+        let detail = detail_from_comic_payload(
+            &json!({
+                "comicName": "漫画",
+                "isFinished": true,
+                "expand": {
+                    "chapterCount": 120,
+                    "fav": 9,
+                    "ticket": 4,
+                    "pointCount": 3,
+                    "latestChapter": { "title": "最新话", "addTime": "2026-01-01" }
+                }
+            }),
+            5,
+        );
+
+        assert!(detail.is_finish);
+        assert_eq!(detail.chapter_count, Some(120));
+        assert_eq!(detail.favorite_count, Some(9));
+        assert_eq!(detail.ticket_count, Some(4));
+        assert_eq!(detail.point_count, Some(3));
+        assert_eq!(detail.latest_chapter_title.as_deref(), Some("最新话"));
+        assert_eq!(detail.latest_chapter_time.as_deref(), Some("2026-01-01"));
     }
 }

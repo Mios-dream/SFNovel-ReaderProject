@@ -4,9 +4,11 @@
 //! App 凭证与网页凭证只由底层客户端读取，不能互相转换。
 //! 已登录 App 时书架、文字正文与媒体资源只使用 App；仅在没有 App 凭证时回退网页。
 //! 有声播放地址、设备登记和 App 余额只接受 App。
+//!
+//! `RemoteGateway` 的 27 个业务方法在这里直接实现，不再额外保留一层同名的
+//! `Result<_, String>` 版本；错误只在出口处转换一次。
 
 use super::app::AppClient;
-use super::device::device_profile;
 use super::web::WebClient;
 use crate::application::ports::RemoteGateway;
 use crate::application::state::AuthSessionState;
@@ -17,7 +19,7 @@ use crate::domain::catalog::{
 };
 use crate::domain::content::{ApiChapterContent, ImageAsset, TextChapter, TextOrigin};
 use crate::domain::error::{AppError, AppResult};
-use crate::domain::ids::validate_novel_id;
+use crate::domain::ids::{validate_chapter_id, validate_comic_id, NovelId};
 use crate::domain::signin::{SigninContinueDays, SigninDay, SigninReward, SigninWeekItem};
 use async_trait::async_trait;
 use tauri::{AppHandle, Manager, Runtime};
@@ -32,12 +34,12 @@ pub(crate) struct SfSource {
 
 impl SfSource {
     /// 创建内容入口。构造时各客户端只读取自己对应的凭证。
-    pub(crate) fn new<R: Runtime>(app: &AppHandle<R>) -> Result<Self, String> {
+    pub(crate) fn new<R: Runtime>(app: &AppHandle<R>) -> AppResult<Self> {
         let session = app.state::<AuthSessionState>().snapshot()?;
         let app_cookie = session.as_ref().and_then(|value| value.app_cookie.clone());
         let web_cookie = session.as_ref().and_then(|value| value.web_cookie.clone());
         Ok(Self {
-            app_client: AppClient::new(device_profile()?, app_cookie)?,
+            app_client: AppClient::new(app_cookie).map_err(AppError::from)?,
             web_client: WebClient::new(web_cookie)?,
         })
     }
@@ -45,13 +47,13 @@ impl SfSource {
     /// 先同步平台会话，再创建内容入口。
     ///
     /// Android 的 WebView 会话由原生插件持有，必须在读取前同步。
-    pub(crate) async fn connect(app: &AppHandle) -> Result<Self, String> {
+    pub(crate) async fn connect(app: &AppHandle) -> AppResult<Self> {
         #[cfg(target_os = "android")]
         if let Some(session) = crate::adapters::platform::android::synchronize_session(app).await? {
             *app.state::<AuthSessionState>()
                 .session
                 .lock()
-                .map_err(|_| "登录会话状态不可用".to_string())? = Some(session);
+                .map_err(|_| AppError::internal("登录会话状态不可用"))? = Some(session);
         }
         Self::new(app)
     }
@@ -68,167 +70,48 @@ impl SfSource {
 
     /// 校验 App 会话并返回 App 客户端。
     ///
-    /// # 参数
-    /// - `feature`：需要 App 凭证的功能名称，用于生成本地错误提示。
-    ///
-    /// # 返回
-    /// 返回当前快照中的 App 客户端。
-    ///
-    /// # 错误
-    /// 快照不包含有效 App 会话时返回错误。
-    fn require_app(&self, feature: &str) -> Result<&AppClient, String> {
+    /// `feature` 用于生成本地错误提示，说明哪个功能需要 App 凭证。
+    fn require_app(&self, feature: &str) -> AppResult<&AppClient> {
         if self.has_app_session() {
             Ok(&self.app_client)
         } else {
-            Err(format!("{feature}需要连接 App 凭证，请先完成 App 登录。"))
+            Err(AppError::unauthenticated(format!(
+                "{feature}需要连接 App 凭证，请先完成 App 登录。"
+            )))
         }
     }
 
     /// 校验网页会话并返回网页客户端。
-    ///
-    /// # 参数
-    /// - `feature`：需要网页凭证的功能名称，用于生成本地错误提示。
-    ///
-    /// # 返回
-    /// 返回当前快照中的网页客户端。
-    ///
-    /// # 错误
-    /// 快照不包含有效网页会话时返回错误。
-    fn require_web(&self, feature: &str) -> Result<&WebClient, String> {
+    fn require_web(&self, feature: &str) -> AppResult<&WebClient> {
         if self.has_web_session() {
             Ok(&self.web_client)
         } else {
-            Err(format!("{feature}需要连接网站凭证，请先完成官方网页登录。"))
+            Err(AppError::unauthenticated(format!(
+                "{feature}需要连接网站凭证，请先完成官方网页登录。"
+            )))
         }
     }
 
-    /// 搜索小说、有声与漫画。
-    pub(crate) async fn search(&self, query: &str) -> Result<Vec<SearchNovel>, String> {
-        self.app_client.search_novels(query).await
-    }
-
-    /// 读取首页发现数据。
-    pub(crate) async fn discover(&self, type_id: Option<i64>) -> Result<DiscoverFeed, String> {
-        self.app_client.get_discover_feed(type_id).await
-    }
-
-    /// 读取作品公开评论。
-    pub(crate) async fn book_comments(
-        &self,
-        kind: &str,
-        novel_id: i64,
-        media_id: Option<i64>,
-        page: i64,
-        size: i64,
-        reviews: bool,
-    ) -> Result<BookCommentPage, String> {
-        self.app_client
-            .get_book_comments(kind, novel_id, media_id, page, size, reviews)
-            .await
-    }
-
-    /// 读取评论回复。
-    pub(crate) async fn comment_replies(
-        &self,
-        kind: &str,
-        comment_id: i64,
-        reviews: bool,
-        page: i64,
-        size: i64,
-    ) -> Result<BookCommentReplyPage, String> {
-        self.app_client
-            .get_comment_replies(kind, comment_id, reviews, page, size)
-            .await
-    }
-
-    /// 读取小说详情。
-    pub(crate) async fn novel_detail(&self, novel_id: i64) -> Result<NovelDetail, String> {
-        self.app_client.get_novel_details(novel_id).await
-    }
-
-    /// 读取有声专辑详情。
-    pub(crate) async fn audio_detail(
-        &self,
-        album_id: i64,
-        novel_id: i64,
-    ) -> Result<NovelDetail, String> {
-        self.app_client.get_audio_details(album_id, novel_id).await
-    }
-
-    /// 读取漫画详情。
-    pub(crate) async fn comic_detail(&self, comic_id: i64) -> Result<NovelDetail, String> {
-        self.app_client.get_comic_details(comic_id).await
-    }
-
-    /// 读取文字小说目录。
-    pub(crate) async fn text_volumes(&self, novel_id: i64) -> Result<Vec<ChapterVolume>, String> {
-        self.app_client.get_chapter_catalog(novel_id).await
-    }
-
-    /// 反查小说对应的有声专辑编号。
-    pub(crate) async fn audio_album_id(
-        &self,
-        novel_id: i64,
-        title_hint: Option<&str>,
-    ) -> Result<i64, String> {
-        self.app_client
-            .find_audio_album_id(novel_id, title_hint)
-            .await
-    }
-
-    /// 读取有声目录。目录接口允许匿名访问。
-    pub(crate) async fn audio_catalog(
-        &self,
-        album_id: i64,
-        title_hint: Option<&str>,
-    ) -> Result<(String, Vec<AudioChapter>), String> {
-        self.app_client
-            .get_audio_catalog(album_id, title_hint)
-            .await
-    }
-
     /// 读取单章音频地址。地址由 App 返回，并需要 App 凭证播放。
-    pub(crate) async fn audio_source(&self, chapter_id: i64) -> Result<String, String> {
-        validate_novel_id(chapter_id)?;
+    pub(crate) async fn audio_source(&self, chapter_id: i64) -> AppResult<String> {
+        validate_chapter_id(chapter_id)?;
         if !self.has_app_session() {
-            return Err("音频地址为空，请登录 App 凭证后播放".to_string());
+            return Err(AppError::unauthenticated(
+                "音频地址为空，请登录 App 凭证后播放",
+            ));
         }
         self.app_client
             .find_audio_chapter_source(chapter_id)
             .await
-            .map_err(|error| format!("读取 App 音频地址失败：{error}"))?
-            .ok_or_else(|| "音频地址为空，请确认章节已解锁或重新登录 App 凭证".to_string())
+            .map_err(AppError::from)?
+            .ok_or_else(|| {
+                AppError::upstream("音频地址为空，请确认章节已解锁或重新登录 App 凭证")
+            })
     }
 
     /// 检查当前会话是否可以使用有声内容。
-    pub(crate) fn ensure_audio_access(&self) -> Result<(), String> {
+    pub(crate) fn ensure_audio_access(&self) -> AppResult<()> {
         self.require_app("有声内容").map(|_| ())
-    }
-
-    /// 解析漫画标题和来源目录标识。
-    pub(crate) async fn comic_source(
-        &self,
-        comic_id: i64,
-        source_path: Option<&str>,
-        title_hint: Option<&str>,
-    ) -> Result<(String, String), String> {
-        validate_novel_id(comic_id)?;
-        if let Some(folder) = source_path.filter(|value| is_comic_folder(value)) {
-            return Ok((
-                title_hint
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| format!("漫画 {comic_id}")),
-                folder.to_string(),
-            ));
-        }
-        self.app_client.comic_identity(comic_id).await
-    }
-
-    /// 读取漫画 App 目录。
-    pub(crate) async fn comic_catalog(&self, comic_id: i64) -> Result<Vec<ComicChapter>, String> {
-        self.app_client.get_comic_catalog(comic_id).await
     }
 
     /// 读取漫画章节图片地址。
@@ -236,159 +119,11 @@ impl SfSource {
         &self,
         comic_id: i64,
         path_name: &str,
-    ) -> Result<Vec<String>, String> {
+    ) -> AppResult<Vec<String>> {
         self.app_client
             .get_comic_chapter_images(comic_id, path_name)
             .await
-    }
-
-    /// 读取书架。App 优先，未登录 App 时回退网页。
-    pub(crate) async fn bookshelf(&self, force_refresh: bool) -> Result<PublicShelf, String> {
-        if self.has_app_session() {
-            return self.app_client.get_bookshelf(force_refresh).await;
-        }
-        let client = self.require_web("网页书架")?;
-        client.get_public_bookshelf().await
-    }
-
-    /// 收藏小说、有声专辑或漫画。
-    pub(crate) async fn add_favorite(
-        &self,
-        kind: &str,
-        novel_id: i64,
-        media_id: Option<i64>,
-    ) -> Result<(), String> {
-        let path = match kind {
-            "novel" => format!("/novels/{novel_id}/favs"),
-            "audio" => format!(
-                "/albums/{}/favs",
-                media_id.ok_or_else(|| "有声作品缺少专辑编号".to_string())?
-            ),
-            "comic" => format!("/comics/{novel_id}/favs"),
-            _ => return Err("不支持的收藏类型".to_string()),
-        };
-        self.require_app("收藏")?
-            .post_data(&path, &serde_json::json!({}))
-            .await
-            .map(|_| ())
-    }
-
-    /// 取消小说、有声专辑或漫画收藏。
-    pub(crate) async fn remove_favorite(
-        &self,
-        kind: &str,
-        novel_id: i64,
-        media_id: Option<i64>,
-    ) -> Result<(), String> {
-        self.require_app("取消收藏")?
-            .remove_favorite(kind, novel_id, media_id)
-            .await
-    }
-
-    /// 读取账户资料。存在 App 凭证时只读取 App，否则读取网页资料。
-    pub(crate) async fn account_profile(&self) -> Result<UserProfile, AppError> {
-        if self.has_app_session() {
-            return match self.app_client.get_user_profile().await {
-                Ok(profile) => Ok(profile),
-                Err(error) => {
-                    let message = error.describe("/user");
-                    eprintln!("[sfacg] App profile unavailable: {message}");
-                    if error.is_session_expired() {
-                        Err(AppError::unauthenticated(
-                            "SF App 登录已失效，已自动退出，请重新登录 App。",
-                        ))
-                    } else {
-                        Err(AppError::upstream(message))
-                    }
-                }
-            };
-        }
-        if self.has_web_session() {
-            return match self.web_client.get_user_profile().await {
-                Ok(profile) => Ok(profile),
-                Err(error) => {
-                    eprintln!("[sfacg] Web profile unavailable: {error}");
-                    Err(AppError::upstream(error))
-                }
-            };
-        }
-        Err(AppError::unauthenticated("请先连接 App 或网站凭证"))
-    }
-
-    /// 读取指定月份的签到日期。
-    pub(crate) async fn signin_month(&self, year: i64, month: i64) -> AppResult<Vec<SigninDay>> {
-        self.require_app("签到")
-            .map_err(remote_error)?
-            .get_signin_month(year, month)
-            .await
-            .map_err(remote_error)
-    }
-
-    /// 读取连续签到摘要。
-    pub(crate) async fn signin_continue_days(&self) -> AppResult<SigninContinueDays> {
-        self.require_app("签到")
-            .map_err(remote_error)?
-            .get_signin_continue_days()
-            .await
-            .map_err(remote_error)
-    }
-
-    /// 读取本周签到记录。
-    pub(crate) async fn signin_week(&self) -> AppResult<Vec<SigninWeekItem>> {
-        self.require_app("签到")
-            .map_err(remote_error)?
-            .get_signin_week()
-            .await
-            .map_err(remote_error)
-    }
-
-    /// 读取签到奖励记录。
-    pub(crate) async fn signin_rewards(&self) -> AppResult<Vec<SigninReward>> {
-        self.require_app("签到")
-            .map_err(remote_error)?
-            .get_signin_rewards()
-            .await
-            .map_err(remote_error)
-    }
-
-    /// 提交指定日期的签到。
-    pub(crate) async fn submit_signin(&self, date: &str) -> AppResult<()> {
-        self.require_app("签到")
-            .map_err(remote_error)?
-            .submit_signin(date)
-            .await
-            .map_err(remote_error)
-    }
-
-    /// 领取指定配置的签到奖励。
-    pub(crate) async fn claim_signin_reward(&self, config_id: i64) -> AppResult<()> {
-        self.require_app("签到")
-            .map_err(remote_error)?
-            .claim_signin_reward(config_id)
-            .await
-            .map_err(remote_error)
-    }
-
-    /// 验证当前账户会话可用。
-    pub(crate) async fn verify_account(&self) -> Result<(), AppError> {
-        self.account_profile().await.map(|_| ())
-    }
-
-    /// 使用账号密码登录 App，并返回 App 会话 Cookie。
-    pub(crate) async fn login_app(&self, username: &str, password: &str) -> Result<String, String> {
-        self.app_client
-            .login_with_password(username, password)
-            .await
-    }
-
-    /// 使用指定 App 会话登记当前安装。
-    ///
-    /// # 参数
-    /// - `app_cookie`：本次登录返回的 App Cookie。
-    pub(crate) async fn register_device(&self, app_cookie: &str) -> Result<(), String> {
-        self.app_client
-            .register_device_for_session(app_cookie)
-            .await
+            .map_err(AppError::from)
     }
 
     /// 有直接正文可用时尝试读取；否则返回 `None`。
@@ -396,9 +131,9 @@ impl SfSource {
         &self,
         chapter_id: i64,
         decode: F,
-    ) -> Option<Result<String, String>>
+    ) -> Option<AppResult<String>>
     where
-        F: FnOnce(&str, bool) -> Result<String, String>,
+        F: FnOnce(&str, bool) -> AppResult<String>,
     {
         if !self.has_app_session() {
             return None;
@@ -410,7 +145,7 @@ impl SfSource {
                 .await
             {
                 Ok(api) => decode(&api.content, api.is_content_encrypted),
-                Err(error) => Err(error),
+                Err(error) => Err(AppError::from(error)),
             },
         )
     }
@@ -422,9 +157,9 @@ impl SfSource {
         volume_id: i64,
         chapter_id: i64,
         decode: F,
-    ) -> Result<TextChapter, String>
+    ) -> AppResult<TextChapter>
     where
-        F: FnOnce(&str, bool) -> Result<String, String>,
+        F: FnOnce(&str, bool) -> AppResult<String>,
     {
         if let Some(result) = self.try_direct_text_chapter(chapter_id, decode).await {
             return result.map(|content| TextChapter {
@@ -438,17 +173,18 @@ impl SfSource {
             .map(|content| TextChapter {
                 content,
                 origin: TextOrigin::Web,
-            })
-    }
+            })}
 
     /// 读取 VIP 图片正文。
     pub(crate) async fn read_vip_image_chapter(
         &self,
         novel_id: i64,
         chapter_id: i64,
-    ) -> Result<ImageAsset, String> {
+    ) -> AppResult<ImageAsset> {
         if self.has_app_session() {
-            return Err("已连接 App 凭证，VIP 图片正文不再回退网页".to_string());
+            return Err(AppError::internal(
+                "已连接 App 凭证，VIP 图片正文不再回退网页",
+            ));
         }
         let client = self.require_web("网页 VIP 图片正文")?;
         let image = client.vip_chapter_image(novel_id, chapter_id).await?;
@@ -484,33 +220,26 @@ impl SfSource {
 }
 
 /// 判断字符串是否可作为安全的 SF 漫画目录标识。
-///
-/// # 参数
-/// - `value`：待校验的目录标识。
 fn is_comic_folder(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 100
         && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 
-/// 将远程适配层错误转换为应用层上游错误。
-///
-/// # 参数
-/// - `message`：远程客户端返回的错误说明。
-fn remote_error(message: String) -> AppError {
-    AppError::upstream(message)
-}
-
 #[async_trait]
 impl RemoteGateway for SfSource {
     async fn search(&self, query: &str) -> AppResult<Vec<SearchNovel>> {
-        SfSource::search(self, query).await.map_err(remote_error)
+        self.app_client
+            .search_novels(query)
+            .await
+            .map_err(AppError::from)
     }
 
     async fn discover(&self, type_id: Option<i64>) -> AppResult<DiscoverFeed> {
-        SfSource::discover(self, type_id)
+        self.app_client
+            .get_discover_feed(type_id)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn book_comments(
@@ -522,9 +251,10 @@ impl RemoteGateway for SfSource {
         size: i64,
         reviews: bool,
     ) -> AppResult<BookCommentPage> {
-        SfSource::book_comments(self, kind, novel_id, media_id, page, size, reviews)
+        self.app_client
+            .get_book_comments(kind, novel_id, media_id, page, size, reviews)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn comment_replies(
@@ -535,39 +265,45 @@ impl RemoteGateway for SfSource {
         page: i64,
         size: i64,
     ) -> AppResult<BookCommentReplyPage> {
-        SfSource::comment_replies(self, kind, comment_id, reviews, page, size)
+        self.app_client
+            .get_comment_replies(kind, comment_id, reviews, page, size)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
-    async fn novel_detail(&self, novel_id: i64) -> AppResult<NovelDetail> {
-        SfSource::novel_detail(self, novel_id)
+    async fn novel_detail(&self, novel_id: NovelId) -> AppResult<NovelDetail> {
+        self.app_client
+            .get_novel_details(novel_id.get())
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
-    async fn audio_detail(&self, album_id: i64, novel_id: i64) -> AppResult<NovelDetail> {
-        SfSource::audio_detail(self, album_id, novel_id)
+    async fn audio_detail(&self, album_id: i64, novel_id: NovelId) -> AppResult<NovelDetail> {
+        self.app_client
+            .get_audio_details(album_id, novel_id.get())
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn comic_detail(&self, comic_id: i64) -> AppResult<NovelDetail> {
-        SfSource::comic_detail(self, comic_id)
+        self.app_client
+            .get_comic_details(comic_id)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
-    async fn text_volumes(&self, novel_id: i64) -> AppResult<Vec<ChapterVolume>> {
-        SfSource::text_volumes(self, novel_id)
+    async fn text_volumes(&self, novel_id: NovelId) -> AppResult<Vec<ChapterVolume>> {
+        self.app_client
+            .get_chapter_catalog(novel_id.get())
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
-    async fn audio_album_id(&self, novel_id: i64, title_hint: Option<&str>) -> AppResult<i64> {
-        SfSource::audio_album_id(self, novel_id, title_hint)
+    async fn audio_album_id(&self, novel_id: NovelId, title_hint: Option<&str>) -> AppResult<i64> {
+        self.app_client
+            .find_audio_album_id(novel_id.get(), title_hint)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn audio_catalog(
@@ -575,9 +311,10 @@ impl RemoteGateway for SfSource {
         album_id: i64,
         title_hint: Option<&str>,
     ) -> AppResult<(String, Vec<AudioChapter>)> {
-        SfSource::audio_catalog(self, album_id, title_hint)
+        self.app_client
+            .get_audio_catalog(album_id, title_hint)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn comic_source(
@@ -586,22 +323,40 @@ impl RemoteGateway for SfSource {
         source_path: Option<&str>,
         title_hint: Option<&str>,
     ) -> AppResult<(String, String)> {
-        SfSource::comic_source(self, comic_id, source_path, title_hint)
+        validate_comic_id(comic_id)?;
+        if let Some(folder) = source_path.filter(|value| is_comic_folder(value)) {
+            return Ok((
+                title_hint
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| format!("漫画 {comic_id}")),
+                folder.to_string(),
+            ));
+        }
+        self.app_client
+            .comic_identity(comic_id)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn comic_catalog(&self, comic_id: i64) -> AppResult<Vec<ComicChapter>> {
-        SfSource::comic_catalog(self, comic_id)
+        self.app_client
+            .get_comic_catalog(comic_id)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn bookshelf(&self, force_refresh: bool) -> AppResult<PublicShelf> {
-        SfSource::bookshelf(self, force_refresh)
-            .await
-            .map_err(remote_error)
-    }
+        if self.has_app_session() {
+            return self
+                .app_client
+                .get_bookshelf(force_refresh)
+                .await
+                .map_err(AppError::from);
+        }
+        let client = self.require_web("网页书架")?;
+        client.get_public_bookshelf().await}
 
     async fn add_favorite(
         &self,
@@ -609,9 +364,20 @@ impl RemoteGateway for SfSource {
         novel_id: i64,
         media_id: Option<i64>,
     ) -> AppResult<()> {
-        SfSource::add_favorite(self, kind, novel_id, media_id)
+        let path = match kind {
+            "novel" => format!("/novels/{novel_id}/favs"),
+            "audio" => format!(
+                "/albums/{}/favs",
+                media_id.ok_or_else(|| AppError::upstream("有声作品缺少专辑编号"))?
+            ),
+            "comic" => format!("/comics/{novel_id}/favs"),
+            _ => return Err(AppError::invalid_input("不支持的收藏类型")),
+        };
+        self.require_app("收藏")?
+            .post_data(&path, &serde_json::json!({}))
             .await
-            .map_err(remote_error)
+            .map(|_| ())
+            .map_err(AppError::from)
     }
 
     async fn remove_favorite(
@@ -620,72 +386,115 @@ impl RemoteGateway for SfSource {
         novel_id: i64,
         media_id: Option<i64>,
     ) -> AppResult<()> {
-        SfSource::remove_favorite(self, kind, novel_id, media_id)
+        self.require_app("取消收藏")?
+            .remove_favorite(kind, novel_id, media_id)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn account_profile(&self) -> AppResult<UserProfile> {
-        SfSource::account_profile(self).await
+        if self.has_app_session() {
+            return match self.app_client.get_user_profile().await {
+                Ok(profile) => Ok(profile),
+                Err(error) => {
+                    let message = error.describe("/user");
+                    log_warn!("[sfacg] App profile unavailable: {message}");
+                    if error.is_session_expired() {
+                        Err(AppError::unauthenticated(
+                            "SF App 登录已失效，已自动退出，请重新登录 App。",
+                        ))
+                    } else {
+                        Err(AppError::upstream(message))
+                    }
+                }
+            };
+        }
+        if self.has_web_session() {
+            return match self.web_client.get_user_profile().await {
+                Ok(profile) => Ok(profile),
+                Err(error) => {
+                    log_warn!("[sfacg] Web profile unavailable: {error}");
+                    Err(error)
+                }
+            };
+        }
+        Err(AppError::unauthenticated("请先连接 App 或网站凭证"))
     }
 
     async fn signin_month(&self, year: i64, month: i64) -> AppResult<Vec<SigninDay>> {
-        SfSource::signin_month(self, year, month).await
+        self.require_app("签到")?
+            .get_signin_month(year, month)
+            .await
+            .map_err(AppError::from)
     }
 
     async fn signin_continue_days(&self) -> AppResult<SigninContinueDays> {
-        SfSource::signin_continue_days(self).await
+        self.require_app("签到")?
+            .get_signin_continue_days()
+            .await
+            .map_err(AppError::from)
     }
 
     async fn signin_week(&self) -> AppResult<Vec<SigninWeekItem>> {
-        SfSource::signin_week(self).await
+        self.require_app("签到")?
+            .get_signin_week()
+            .await
+            .map_err(AppError::from)
     }
 
     async fn signin_rewards(&self) -> AppResult<Vec<SigninReward>> {
-        SfSource::signin_rewards(self).await
+        self.require_app("签到")?
+            .get_signin_rewards()
+            .await
+            .map_err(AppError::from)
     }
 
     async fn submit_signin(&self, date: &str) -> AppResult<()> {
-        SfSource::submit_signin(self, date).await
+        self.require_app("签到")?
+            .submit_signin(date)
+            .await
+            .map_err(AppError::from)
     }
 
     async fn claim_signin_reward(&self, config_id: i64) -> AppResult<()> {
-        SfSource::claim_signin_reward(self, config_id).await
+        self.require_app("签到")?
+            .claim_signin_reward(config_id)
+            .await
+            .map_err(AppError::from)
     }
 
     async fn verify_account(&self) -> AppResult<()> {
-        SfSource::verify_account(self).await
+        self.account_profile().await.map(|_| ())
     }
 
     async fn login_app(&self, username: &str, password: &str) -> AppResult<String> {
-        SfSource::login_app(self, username, password)
+        self.app_client
+            .login_with_password(username, password)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn register_device(&self, app_cookie: &str) -> AppResult<()> {
-        SfSource::register_device(self, app_cookie)
+        self.app_client
+            .register_device_for_session(app_cookie)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn app_chapter_content(&self, chapter_id: i64) -> AppResult<ApiChapterContent> {
-        self.require_app("正文对齐")
-            .map_err(remote_error)?
+        self.require_app("正文对齐")?
             .get_chapter_content_and_metadata(chapter_id)
             .await
-            .map_err(remote_error)
+            .map_err(AppError::from)
     }
 
     async fn web_chapter_content(
         &self,
-        novel_id: i64,
+        novel_id: NovelId,
         volume_id: i64,
         chapter_id: i64,
     ) -> AppResult<String> {
         self.web_client
-            .chapter_content(novel_id, volume_id, chapter_id)
-            .await
-            .map_err(remote_error)
-    }
+            .chapter_content(novel_id.get(), volume_id, chapter_id)
+            .await}
 }

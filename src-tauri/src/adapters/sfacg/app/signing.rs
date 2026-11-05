@@ -1,5 +1,6 @@
 //! App API 请求签名。
 
+use crate::domain::error::{AppError, AppResult};
 use super::super::device::DeviceProfile;
 use super::constants::SF_SECURITY_SALT_V2;
 use md5::{Digest, Md5};
@@ -9,10 +10,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const V2_SEGMENT_SIZES: [usize; 4] = [13, 16, 36, 36];
 
 /// 构建 SF `SFSecurity` 请求头，不记录任何凭据材料。
-pub(super) fn security_header(device: &DeviceProfile, nonce: &str) -> Result<String, String> {
+pub(super) fn security_header(device: &DeviceProfile, nonce: &str) -> AppResult<String> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| "系统时间无效".to_string())?
+        .map_err(|_| AppError::internal("系统时间无效"))?
         .as_millis();
     let nonce = nonce.to_uppercase();
     let device_id = device.device_id.to_uppercase();
@@ -23,13 +24,13 @@ pub(super) fn security_header(device: &DeviceProfile, nonce: &str) -> Result<Str
 }
 
 /// 计算 5.2.84 的 101 字符变换签名。
-fn sfacg_sign_v2(nonce: &str, timestamp: u128, device_id: &str) -> Result<String, String> {
+fn sfacg_sign_v2(nonce: &str, timestamp: u128, device_id: &str) -> AppResult<String> {
     if nonce.len() != 36 || device_id.len() != 36 {
-        return Err("SFSecurity 签名需要 36 字符的 nonce 和设备编号".to_string());
+        return Err(AppError::internal("SFSecurity 签名需要 36 字符的 nonce 和设备编号"));
     }
     let timestamp_text = timestamp.to_string();
     if timestamp_text.len() != 13 {
-        return Err("SFSecurity 签名需要 13 位毫秒时间戳".to_string());
+        return Err(AppError::internal("SFSecurity 签名需要 13 位毫秒时间戳"));
     }
 
     let repeated = nonce.repeat(4);

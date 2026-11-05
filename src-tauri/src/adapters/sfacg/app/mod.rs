@@ -6,8 +6,18 @@ mod audio;
 mod auth;
 /// App API 成功响应的进程内缓存。
 mod cache;
-/// 小说、有声和漫画的搜索与详情接口。
-mod catalog;
+/// 有声专辑编号的查找接口。
+mod album;
+/// 公开评论与回复接口。
+mod comments;
+/// 小说与有声作品的详情接口。
+mod detail;
+/// 首页发现接口。
+mod discover;
+/// 搜索接口。
+mod search;
+/// 书架与收藏接口。
+mod shelf;
 /// App HTTP 客户端、会话快照与请求重试策略。
 mod client;
 /// 漫画详情与目录标识接口。
@@ -32,4 +42,3 @@ mod signing;
 mod signin;
 
 pub(crate) use client::AppClient;
-pub(crate) use error::is_risk_control_failure;

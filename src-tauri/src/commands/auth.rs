@@ -1,20 +1,11 @@
 //! 会话与账户命令。
 
 use crate::adapters::platform::NativeAuthGateway;
-use crate::adapters::sfacg::source::SfSource;
 use crate::application::auth::AuthService;
 use crate::application::state::AuthSessionState;
 use crate::domain::auth::{AuthStatus, UserProfile};
-use crate::domain::error::AppError;
+use crate::domain::error::AppResult;
 use tauri::Manager;
-
-/// 根据当前应用句柄创建已装配的 SF 内容源。
-///
-/// # 参数
-/// - `app`：Tauri 应用句柄，用于读取平台状态和持久化会话。
-async fn source(app: &tauri::AppHandle) -> Result<SfSource, AppError> {
-    SfSource::connect(app).await.map_err(AppError::upstream)
-}
 
 #[tauri::command]
 /// 同步平台会话并返回当前认证状态。
@@ -24,14 +15,11 @@ async fn source(app: &tauri::AppHandle) -> Result<SfSource, AppError> {
 ///
 /// # 错误
 /// 会话同步、上游初始化或状态读取失败时返回可展示的错误消息。
-pub(crate) async fn auth_status(app: tauri::AppHandle) -> Result<AuthStatus, String> {
-    let remote = source(&app).await.map_err(AppError::into_message)?;
+pub(crate) async fn auth_status(app: tauri::AppHandle) -> AppResult<AuthStatus> {
+    let remote = super::remote(&app).await?;
     let gateway = NativeAuthGateway::new(app.clone());
     let state = app.state::<AuthSessionState>();
-    AuthService::new(&remote, &gateway, &state)
-        .status()
-        .await
-        .map_err(AppError::into_message)
+    AuthService::new(&remote, &gateway, &state).status().await
 }
 
 #[tauri::command]
@@ -48,14 +36,13 @@ pub(crate) async fn login_with_password(
     app: tauri::AppHandle,
     username: String,
     password: String,
-) -> Result<AuthStatus, String> {
-    let remote = source(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<AuthStatus> {
+    let remote = super::remote(&app).await?;
     let gateway = NativeAuthGateway::new(app.clone());
     let state = app.state::<AuthSessionState>();
     AuthService::new(&remote, &gateway, &state)
         .login_with_password(&username, &password)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -66,14 +53,13 @@ pub(crate) async fn login_with_password(
 ///
 /// # 错误
 /// 官方登录取消后通常返回成功；流程失败或未返回 Web Cookie 时返回错误。
-pub(crate) async fn start_official_login(app: tauri::AppHandle) -> Result<(), String> {
-    let remote = source(&app).await.map_err(AppError::into_message)?;
+pub(crate) async fn start_official_login(app: tauri::AppHandle) -> AppResult<()> {
+    let remote = super::remote(&app).await?;
     let gateway = NativeAuthGateway::new(app.clone());
     let state = app.state::<AuthSessionState>();
     AuthService::new(&remote, &gateway, &state)
         .start_official_login()
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -84,14 +70,11 @@ pub(crate) async fn start_official_login(app: tauri::AppHandle) -> Result<(), St
 ///
 /// # 错误
 /// 平台清理或状态更新失败时返回错误消息。
-pub(crate) async fn logout(app: tauri::AppHandle) -> Result<(), String> {
-    let remote = source(&app).await.map_err(AppError::into_message)?;
+pub(crate) async fn logout(app: tauri::AppHandle) -> AppResult<()> {
+    let remote = super::remote(&app).await?;
     let gateway = NativeAuthGateway::new(app.clone());
     let state = app.state::<AuthSessionState>();
-    AuthService::new(&remote, &gateway, &state)
-        .logout()
-        .await
-        .map_err(AppError::into_message)
+    AuthService::new(&remote, &gateway, &state).logout().await
 }
 
 #[tauri::command]
@@ -102,14 +85,13 @@ pub(crate) async fn logout(app: tauri::AppHandle) -> Result<(), String> {
 ///
 /// # 错误
 /// App 会话清理或状态更新失败时返回错误消息。
-pub(crate) async fn logout_app_session(app: tauri::AppHandle) -> Result<AuthStatus, String> {
-    let remote = source(&app).await.map_err(AppError::into_message)?;
+pub(crate) async fn logout_app_session(app: tauri::AppHandle) -> AppResult<AuthStatus> {
+    let remote = super::remote(&app).await?;
     let gateway = NativeAuthGateway::new(app.clone());
     let state = app.state::<AuthSessionState>();
     AuthService::new(&remote, &gateway, &state)
         .logout_app()
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -120,14 +102,13 @@ pub(crate) async fn logout_app_session(app: tauri::AppHandle) -> Result<AuthStat
 ///
 /// # 错误
 /// Web 会话清理或状态更新失败时返回错误消息。
-pub(crate) async fn logout_web_session(app: tauri::AppHandle) -> Result<AuthStatus, String> {
-    let remote = source(&app).await.map_err(AppError::into_message)?;
+pub(crate) async fn logout_web_session(app: tauri::AppHandle) -> AppResult<AuthStatus> {
+    let remote = super::remote(&app).await?;
     let gateway = NativeAuthGateway::new(app.clone());
     let state = app.state::<AuthSessionState>();
     AuthService::new(&remote, &gateway, &state)
         .logout_web()
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -138,16 +119,11 @@ pub(crate) async fn logout_web_session(app: tauri::AppHandle) -> Result<AuthStat
 ///
 /// # 错误
 /// 未登录、会话过期或上游请求失败时返回错误消息。
-pub(crate) async fn verify_authenticated_request(
-    app: tauri::AppHandle,
-) -> Result<AuthStatus, String> {
-    let remote = source(&app).await.map_err(AppError::into_message)?;
+pub(crate) async fn verify_authenticated_request(app: tauri::AppHandle) -> AppResult<AuthStatus> {
+    let remote = super::remote(&app).await?;
     let gateway = NativeAuthGateway::new(app.clone());
     let state = app.state::<AuthSessionState>();
-    AuthService::new(&remote, &gateway, &state)
-        .verify()
-        .await
-        .map_err(AppError::into_message)
+    AuthService::new(&remote, &gateway, &state).verify().await
 }
 
 #[tauri::command]
@@ -158,12 +134,9 @@ pub(crate) async fn verify_authenticated_request(
 ///
 /// # 错误
 /// 未登录或上游资料接口失败时返回错误消息。
-pub(crate) async fn get_account_profile(app: tauri::AppHandle) -> Result<UserProfile, String> {
-    let remote = source(&app).await.map_err(AppError::into_message)?;
+pub(crate) async fn get_account_profile(app: tauri::AppHandle) -> AppResult<UserProfile> {
+    let remote = super::remote(&app).await?;
     let gateway = NativeAuthGateway::new(app.clone());
     let state = app.state::<AuthSessionState>();
-    AuthService::new(&remote, &gateway, &state)
-        .profile()
-        .await
-        .map_err(AppError::into_message)
+    AuthService::new(&remote, &gateway, &state).profile().await
 }

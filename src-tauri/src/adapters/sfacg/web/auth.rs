@@ -1,4 +1,5 @@
 use super::html::{extract_js_field, strip_html_text};
+use crate::domain::error::{AppError, AppResult};
 use super::WebClient;
 use crate::domain::auth::UserProfile;
 use serde_json::Value;
@@ -11,7 +12,7 @@ impl WebClient {
     ///
     /// # 错误
     /// 网页会话缺失、登录信息失效或账户中心请求失败时返回错误。
-    pub(crate) async fn get_user_profile(&self) -> Result<UserProfile, String> {
+    pub(crate) async fn get_user_profile(&self) -> AppResult<UserProfile> {
         self.require_session()?;
         let account = self.get_login_info().await?;
         let mut profile = user_profile_from_login_info(&account)?;
@@ -19,12 +20,12 @@ impl WebClient {
             .page_request("https://m.sfacg.com/my/", Some("https://m.sfacg.com/"))
             .send()
             .await
-            .map_err(|error| format!("无法读取 SF 网页账户中心：{error}"))?
+            .map_err(|error| AppError::upstream(format!("无法读取 SF 网页账户中心：{error}")))?
             .error_for_status()
-            .map_err(|error| format!("SF 网页账户中心请求被拒绝：{error}"))?
+            .map_err(|error| AppError::upstream(format!("SF 网页账户中心请求被拒绝：{error}")))?
             .text()
             .await
-            .map_err(|error| format!("SF 网页账户中心格式无效：{error}"))?;
+            .map_err(|error| AppError::upstream(format!("SF 网页账户中心格式无效：{error}")))?;
         let account_text = strip_html_text(&my_html);
         let month_ticket = extract_numbers_after_text(&account_text, "月票")
             .first()
@@ -47,7 +48,7 @@ impl WebClient {
     }
 
     /// 根据 `newVip.isNewVip` 选择新 VIP 或旧 VIP 资料。
-    async fn get_web_vip_details(&self) -> Result<WebVipDetails, String> {
+    async fn get_web_vip_details(&self) -> AppResult<WebVipDetails> {
         let payload = self
             .ajax_request(
                 "https://pages.sfacg.com/api/User?expand=newVip",
@@ -55,12 +56,12 @@ impl WebClient {
             )
             .send()
             .await
-            .map_err(|error| format!("无法读取 SF VIP 资料：{error}"))?
+            .map_err(|error| AppError::upstream(format!("无法读取 SF VIP 资料：{error}")))?
             .error_for_status()
-            .map_err(|error| format!("SF VIP 资料请求被拒绝：{error}"))?
+            .map_err(|error| AppError::upstream(format!("SF VIP 资料请求被拒绝：{error}")))?
             .json::<Value>()
             .await
-            .map_err(|error| format!("SF VIP 资料格式无效：{error}"))?;
+            .map_err(|error| AppError::upstream(format!("SF VIP 资料格式无效：{error}")))?;
         let new_vip = web_new_vip_details_from_payload(&payload)?;
         if new_vip.is_new {
             return Ok(WebVipDetails {
@@ -77,12 +78,12 @@ impl WebClient {
             )
             .send()
             .await
-            .map_err(|error| format!("无法读取 SF 旧 VIP 资料：{error}"))?
+            .map_err(|error| AppError::upstream(format!("无法读取 SF 旧 VIP 资料：{error}")))?
             .error_for_status()
-            .map_err(|error| format!("SF 旧 VIP 资料请求被拒绝：{error}"))?
+            .map_err(|error| AppError::upstream(format!("SF 旧 VIP 资料请求被拒绝：{error}")))?
             .json::<Value>()
             .await
-            .map_err(|error| format!("SF 旧 VIP 资料格式无效：{error}"))?;
+            .map_err(|error| AppError::upstream(format!("SF 旧 VIP 资料格式无效：{error}")))?;
         let level = web_old_vip_level_from_payload(&payload)?;
         Ok(WebVipDetails {
             system: "legacy",
@@ -92,16 +93,16 @@ impl WebClient {
     }
 
     /// 请求官方网页登录信息，不返回原始响应给调用方。
-    pub(super) async fn get_login_info(&self) -> Result<String, String> {
+    pub(super) async fn get_login_info(&self) -> AppResult<String> {
         self.page_request("https://passport.sfacg.com/Ajax/GetLoginInfo.ashx", None)
             .send()
             .await
-            .map_err(|error| format!("无法读取 SF 网页账号信息：{error}"))?
+            .map_err(|error| AppError::upstream(format!("无法读取 SF 网页账号信息：{error}")))?
             .error_for_status()
-            .map_err(|error| format!("SF 网页账号信息请求被拒绝：{error}"))?
+            .map_err(|error| AppError::upstream(format!("SF 网页账号信息请求被拒绝：{error}")))?
             .text()
             .await
-            .map_err(|error| format!("SF 网页账号信息格式无效：{error}"))
+            .map_err(|error| AppError::upstream(format!("SF 网页账号信息格式无效：{error}")))
     }
 }
 
@@ -115,14 +116,14 @@ impl WebClient {
 ///
 /// # 错误
 /// 响应表示未登录或缺少昵称时返回错误。
-fn user_profile_from_login_info(value: &str) -> Result<UserProfile, String> {
+fn user_profile_from_login_info(value: &str) -> AppResult<UserProfile> {
     if extract_js_field(value, "login").as_deref() != Some("true") {
-        return Err("网页登录会话已失效".to_string());
+        return Err(AppError::upstream("网页登录会话已失效"));
     }
     let nick_name = ["nickname", "nickName"]
         .iter()
         .find_map(|field| extract_js_field(value, field))
-        .ok_or_else(|| "SF 网页账号信息未返回昵称".to_string())?;
+        .ok_or_else(|| AppError::upstream("SF 网页账号信息未返回昵称"))?;
     let avatar = ["avatar", "userAvatar", "portrait", "headImg", "headimg"]
         .iter()
         .find_map(|field| extract_js_field(value, field))
@@ -210,28 +211,28 @@ struct WebVipDetails {
 }
 
 /// 从 `newVip` 响应中提取新旧体系标记、等级和名称。
-fn web_new_vip_details_from_payload(payload: &Value) -> Result<NewVipDetails, String> {
+fn web_new_vip_details_from_payload(payload: &Value) -> AppResult<NewVipDetails> {
     if payload
         .get("status")
         .and_then(|status| status.get("errorCode"))
         .and_then(Value::as_i64)
         != Some(200)
     {
-        return Err("SF VIP 资料请求未成功".to_string());
+        return Err(AppError::upstream("SF VIP 资料请求未成功"));
     }
     let vip = payload
         .get("data")
         .and_then(|data| data.get("expand"))
         .and_then(|expand| expand.get("newVip"))
-        .ok_or_else(|| "SF VIP 资料未返回等级".to_string())?;
+        .ok_or_else(|| AppError::upstream("SF VIP 资料未返回等级"))?;
     let is_new = vip
         .get("isNewVip")
         .and_then(Value::as_bool)
-        .ok_or_else(|| "SF VIP 资料未返回体系标记".to_string())?;
+        .ok_or_else(|| AppError::upstream("SF VIP 资料未返回体系标记"))?;
     let level = vip
         .get("level")
         .and_then(Value::as_i64)
-        .ok_or_else(|| "SF VIP 资料未返回等级".to_string())?;
+        .ok_or_else(|| AppError::upstream("SF VIP 资料未返回等级"))?;
     let name = vip
         .get("name")
         .and_then(Value::as_str)
@@ -245,20 +246,20 @@ fn web_new_vip_details_from_payload(payload: &Value) -> Result<NewVipDetails, St
 }
 
 /// 从旧 VIP 接口提取当前旧体系等级。
-fn web_old_vip_level_from_payload(payload: &Value) -> Result<i64, String> {
+fn web_old_vip_level_from_payload(payload: &Value) -> AppResult<i64> {
     if payload
         .get("status")
         .and_then(|status| status.get("errorCode"))
         .and_then(Value::as_i64)
         != Some(200)
     {
-        return Err("SF 旧 VIP 资料请求未成功".to_string());
+        return Err(AppError::upstream("SF 旧 VIP 资料请求未成功"));
     }
     payload
         .get("data")
         .and_then(|data| data.get("vipLevel"))
         .and_then(Value::as_i64)
-        .ok_or_else(|| "SF 旧 VIP 资料未返回等级".to_string())
+        .ok_or_else(|| AppError::upstream("SF 旧 VIP 资料未返回等级"))
 }
 
 /// 判断账户名是否符合网页端点允许的受限字符和长度规则。

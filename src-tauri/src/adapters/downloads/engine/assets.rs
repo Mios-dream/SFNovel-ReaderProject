@@ -1,8 +1,11 @@
 //! 下载流程共用的封面、详情和二进制资源写入。
 
 use crate::adapters::sfacg::source::SfSource;
-use crate::adapters::storage::write_bytes_atomically;
+use crate::adapters::storage::replace_file;
+use crate::application::ports::RemoteGateway;
 use crate::domain::catalog::NovelDetail;
+use crate::domain::error::{AppError, AppResult};
+use crate::domain::ids::NovelId;
 use crate::domain::library::WorkMetadata;
 use std::path::Path;
 
@@ -86,18 +89,18 @@ pub(super) async fn fetch_asset(
     referer: &str,
     accept: &str,
     label: &str,
-) -> Result<Vec<u8>, String> {
+) -> AppResult<Vec<u8>> {
     source
         .asset_request(url, referer, accept)
         .send()
         .await
-        .map_err(|error| format!("无法下载{label}：{error}"))?
+        .map_err(|error| AppError::upstream(format!("无法下载{label}：{error}")))?
         .error_for_status()
-        .map_err(|error| format!("{label}下载被拒绝：{error}"))?
+        .map_err(|error| AppError::upstream(format!("{label}下载被拒绝：{error}")))?
         .bytes()
         .await
         .map(|bytes| bytes.to_vec())
-        .map_err(|error| format!("无法读取{label}：{error}"))
+        .map_err(|error| AppError::storage(format!("无法读取{label}：{error}")))
 }
 
 /// 下载并原子写入封面；文件已存在时跳过。
@@ -121,7 +124,7 @@ async fn save_cover(
     base_url: &str,
     referer: &str,
     label: &str,
-) -> Result<(), String> {
+) -> AppResult<()> {
     if cover_url.trim().is_empty() {
         return Ok(());
     }
@@ -138,7 +141,7 @@ async fn save_cover(
         label,
     )
     .await?;
-    write_bytes_atomically(&target, &payload, label)
+    replace_file(&target, &payload, label)
 }
 
 /// 拉取小说详情并保存元数据与封面。
@@ -156,8 +159,8 @@ pub(super) async fn enrich_novel_metadata(
     directory: &Path,
     metadata: &mut WorkMetadata,
     novel_id: i64,
-) -> Result<(), String> {
-    let detail = source.novel_detail(novel_id).await?;
+) -> AppResult<()> {
+    let detail = source.novel_detail(NovelId::new(novel_id)?).await?;
     metadata.id = Some(novel_id);
     apply_detail_metadata(metadata, &detail);
     save_cover(
@@ -189,10 +192,11 @@ pub(super) async fn enrich_audio_metadata(
     metadata: &mut WorkMetadata,
     novel_id: i64,
     album_id: i64,
-) -> Result<(), String> {
+) -> AppResult<()> {
+    let novel_id = NovelId::new(novel_id)?;
     let detail = source.audio_detail(album_id, novel_id).await?;
     metadata.id = Some(album_id);
-    metadata.catalog_id = Some(novel_id);
+    metadata.catalog_id = Some(novel_id.get());
     apply_detail_metadata(metadata, &detail);
     let cover_url = if detail.novel_cover.trim().is_empty() {
         source
@@ -230,7 +234,7 @@ pub(super) async fn enrich_comic_metadata(
     directory: &Path,
     metadata: &mut WorkMetadata,
     comic_id: i64,
-) -> Result<(), String> {
+) -> AppResult<()> {
     let detail = source.comic_detail(comic_id).await?;
     metadata.id = Some(comic_id);
     metadata.online_path = detail

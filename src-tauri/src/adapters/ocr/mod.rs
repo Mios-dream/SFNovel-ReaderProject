@@ -3,6 +3,7 @@
 #[cfg(not(target_os = "android"))]
 mod worker;
 
+use crate::domain::error::{AppError, AppResult};
 use std::path::{Path, PathBuf};
 
 #[cfg(not(target_os = "android"))]
@@ -13,7 +14,7 @@ pub(crate) async fn recognize_image(
     app: &tauri::AppHandle,
     source: PathBuf,
     segments_dir: Option<PathBuf>,
-) -> Result<String, String> {
+) -> AppResult<String> {
     #[cfg(target_os = "android")]
     {
         let text =
@@ -37,21 +38,8 @@ pub(crate) fn format_ocr_novel_text(text: &str) -> String {
 }
 
 /// 将书籍内路径转换为 Markdown 使用的相对路径。
-pub(crate) fn relative_book_path(path: &Path, directory: &Path) -> Result<String, String> {
+pub(crate) fn relative_book_path(path: &Path, directory: &Path) -> AppResult<String> {
     path.strip_prefix(directory)
-        .map_err(|_| "路径不属于当前书籍目录".to_string())
+        .map_err(|_| AppError::internal("路径不属于当前书籍目录"))
         .map(|value| value.to_string_lossy().replace('\\', "/"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::format_ocr_novel_text;
-
-    #[test]
-    fn ocr_text_is_grouped_by_sentence() {
-        assert_eq!(
-            format_ocr_novel_text("第一句。\n第二\n句。 "),
-            "第一句。\n第二句。"
-        );
-    }
 }

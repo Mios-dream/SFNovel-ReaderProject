@@ -1,9 +1,11 @@
+use crate::domain::error::{AppError, ErrorKind};
 use serde_json::Value;
 
 /// SF App 请求失败的结构化分类。
 ///
 /// 同时保留 HTTP 状态和上游 JSON 中的业务状态，用于区分会话失效、设备未登记、
 /// 客户端版本限制和账号风控，而不是只拼接一段错误文本。
+#[derive(Debug)]
 pub(crate) struct AppApiError {
     /// 传输层 HTTP 状态码；本地错误为 `0`。
     pub(super) http_status: u16,
@@ -139,10 +141,41 @@ impl AppApiError {
     }
 }
 
-/// 判断任意错误文本是否表示账号触发了 SF 风控。
+/// 输出与 `describe` 一致的纯文本，供日志与 `format!` 直接使用。
+impl std::fmt::Display for AppApiError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.describe(""))
+    }
+}
+
+/// 把模块内的纯文本错误（参数校验、响应字段缺失）收进同一个错误类型。
+impl From<String> for AppApiError {
+    fn from(message: String) -> Self {
+        Self::local(message)
+    }
+}
+
+/// 让编号校验这类应用层错误直接进入 API 错误通道。
 ///
-/// 下载层会将 `AppApiError` 转换为字符串，此函数用于在继续请求剩余章节前
-/// 识别这些已经失去结构化类型的错误。
-pub(crate) fn is_risk_control_failure(message: &str) -> bool {
-    message.contains("风控") || message.contains("1146") || message.contains("422")
+/// 只保留文本：这类失败没有上游状态码，重新分类也没有意义。
+impl From<AppError> for AppApiError {
+    fn from(error: AppError) -> Self {
+        Self::local(error.to_string())
+    }
+}
+
+/// 把结构化上游错误转换为带分类的应用层错误。
+impl From<AppApiError> for AppError {
+    fn from(error: AppApiError) -> Self {
+        let kind = if error.is_session_expired() || error.is_device_unregistered() {
+            ErrorKind::Unauthenticated
+        } else if error.is_account_risk_controlled() {
+            ErrorKind::RiskControl
+        } else if error.is_client_version_gated() {
+            ErrorKind::ClientOutdated
+        } else {
+            ErrorKind::Upstream
+        };
+        AppError::new(kind, error.describe(""))
+    }
 }

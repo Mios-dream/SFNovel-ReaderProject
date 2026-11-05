@@ -1,7 +1,8 @@
 //! SF 网页、AJAX 与静态资源客户端。
 
-use super::super::device::SF_WEB_USER_AGENT;
+use crate::domain::error::{AppError, AppResult};
 use crate::adapters::sfacg::cookie::{filter_cookie_header, has_cookie_name};
+use crate::adapters::sfacg::http;
 
 /// 使用经过过滤的 Web 凭证发送 SF 网页、AJAX 和静态资源请求。
 pub(crate) struct WebClient {
@@ -17,24 +18,10 @@ impl WebClient {
     /// # 参数
     /// - `web_cookie`：从会话快照读取的原始 Cookie 请求头。
     ///
-    /// # 错误
-    /// HTTP 客户端构建失败时返回错误。
-    pub(crate) fn new(web_cookie: Option<String>) -> Result<Self, String> {
+    pub(crate) fn new(web_cookie: Option<String>) -> AppResult<Self> {
         let web_cookie = web_cookie
             .and_then(|cookie| filter_cookie_header(&cookie, &[".SFCommunity", "session_PC"]));
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .user_agent(SF_WEB_USER_AGENT)
-            .default_headers({
-                let mut headers = reqwest::header::HeaderMap::new();
-                headers.insert(
-                    reqwest::header::ACCEPT_LANGUAGE,
-                    reqwest::header::HeaderValue::from_static("zh-CN,zh;q=0.9,en;q=0.8"),
-                );
-                headers
-            })
-            .build()
-            .map_err(|error| format!("无法创建 SF 网页网络客户端：{error}"))?;
+        let client = http::web_client();
         Ok(Self { client, web_cookie })
     }
 
@@ -49,10 +36,10 @@ impl WebClient {
     ///
     /// # 错误
     /// 缺少 `session_PC` 时返回提示用户重新登录的错误。
-    pub(crate) fn require_session(&self) -> Result<(), String> {
+    pub(crate) fn require_session(&self) -> AppResult<()> {
         self.has_session()
             .then_some(())
-            .ok_or_else(|| "请先使用官方网页登录 Web 服务".to_string())
+            .ok_or_else(|| AppError::upstream("请先使用官方网页登录 Web 服务"))
     }
 
     /// 创建网页页面请求，并附加 HTML 接受头、可选 Referer 和网页 Cookie。

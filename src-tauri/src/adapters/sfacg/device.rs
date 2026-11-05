@@ -1,5 +1,6 @@
 //! 官方 App 请求画像和设备身份。
 
+use crate::domain::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -186,10 +187,19 @@ pub(crate) fn install_device_profile(profile: DeviceProfile) {
     set_device_profile(profile);
 }
 
-/// 替换运行时设备身份并保存登记结果。
-pub(crate) fn replace_device_profile(profile: DeviceProfile) {
-    save_device_state(&profile);
-    set_device_profile(profile);
+/// 就地修改全局设备身份，并立即保存登记结果。
+///
+/// 设备身份只有这一份进程内副本，客户端不再各自持有快照。
+pub(crate) fn update_device_profile(update: impl FnOnce(&mut DeviceProfile)) -> AppResult<()> {
+    let current = DEVICE_PROFILE
+        .get()
+        .ok_or_else(|| AppError::internal("设备身份尚未初始化，请重启应用"))?;
+    let mut guard = current
+        .lock()
+        .map_err(|_| AppError::internal("设备身份状态不可用"))?;
+    update(&mut guard);
+    save_device_state(&guard);
+    Ok(())
 }
 
 /// 写入进程内设备身份。
@@ -210,13 +220,13 @@ fn set_device_profile(profile: DeviceProfile) {
 ///
 /// # 错误
 /// 设备身份尚未初始化或状态锁不可用时返回错误。
-pub(crate) fn device_profile() -> Result<DeviceProfile, String> {
+pub(crate) fn device_profile() -> AppResult<DeviceProfile> {
     DEVICE_PROFILE
         .get()
-        .ok_or_else(|| "设备身份尚未初始化，请重启应用".to_string())?
+        .ok_or_else(|| AppError::internal("设备身份尚未初始化，请重启应用"))?
         .lock()
         .map(|guard| guard.clone())
-        .map_err(|_| "设备身份状态不可用".to_string())
+        .map_err(|_| AppError::internal("设备身份状态不可用"))
 }
 
 /// 判断字符串是否为合法 UUID。

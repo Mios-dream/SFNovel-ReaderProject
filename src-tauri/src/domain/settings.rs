@@ -2,6 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
+/// 判断字符是否属于正文恢复字典允许的汉字区间。
+///
+/// 覆盖扩展 A 区、基本区与兼容区；恢复字典的键和值都只允许这些字符。
+pub(crate) fn is_han_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}'
+    )
+}
+
 /// 应用设置根结构，按功能分类持久化。
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

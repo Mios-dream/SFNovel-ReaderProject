@@ -121,10 +121,8 @@ export type ChapterVolume = {
     title: string;
     isVip: boolean;
     needFireMoney: number;
-    /** Web-visible text shape; this is not an entitlement result. */
-    contentKind: "text" | "imageVip" | "encryptedVip" | "unknown";
-    /** Only chapter-resource requests can change this from unknown. */
-    accessState: "unknown" | "available" | "unavailable" | "sessionExpired";
+    /** 后端只产出可读与不可读两种结果，字段本身即为权限判断依据。 */
+    accessState: "available" | "unavailable";
     downloaded: boolean;
   }>;
 };

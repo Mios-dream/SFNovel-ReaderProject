@@ -1,3 +1,4 @@
+use super::error::AppApiError;
 use super::parse_catalog::parse_chapter_catalog;
 use super::parsing::json_bool_field;
 use super::AppClient;
@@ -20,9 +21,9 @@ impl AppClient {
     pub(crate) async fn get_chapter_content_and_metadata(
         &self,
         chapter_id: i64,
-    ) -> Result<ApiChapterContent, String> {
+    ) -> Result<ApiChapterContent, AppApiError> {
         if chapter_id <= 0 {
-            return Err("章节编号无效".to_string());
+            return Err(AppApiError::local("章节编号无效".to_string()));
         }
         let response = self
             .get_data(
@@ -36,18 +37,18 @@ impl AppClient {
             .and_then(Value::as_str)
             .or_else(|| response.get("content").and_then(Value::as_str))
             .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "SF App API 未返回章节正文".to_string())?;
+            .ok_or_else(|| AppApiError::local("SF App API 未返回章节正文".to_string()))?;
         let is_content_encrypted = expand
             .and_then(|value| json_bool_field(value, &["isContentEncrypted"]))
             .unwrap_or(false);
         let novel_id = response
             .get("novelId")
             .and_then(Value::as_i64)
-            .ok_or_else(|| "SF App API 未返回章节所属作品信息".to_string())?;
+            .ok_or_else(|| AppApiError::local("SF App API 未返回章节所属作品信息".to_string()))?;
         let volume_id = response
             .get("volumeId")
             .and_then(Value::as_i64)
-            .ok_or_else(|| "SF App API 未返回章节所属卷信息".to_string())?;
+            .ok_or_else(|| AppApiError::local("SF App API 未返回章节所属卷信息".to_string()))?;
         Ok(ApiChapterContent {
             content: content.to_string(),
             is_content_encrypted,
@@ -62,7 +63,7 @@ impl AppClient {
     pub(crate) async fn get_chapter_catalog(
         &self,
         novel_id: i64,
-    ) -> Result<Vec<ChapterVolume>, String> {
+    ) -> Result<Vec<ChapterVolume>, AppApiError> {
         validate_novel_id(novel_id)?;
         let response = self
             .get_data(&format!("/novels/{novel_id}/dirs"), &[])

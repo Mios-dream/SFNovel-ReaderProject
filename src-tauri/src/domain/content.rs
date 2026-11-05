@@ -9,14 +9,32 @@ pub(crate) enum TextOrigin {
     App,
     /// 正文来自网页渠道。
     Web,
+    /// VIP 章节由网页图片经 OCR 识别得到。
+    WebVipOcr,
 }
 
 impl TextOrigin {
     /// 返回写入持久化记录时使用的稳定来源标识。
+    ///
+    /// 该标识会落进章节索引，续传判断依赖它，改动等于破坏已有书库的兼容性。
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::App => "app",
             Self::Web => "web",
+            Self::WebVipOcr => "webVipOcr",
+        }
+    }
+
+    /// 解析章节索引里的来源标识。
+    ///
+    /// 未知标识返回 `None`：调用方必须按"来源不明"处理，不能当成已完成章节，
+    /// 否则旧版本写入或用户手工改过的记录会让正文永久缺失。
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "app" => Some(Self::App),
+            "web" => Some(Self::Web),
+            "webVipOcr" => Some(Self::WebVipOcr),
+            _ => None,
         }
     }
 }

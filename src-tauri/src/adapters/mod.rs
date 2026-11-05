@@ -1,5 +1,6 @@
 //! 外部系统适配层。
 
+pub(crate) mod auto_signin;
 pub(crate) mod downloads;
 pub(crate) mod media;
 pub(crate) mod ocr;

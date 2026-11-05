@@ -2,10 +2,12 @@
 
 use super::atomic::{read_or_default, write_atomically};
 use super::paths::{library_directory, local_book_directory, safe_library_name};
+use crate::domain::download::MediaKind;
+use crate::domain::error::{AppError, AppResult};
 use crate::domain::library::{
-    AudioTrackView, AvailableFormats, BookDetail, BookManifest, BookWorkDetail, ChapterIndex,
-    LibraryChapterSummary, LibraryChapterVolume, LibraryComicChapter, LibraryEntry, StoredChapter,
-    WorkMetadata,
+    AudioTrackView, AvailableFormats, BookDetail, BookManifest, BookScope, BookWorkDetail,
+    ChapterIndex, LibraryChapterSummary, LibraryChapterVolume, LibraryComicChapter, LibraryEntry,
+    StoredChapter, WorkMetadata,
 };
 use std::collections::HashSet;
 use std::fs;
@@ -20,7 +22,7 @@ pub(crate) const CHAPTERS_FILE: &str = ".novel-flow-chapters.json";
 ///
 /// # 错误
 /// 清单无法读取或格式无效时返回错误消息。
-pub(crate) fn read_book_manifest(directory: &Path) -> Result<BookManifest, String> {
+pub(crate) fn read_book_manifest(directory: &Path) -> AppResult<BookManifest> {
     read_or_default(&directory.join(MANIFEST_FILE), "本地数据")
 }
 
@@ -28,7 +30,7 @@ pub(crate) fn read_book_manifest(directory: &Path) -> Result<BookManifest, Strin
 ///
 /// # 错误
 /// 序列化或文件写入失败时返回错误消息。
-pub(crate) fn write_book_manifest(directory: &Path, manifest: &BookManifest) -> Result<(), String> {
+pub(crate) fn write_book_manifest(directory: &Path, manifest: &BookManifest) -> AppResult<()> {
     write_atomically(&directory.join(MANIFEST_FILE), manifest, "本地数据")
 }
 
@@ -36,7 +38,7 @@ pub(crate) fn write_book_manifest(directory: &Path, manifest: &BookManifest) -> 
 ///
 /// # 错误
 /// 索引无法读取或格式无效时返回错误消息。
-pub(crate) fn read_chapter_store(directory: &Path) -> Result<ChapterIndex, String> {
+pub(crate) fn read_chapter_store(directory: &Path) -> AppResult<ChapterIndex> {
     read_or_default(&directory.join(CHAPTERS_FILE), "本地数据")
 }
 
@@ -44,7 +46,7 @@ pub(crate) fn read_chapter_store(directory: &Path) -> Result<ChapterIndex, Strin
 ///
 /// # 错误
 /// 序列化或文件写入失败时返回错误消息。
-pub(crate) fn write_chapter_store(directory: &Path, store: &ChapterIndex) -> Result<(), String> {
+pub(crate) fn write_chapter_store(directory: &Path, store: &ChapterIndex) -> AppResult<()> {
     write_atomically(&directory.join(CHAPTERS_FILE), store, "章节索引")
 }
 
@@ -69,15 +71,17 @@ pub(crate) fn downloaded_text_chapter_ids(store: &ChapterIndex) -> Vec<i64> {
 ///
 /// # 错误
 /// 书库目录或条目元数据无法读取时返回错误消息。
-pub(crate) fn list(app: &tauri::AppHandle) -> Result<Vec<LibraryEntry>, String> {
+pub(crate) fn list(app: &tauri::AppHandle) -> AppResult<Vec<LibraryEntry>> {
     let directory = library_directory(app)?;
-    let entries = fs::read_dir(&directory).map_err(|error| format!("无法读取本地书库：{error}"))?;
+    let entries = fs::read_dir(&directory)
+        .map_err(|error| AppError::storage(format!("无法读取本地书库：{error}")))?;
     let mut books = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|error| format!("读取书库条目失败：{error}"))?;
+        let entry =
+            entry.map_err(|error| AppError::storage(format!("读取书库条目失败：{error}")))?;
         let metadata = entry
             .metadata()
-            .map_err(|error| format!("读取书库条目元数据失败：{error}"))?;
+            .map_err(|error| AppError::storage(format!("读取书库条目元数据失败：{error}")))?;
         if !metadata.is_dir() {
             continue;
         }
@@ -86,18 +90,16 @@ pub(crate) fn list(app: &tauri::AppHandle) -> Result<Vec<LibraryEntry>, String> 
             entry.path().join(CHAPTERS_FILE).exists() || entry.path().join("book.md").exists();
         let audio = entry.path().join("audio").is_dir();
         let comic = entry.path().join("comic").is_dir();
-        let author = read_book_manifest(&entry.path())
-            .ok()
-            .and_then(|manifest| {
-                [manifest.novel, manifest.audio, manifest.comic]
-                    .into_iter()
-                    .flatten()
-                    .find_map(|work| {
-                        let author = work.author?;
-                        let author = author.trim();
-                        (!author.is_empty()).then(|| author.to_string())
-                    })
-            });
+        let author = read_book_manifest(&entry.path()).ok().and_then(|manifest| {
+            [manifest.novel, manifest.audio, manifest.comic]
+                .into_iter()
+                .flatten()
+                .find_map(|work| {
+                    let author = work.author?;
+                    let author = author.trim();
+                    (!author.is_empty()).then(|| author.to_string())
+                })
+        });
         books.push(LibraryEntry {
             name,
             author,
@@ -127,7 +129,7 @@ pub(crate) fn list(app: &tauri::AppHandle) -> Result<Vec<LibraryEntry>, String> 
 ///
 /// # 错误
 /// 书籍目录、清单、章节索引或媒体目录读取失败时返回错误消息。
-pub(crate) fn detail(app: &tauri::AppHandle, name: &str) -> Result<BookDetail, String> {
+pub(crate) fn detail(app: &tauri::AppHandle, name: &str) -> AppResult<BookDetail> {
     let directory = local_book_directory(app, name)?;
     let metadata = read_book_manifest(&directory)?;
     let store = read_chapter_store(&directory)?;
@@ -217,14 +219,14 @@ fn work_detail(
 ///
 /// # 错误
 /// 播放列表无法读取时返回错误消息；无效条目会被跳过。
-fn read_audio_tracks(directory: &Path) -> Result<Vec<AudioTrackView>, String> {
+fn read_audio_tracks(directory: &Path) -> AppResult<Vec<AudioTrackView>> {
     let audio_directory = directory.join("audio");
     let playlist_path = audio_directory.join("有声目录.m3u8");
     if !playlist_path.is_file() {
         return Ok(Vec::new());
     }
     let playlist = fs::read_to_string(&playlist_path)
-        .map_err(|error| format!("无法读取有声播放列表：{error}"))?;
+        .map_err(|error| AppError::storage(format!("无法读取有声播放列表：{error}")))?;
     let mut tracks = Vec::new();
     let mut title = None;
     for line in playlist.lines() {
@@ -274,15 +276,17 @@ fn read_audio_tracks(directory: &Path) -> Result<Vec<AudioTrackView>, String> {
 ///
 /// # 错误
 /// 漫画目录或页面列表无法读取时返回错误消息。
-pub(crate) fn read_comic_chapters(directory: &Path) -> Result<Vec<LibraryComicChapter>, String> {
+pub(crate) fn read_comic_chapters(directory: &Path) -> AppResult<Vec<LibraryComicChapter>> {
     let root = directory.join("comic");
     if !root.is_dir() {
         return Ok(Vec::new());
     }
     let mut chapters = Vec::new();
-    for entry in fs::read_dir(root).map_err(|error| format!("无法读取漫画目录：{error}"))?
+    for entry in fs::read_dir(root)
+        .map_err(|error| AppError::storage(format!("无法读取漫画目录：{error}")))?
     {
-        let entry = entry.map_err(|error| format!("读取漫画章节失败：{error}"))?;
+        let entry =
+            entry.map_err(|error| AppError::storage(format!("读取漫画章节失败：{error}")))?;
         let chapter_dir = entry.path();
         if !chapter_dir.is_dir() || !chapter_dir.join(".complete").is_file() {
             continue;
@@ -294,12 +298,15 @@ pub(crate) fn read_comic_chapters(directory: &Path) -> Result<Vec<LibraryComicCh
         else {
             continue;
         };
+        // 完成标记里存的是章节标题；标记缺失或内容为空白时回退到默认标题，
+        // 避免书库里出现封面正常但标题为空白的章节。
         let title = fs::read_to_string(chapter_dir.join(".complete"))
-            .unwrap_or_else(|_| format!("第 {id} 话"))
-            .trim()
-            .to_string();
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| format!("第 {id} 话"));
         let mut pages = fs::read_dir(&chapter_dir)
-            .map_err(|error| format!("无法读取漫画页：{error}"))?
+            .map_err(|error| AppError::storage(format!("无法读取漫画页：{error}")))?
             .filter_map(Result::ok)
             .filter(|item| item.path().is_file() && item.file_name() != ".complete")
             .map(|item| item.path())
@@ -339,19 +346,19 @@ pub(crate) fn comic_chapter(
     app: &tauri::AppHandle,
     name: &str,
     chapter_id: i64,
-) -> Result<LibraryComicChapter, String> {
+) -> AppResult<LibraryComicChapter> {
     let directory = local_book_directory(app, name)?;
     read_comic_chapters(&directory)?
         .into_iter()
         .find(|chapter| chapter.id == chapter_id)
-        .ok_or_else(|| "本地漫画章节不存在".to_string())
+        .ok_or_else(|| AppError::storage("本地漫画章节不存在"))
 }
 
 /// 从书籍清单读取文字作品编号。
 ///
 /// # 错误
 /// 清单无法读取时返回错误消息。
-fn metadata_novel_id(directory: &Path) -> Result<Option<i64>, String> {
+fn metadata_novel_id(directory: &Path) -> AppResult<Option<i64>> {
     Ok(read_book_manifest(directory)?
         .novel
         .and_then(|work| work.id))
@@ -365,64 +372,50 @@ pub(crate) fn chapter(
     app: &tauri::AppHandle,
     name: &str,
     chapter_id: i64,
-) -> Result<StoredChapter, String> {
+) -> AppResult<StoredChapter> {
     let directory = local_book_directory(app, name)?;
     let store = read_chapter_store(&directory)?;
     if store.novel_id != 0 && metadata_novel_id(&directory)? != Some(store.novel_id) {
-        return Err("本地章节与书籍元数据不匹配".to_string());
+        return Err(AppError::storage("本地章节与书籍元数据不匹配"));
     }
     store
         .chapters
         .into_values()
         .find(|chapter| chapter.id == chapter_id)
-        .ok_or_else(|| "本地未找到该章节正文".to_string())
+        .ok_or_else(|| AppError::storage("本地未找到该章节正文"))
 }
 
 /// 汇总某类媒体已经下载的章节编号。
 ///
-/// # 参数
-/// - `app`：Tauri 应用句柄。
-/// - `kind`：`text`、`audio` 或 `comic`。
-/// - `title`：可选的书籍标题；提供时只扫描对应目录。
-///
-/// # 错误
-/// 书库或书籍清单无法读取时返回错误消息。
+/// 已知目录名时只读一本；否则扫描书库，并按作品编号排除同名目录被别的书覆盖的情况。
 pub(crate) fn downloaded_ids(
     app: &tauri::AppHandle,
-    kind: &str,
-    title: Option<&str>,
-) -> Result<HashSet<i64>, String> {
-    let mut result = HashSet::new();
-    if kind == "text" || title.is_none() {
-        let directory = library_directory(app)?;
-        for entry in fs::read_dir(&directory).into_iter().flatten().flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            if let Ok(metadata) = read_book_manifest(&path) {
-                let ids = match kind {
-                    "audio" => metadata.downloaded_audio_chapter_ids,
-                    "comic" => metadata.downloaded_comic_chapter_ids,
-                    _ => metadata.downloaded_text_chapter_ids,
-                };
-                if let Some(ids) = ids {
-                    result.extend(ids);
-                }
-            }
+    kind: MediaKind,
+    scope: BookScope<'_>,
+) -> AppResult<HashSet<i64>> {
+    if let Some(title) = scope.title {
+        let directory = library_directory(app)?.join(safe_library_name(title));
+        if !directory.is_dir() {
+            return Ok(HashSet::new());
         }
-        return Ok(result);
+        let manifest = read_book_manifest(&directory)?;
+        if !manifest.belongs_to(kind, scope.novel_id) {
+            return Ok(HashSet::new());
+        }
+        return Ok(manifest.downloaded_ids(kind));
     }
-    let directory = library_directory(app)?.join(safe_library_name(title.unwrap_or_default()));
-    if directory.is_dir() {
-        let metadata = read_book_manifest(&directory)?;
-        let ids = match kind {
-            "audio" => metadata.downloaded_audio_chapter_ids,
-            "comic" => metadata.downloaded_comic_chapter_ids,
-            _ => metadata.downloaded_text_chapter_ids,
-        };
-        if let Some(ids) = ids {
-            result.extend(ids);
+
+    let mut result = HashSet::new();
+    let directory = library_directory(app)?;
+    for entry in fs::read_dir(&directory).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if let Ok(manifest) = read_book_manifest(&path) {
+            if manifest.belongs_to(kind, scope.novel_id) {
+                result.extend(manifest.downloaded_ids(kind));
+            }
         }
     }
     Ok(result)
@@ -432,7 +425,180 @@ pub(crate) fn downloaded_ids(
 ///
 /// # 错误
 /// 目录非法、书籍不存在或删除失败时返回错误消息。
-pub(crate) fn delete(app: &tauri::AppHandle, name: &str) -> Result<(), String> {
+pub(crate) fn delete(app: &tauri::AppHandle, name: &str) -> AppResult<()> {
     let directory = local_book_directory(app, name)?;
-    fs::remove_dir_all(directory).map_err(|error| format!("删除本地书籍失败：{error}"))
+    fs::remove_dir_all(directory)
+        .map_err(|error| AppError::storage(format!("删除本地书籍失败：{error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapters::storage::test_support::TempDir;
+
+    /// 构造一条最小章节，只关心编号与正文。
+    fn stored(id: i64, content: &str) -> StoredChapter {
+        StoredChapter {
+            id,
+            title: format!("第 {id} 章"),
+            volume: "第一卷".to_string(),
+            content: content.to_string(),
+            volume_index: 0,
+            chapter_index: 0,
+            content_source: None,
+            ocr_source_path: None,
+        }
+    }
+
+    /// 准备一个带 `.complete` 标记的漫画章节目录。
+    fn comic_chapter(directory: &Path, id: i64, title: &str, pages: &[&str]) {
+        let chapter = directory.join("comic").join(id.to_string());
+        fs::create_dir_all(&chapter).expect("创建漫画章节目录");
+        fs::write(chapter.join(".complete"), title).expect("写入完成标记");
+        for page in pages {
+            fs::write(chapter.join(page), b"page").expect("写入漫画页");
+        }
+    }
+
+    #[test]
+    fn read_comic_chapters_requires_complete_marker() {
+        let dir = TempDir::new("comic-complete");
+        comic_chapter(&dir.0, 1, "第一话", &["001.png"]);
+
+        let unfinished = dir.0.join("comic").join("2");
+        fs::create_dir_all(&unfinished).expect("创建未完成章节");
+        fs::write(unfinished.join("001.png"), b"page").expect("写入漫画页");
+
+        let chapters = read_comic_chapters(&dir.0).expect("读取漫画目录");
+
+        assert_eq!(chapters.len(), 1, "缺少完成标记的章节不应出现在书库中");
+        assert_eq!(chapters[0].id, 1);
+        assert_eq!(chapters[0].title, "第一话");
+    }
+
+    #[test]
+    fn read_comic_chapters_sorts_by_chapter_id_and_keeps_page_order() {
+        let dir = TempDir::new("comic-order");
+        comic_chapter(&dir.0, 10, "第十话", &["001.png", "002.png"]);
+        comic_chapter(&dir.0, 2, "第二话", &["001.png", "002.jpg"]);
+
+        let chapters = read_comic_chapters(&dir.0).expect("读取漫画目录");
+
+        assert_eq!(
+            chapters
+                .iter()
+                .map(|chapter| chapter.id)
+                .collect::<Vec<_>>(),
+            vec![2, 10],
+            "章节应按编号而非目录名排序"
+        );
+        let pages = &chapters[0].pages;
+        assert_eq!(pages.len(), 2, "完成标记不计入页面");
+        assert!(pages[0].ends_with("001.png"));
+        assert!(pages[1].ends_with("002.jpg"));
+        assert_eq!(
+            chapters[0].cover.as_deref(),
+            pages.first().map(String::as_str),
+            "封面应取第一页"
+        );
+    }
+
+    #[test]
+    fn read_comic_chapters_skips_unsupported_files_and_bad_names() {
+        let dir = TempDir::new("comic-filter");
+        comic_chapter(&dir.0, 1, "第一话", &["001.png", "notes.txt"]);
+        fs::create_dir_all(dir.0.join("comic").join("not-a-number")).expect("创建非法目录");
+
+        let chapters = read_comic_chapters(&dir.0).expect("读取漫画目录");
+
+        assert_eq!(chapters.len(), 1);
+        assert_eq!(chapters[0].pages.len(), 1, "非图片文件不应计入页面");
+    }
+
+    #[test]
+    fn read_comic_chapters_returns_empty_without_comic_directory() {
+        let dir = TempDir::new("comic-absent");
+
+        assert!(read_comic_chapters(&dir.0)
+            .expect("缺少漫画目录不应报错")
+            .is_empty());
+    }
+
+    #[test]
+    fn read_comic_chapters_falls_back_to_default_title() {
+        let dir = TempDir::new("comic-title");
+        let chapter = dir.0.join("comic").join("7");
+        fs::create_dir_all(&chapter).expect("创建目录");
+        fs::write(chapter.join(".complete"), b"   ").expect("写入空标记");
+        fs::write(chapter.join("001.png"), b"page").expect("写入漫画页");
+
+        let chapters = read_comic_chapters(&dir.0).expect("读取漫画目录");
+
+        assert_eq!(chapters[0].title, "第 7 话", "空标记应回退到默认标题");
+    }
+
+    #[test]
+    fn downloaded_text_chapter_ids_sorts_numerically_and_ignores_bad_keys() {
+        let index = ChapterIndex {
+            novel_id: 1,
+            chapters: [
+                ("10".to_string(), stored(10, "正文")),
+                ("2".to_string(), stored(2, "正文")),
+                ("draft".to_string(), stored(0, "正文")),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        assert_eq!(
+            downloaded_text_chapter_ids(&index),
+            vec![2, 10],
+            "应按数字大小排序，并跳过非数字键"
+        );
+    }
+
+    #[test]
+    fn manifest_round_trip_preserves_downloaded_ids() {
+        let dir = TempDir::new("manifest");
+        let manifest = BookManifest {
+            downloaded_text_chapter_ids: Some(vec![3, 1, 2]),
+            ..BookManifest::default()
+        };
+
+        write_book_manifest(&dir.0, &manifest).expect("写入清单");
+        let restored = read_book_manifest(&dir.0).expect("读取清单");
+
+        assert_eq!(
+            restored.downloaded_text_chapter_ids,
+            Some(vec![3, 1, 2]),
+            "读取不应改写或排序调用方写入的内容"
+        );
+    }
+
+    #[test]
+    fn read_book_manifest_returns_default_for_missing_file() {
+        let dir = TempDir::new("manifest-missing");
+
+        let manifest = read_book_manifest(&dir.0).expect("缺失清单应返回默认值");
+
+        assert!(manifest.novel.is_none());
+        assert!(manifest.downloaded_text_chapter_ids.is_none());
+    }
+
+    #[test]
+    fn chapter_store_round_trip_keeps_content() {
+        let dir = TempDir::new("chapter-store");
+        let index = ChapterIndex {
+            novel_id: 42,
+            chapters: [("7".to_string(), stored(7, "正文内容"))]
+                .into_iter()
+                .collect(),
+        };
+
+        write_chapter_store(&dir.0, &index).expect("写入章节索引");
+        let restored = read_chapter_store(&dir.0).expect("读取章节索引");
+
+        assert_eq!(restored.novel_id, 42);
+        assert_eq!(restored.chapters["7"].content, "正文内容");
+    }
 }

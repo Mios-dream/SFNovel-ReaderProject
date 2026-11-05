@@ -6,42 +6,47 @@
 mod assets;
 mod audio;
 mod comic;
+mod prepare;
 mod text;
 
+use crate::adapters::downloads::registry;
 use crate::adapters::downloads::DownloadState;
-use crate::domain::download::DownloadSpec;
+use crate::domain::download::{DownloadSpec, JobStatus, MediaKind};
+use crate::domain::error::AppResult;
 use std::future::Future;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, OnceLock};
-use tokio::sync::Semaphore;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-/// 全进程共享的下载并发槽位。
-static DOWNLOAD_SLOTS: OnceLock<Mutex<Arc<Semaphore>>> = OnceLock::new();
+/// 并发上限的硬上限，同时也是信号量的初始容量。
+const MAX_SLOTS: usize = 4;
+
+/// 全进程共享的下载并发槽位；只创建一次，配置变更时增减 permit。
+static DOWNLOAD_SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+/// 当前允许的并发数，用于配置变更时计算增量。
+static SLOT_LIMIT: AtomicUsize = AtomicUsize::new(MAX_SLOTS);
+
+fn slots() -> &'static Arc<Semaphore> {
+    DOWNLOAD_SLOTS.get_or_init(|| Arc::new(Semaphore::new(MAX_SLOTS)))
+}
 
 /// 更新下载任务并发上限。
+///
+/// 运行中的任务持有旧 permit，会晚于新上限释放；因此调低上限后短暂超出属预期。
 pub(crate) fn configure_concurrency(max_concurrent: u8) {
-    let permits = usize::from(max_concurrent.clamp(1, 4));
-    let slots = Arc::new(Semaphore::new(permits));
-    match DOWNLOAD_SLOTS.get() {
-        Some(current) => {
-            if let Ok(mut guard) = current.lock() {
-                *guard = slots;
-            }
-        }
-        None => {
-            let _ = DOWNLOAD_SLOTS.set(Mutex::new(slots));
-        }
+    let desired = usize::from(max_concurrent.clamp(1, MAX_SLOTS as u8));
+    let previous = SLOT_LIMIT.swap(desired, Ordering::SeqCst);
+    if desired > previous {
+        slots().add_permits(desired - previous);
+    } else if desired < previous {
+        let _ = slots().forget_permits(previous - desired);
     }
 }
 
 /// 等待并取得一个下载并发槽位。
-async fn acquire_slot() -> tokio::sync::OwnedSemaphorePermit {
-    let slots = DOWNLOAD_SLOTS
-        .get_or_init(|| Mutex::new(Arc::new(Semaphore::new(1))))
-        .lock()
-        .map(|guard| guard.clone())
-        .unwrap_or_else(|_| Arc::new(Semaphore::new(1)));
-    slots.acquire_owned().await.expect("下载并发槽位不应关闭")
+async fn acquire_slot() -> Option<OwnedSemaphorePermit> {
+    slots().clone().acquire_owned().await.ok()
 }
 
 /// 在取得并发槽位后执行单个下载任务。
@@ -50,9 +55,50 @@ where
     F: Future<Output = ()> + Send + 'static,
 {
     tauri::async_runtime::spawn(async move {
-        let _slot = acquire_slot().await;
+        let Some(_slot) = acquire_slot().await else {
+            return;
+        };
         future.await;
     });
+}
+
+/// 写入任务最终状态并持久化，三类下载共用同一套状态机。
+pub(super) fn finish(
+    context: &JobContext<'_>,
+    result: AppResult<String>,
+    done_message: &str,
+    expose_file: bool,
+) {
+    let JobContext {
+        app,
+        state,
+        job_id,
+        cancelled,
+    } = *context;
+    match result {
+        Ok(file) => registry::update(state, job_id, |job| {
+            job.status = JobStatus::Done;
+            job.progress = 100;
+            job.message = done_message.to_string();
+            if expose_file {
+                job.file = Some(file);
+            }
+        }),
+        Err(error) if error.is_cancelled() || cancelled.load(Ordering::Relaxed) => {
+            registry::update(state, job_id, |job| {
+                job.status = JobStatus::Paused;
+                job.message = "已暂停，可继续下载".to_string();
+            })
+        }
+        Err(error) => registry::update(state, job_id, |job| {
+            job.status = JobStatus::Error;
+            job.message = error.to_string();
+        }),
+    }
+    registry::emit_job(app, state, job_id);
+    if let Err(error) = registry::persist(app, state) {
+        log_error!("下载任务状态保存失败：{error}");
+    }
 }
 
 /// 单个后台下载任务共享的运行时句柄。
@@ -168,8 +214,8 @@ pub(super) fn spawn_from_spec(
     spec: DownloadSpec,
     cancelled: Arc<AtomicBool>,
 ) {
-    match spec.kind.as_str() {
-        "audio" => spawn_audio(
+    match spec.kind {
+        MediaKind::Audio => spawn_audio(
             app,
             job_id,
             spec.novel_id,
@@ -178,7 +224,7 @@ pub(super) fn spawn_from_spec(
             spec.chapter_ids,
             cancelled,
         ),
-        "comic" => spawn_comic(
+        MediaKind::Comic => spawn_comic(
             app,
             job_id,
             spec.source_id.unwrap_or(spec.novel_id),
@@ -187,7 +233,7 @@ pub(super) fn spawn_from_spec(
             spec.chapter_ids,
             cancelled,
         ),
-        _ => spawn_text(
+        MediaKind::Text => spawn_text(
             app,
             job_id,
             spec.novel_id,

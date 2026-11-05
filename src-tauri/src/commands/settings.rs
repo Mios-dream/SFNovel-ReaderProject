@@ -2,7 +2,7 @@
 
 use crate::adapters::storage::NativeStorage;
 use crate::application::settings::SettingsService;
-use crate::domain::error::AppError;
+use crate::domain::error::AppResult;
 use crate::domain::settings::AppSettings;
 
 #[tauri::command]
@@ -13,11 +13,9 @@ use crate::domain::settings::AppSettings;
 ///
 /// # 错误
 /// 设置文件不存在、损坏或无法读取时返回错误消息。
-pub(crate) fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
+pub(crate) fn get_settings(app: tauri::AppHandle) -> AppResult<AppSettings> {
     let storage = NativeStorage::new(app);
-    SettingsService::new(&storage)
-        .settings()
-        .map_err(AppError::into_message)
+    SettingsService::new(&storage).settings()
 }
 
 #[tauri::command]
@@ -32,16 +30,14 @@ pub(crate) fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, String>
 pub(crate) async fn save_settings(
     app: tauri::AppHandle,
     settings: AppSettings,
-) -> Result<AppSettings, String> {
+) -> AppResult<AppSettings> {
     let storage = NativeStorage::new(app.clone());
     #[cfg(target_os = "android")]
     let previous_auto_signin = storage
         .settings()
         .ok()
         .map(|settings| settings.signin.auto_signin_enabled);
-    let saved = SettingsService::new(&storage)
-        .save_settings(settings)
-        .map_err(AppError::into_message)?;
+    let saved = SettingsService::new(&storage).save_settings(settings)?;
     crate::adapters::downloads::configure_concurrency(saved.download.max_concurrent_downloads);
     #[cfg(target_os = "windows")]
     crate::adapters::platform::set_autostart(saved.desktop.autostart)?;

@@ -3,7 +3,8 @@
 use crate::adapters::downloads::NativeDownloadGateway;
 use crate::application::downloads::DownloadService;
 use crate::domain::download::DownloadJob;
-use crate::domain::error::AppError;
+use crate::domain::error::AppResult;
+use crate::domain::ids::NovelId;
 
 #[tauri::command]
 /// 创建文字小说下载任务。
@@ -21,12 +22,12 @@ pub(crate) async fn create_text_download(
     novel_id: i64,
     title: String,
     chapter_ids: Vec<i64>,
-) -> Result<DownloadJob, String> {
+) -> AppResult<DownloadJob> {
     let gateway = NativeDownloadGateway::new(app);
+    let novel_id = NovelId::new(novel_id)?;
     DownloadService::new(&gateway)
         .create_text(novel_id, title, chapter_ids)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -47,12 +48,12 @@ pub(crate) async fn create_audio_download(
     album_id: Option<i64>,
     title: String,
     chapter_ids: Vec<i64>,
-) -> Result<DownloadJob, String> {
+) -> AppResult<DownloadJob> {
     let gateway = NativeDownloadGateway::new(app);
+    let novel_id = NovelId::new(novel_id)?;
     DownloadService::new(&gateway)
         .create_audio(novel_id, album_id, title, chapter_ids)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -73,12 +74,11 @@ pub(crate) async fn create_comic_download(
     source_path: Option<String>,
     title: String,
     chapter_ids: Vec<i64>,
-) -> Result<DownloadJob, String> {
+) -> AppResult<DownloadJob> {
     let gateway = NativeDownloadGateway::new(app);
     DownloadService::new(&gateway)
         .create_comic(comic_id, source_path, title, chapter_ids)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -89,11 +89,9 @@ pub(crate) async fn create_comic_download(
 ///
 /// # 错误
 /// 下载队列状态不可用时返回错误消息。
-pub(crate) fn list_download_jobs(app: tauri::AppHandle) -> Result<Vec<DownloadJob>, String> {
+pub(crate) fn list_download_jobs(app: tauri::AppHandle) -> AppResult<Vec<DownloadJob>> {
     let gateway = NativeDownloadGateway::new(app);
-    DownloadService::new(&gateway)
-        .list()
-        .map_err(AppError::into_message)
+    DownloadService::new(&gateway).list()
 }
 
 #[tauri::command]
@@ -105,14 +103,9 @@ pub(crate) fn list_download_jobs(app: tauri::AppHandle) -> Result<Vec<DownloadJo
 ///
 /// # 错误
 /// 任务不存在或当前状态无法暂停时返回错误消息。
-pub(crate) fn pause_download_job(
-    app: tauri::AppHandle,
-    job_id: String,
-) -> Result<DownloadJob, String> {
+pub(crate) fn pause_download_job(app: tauri::AppHandle, job_id: String) -> AppResult<DownloadJob> {
     let gateway = NativeDownloadGateway::new(app);
-    DownloadService::new(&gateway)
-        .pause(&job_id)
-        .map_err(AppError::into_message)
+    DownloadService::new(&gateway).pause(&job_id)
 }
 
 #[tauri::command]
@@ -124,14 +117,9 @@ pub(crate) fn pause_download_job(
 ///
 /// # 错误
 /// 任务不存在、缺少恢复参数或当前状态无法恢复时返回错误消息。
-pub(crate) fn resume_download_job(
-    app: tauri::AppHandle,
-    job_id: String,
-) -> Result<DownloadJob, String> {
+pub(crate) fn resume_download_job(app: tauri::AppHandle, job_id: String) -> AppResult<DownloadJob> {
     let gateway = NativeDownloadGateway::new(app);
-    DownloadService::new(&gateway)
-        .resume(&job_id)
-        .map_err(AppError::into_message)
+    DownloadService::new(&gateway).resume(&job_id)
 }
 
 #[tauri::command]
@@ -143,9 +131,7 @@ pub(crate) fn resume_download_job(
 ///
 /// # 错误
 /// 任务不存在或队列状态更新失败时返回错误消息。
-pub(crate) fn delete_download_job(app: tauri::AppHandle, job_id: String) -> Result<(), String> {
+pub(crate) fn delete_download_job(app: tauri::AppHandle, job_id: String) -> AppResult<()> {
     let gateway = NativeDownloadGateway::new(app);
-    DownloadService::new(&gateway)
-        .delete(&job_id)
-        .map_err(AppError::into_message)
+    DownloadService::new(&gateway).delete(&job_id)
 }

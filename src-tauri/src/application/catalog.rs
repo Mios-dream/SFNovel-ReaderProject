@@ -5,8 +5,13 @@ use crate::domain::catalog::{
     AudioCatalog, AudioChapterSummary, BookCommentPage, BookCommentReplyPage, BookshelfCollection,
     ChapterVolume, ComicCatalog, ComicChapterSummary, DiscoverFeed, NovelDetail, SearchNovel,
 };
+use crate::domain::download::MediaKind;
 use crate::domain::error::{AppError, AppResult};
-use crate::domain::ids::validate_novel_id;
+use crate::domain::ids::{
+    validate_album_id, validate_comic_id, validate_comment_id, validate_novel_id,
+    validate_positive_id, NovelId,
+};
+use crate::domain::library::BookScope;
 
 /// 组合远程目录与本地完成状态的查询服务。
 pub(crate) struct CatalogService<'a, R: RemoteGateway, S: LibraryStore> {
@@ -47,7 +52,8 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
     /// 读取首页发现数据。
     pub(crate) async fn discover(&self, type_id: Option<i64>) -> AppResult<DiscoverFeed> {
         if let Some(type_id) = type_id {
-            validate_novel_id(type_id).map_err(AppError::invalid_input)?;
+            // `type_id` 是小说分类编号，不是作品编号，校验消息要说明分类。
+            validate_positive_id(type_id, "分类")?;
         }
         self.remote.discover(type_id).await
     }
@@ -62,7 +68,7 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
         size: i64,
         reviews: bool,
     ) -> AppResult<BookCommentPage> {
-        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
+        validate_novel_id(novel_id)?;
         if !(0..=100).contains(&page) {
             return Err(AppError::invalid_input("评论页码无效"));
         }
@@ -72,10 +78,9 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
         match kind {
             "novel" | "comic" => {}
             "audio" => {
-                validate_novel_id(
+                validate_album_id(
                     media_id.ok_or_else(|| AppError::invalid_input("有声作品缺少专辑编号"))?,
-                )
-                .map_err(AppError::invalid_input)?;
+                )?;
             }
             _ => return Err(AppError::invalid_input("不支持的评论类型")),
         }
@@ -93,7 +98,7 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
         page: i64,
         size: i64,
     ) -> AppResult<BookCommentReplyPage> {
-        validate_novel_id(comment_id).map_err(AppError::invalid_input)?;
+        validate_comment_id(comment_id)?;
         if !(0..=100).contains(&page) {
             return Err(AppError::invalid_input("回复页码无效"));
         }
@@ -115,8 +120,7 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
     ///
     /// # 错误
     /// 编号非法或上游请求失败时返回错误。
-    pub(crate) async fn novel_detail(&self, novel_id: i64) -> AppResult<NovelDetail> {
-        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
+    pub(crate) async fn novel_detail(&self, novel_id: NovelId) -> AppResult<NovelDetail> {
         self.remote.novel_detail(novel_id).await
     }
 
@@ -131,10 +135,9 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
     pub(crate) async fn audio_detail(
         &self,
         album_id: i64,
-        novel_id: i64,
+        novel_id: NovelId,
     ) -> AppResult<NovelDetail> {
-        validate_novel_id(album_id).map_err(AppError::invalid_input)?;
-        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
+        validate_album_id(album_id)?;
         self.remote.audio_detail(album_id, novel_id).await
     }
 
@@ -146,7 +149,7 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
     /// # 错误
     /// 编号非法或上游请求失败时返回错误。
     pub(crate) async fn comic_detail(&self, comic_id: i64) -> AppResult<NovelDetail> {
-        validate_novel_id(comic_id).map_err(AppError::invalid_input)?;
+        validate_comic_id(comic_id)?;
         self.remote.comic_detail(comic_id).await
     }
 
@@ -157,13 +160,18 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
     ///
     /// # 错误
     /// 编号非法、上游无章节或本地书库读取失败时返回错误。
-    pub(crate) async fn chapter_volumes(&self, novel_id: i64) -> AppResult<Vec<ChapterVolume>> {
-        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
+    pub(crate) async fn chapter_volumes(&self, novel_id: NovelId) -> AppResult<Vec<ChapterVolume>> {
         let mut volumes = self.remote.text_volumes(novel_id).await?;
         if volumes.is_empty() {
             return Err(AppError::not_found("该作品没有可用的小说章节"));
         }
-        let downloaded = self.store.downloaded_ids("text", None)?;
+        let downloaded = self.store.downloaded_ids(
+            MediaKind::Text,
+            BookScope {
+                title: None,
+                novel_id: Some(novel_id.get()),
+            },
+        )?;
         for volume in &mut volumes {
             for chapter in &mut volume.chapters {
                 chapter.downloaded = downloaded.contains(&chapter.chap_id);
@@ -183,14 +191,13 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
     /// 编号非法、专辑无法确定、上游请求失败或本地书库读取失败时返回错误。
     pub(crate) async fn audio_catalog(
         &self,
-        novel_id: i64,
+        novel_id: NovelId,
         album_id: Option<i64>,
         title_hint: Option<String>,
     ) -> AppResult<AudioCatalog> {
-        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
         let album_id = match album_id {
             Some(album_id) => {
-                validate_novel_id(album_id).map_err(AppError::invalid_input)?;
+                validate_album_id(album_id)?;
                 album_id
             }
             None => {
@@ -203,7 +210,13 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
             .remote
             .audio_catalog(album_id, title_hint.as_deref())
             .await?;
-        let downloaded = self.store.downloaded_ids("audio", Some(&title))?;
+        let downloaded = self.store.downloaded_ids(
+            MediaKind::Audio,
+            BookScope {
+                title: Some(&title),
+                novel_id: Some(novel_id.get()),
+            },
+        )?;
         Ok(AudioCatalog {
             title,
             chapters: chapters
@@ -235,13 +248,19 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
         source_path: Option<String>,
         title_hint: Option<String>,
     ) -> AppResult<ComicCatalog> {
-        validate_novel_id(comic_id).map_err(AppError::invalid_input)?;
+        validate_comic_id(comic_id)?;
         let (title, _) = self
             .remote
             .comic_source(comic_id, source_path.as_deref(), title_hint.as_deref())
             .await?;
         let chapters = self.remote.comic_catalog(comic_id).await?;
-        let downloaded = self.store.downloaded_ids("comic", Some(&title))?;
+        let downloaded = self.store.downloaded_ids(
+            MediaKind::Comic,
+            BookScope {
+                title: Some(&title),
+                novel_id: Some(comic_id),
+            },
+        )?;
         Ok(ComicCatalog {
             title,
             chapters: chapters
@@ -319,14 +338,13 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
         novel_id: i64,
         media_id: Option<i64>,
     ) -> AppResult<()> {
-        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
+        validate_novel_id(novel_id)?;
         match kind {
             "novel" | "comic" => {}
             "audio" => {
-                validate_novel_id(
+                validate_album_id(
                     media_id.ok_or_else(|| AppError::invalid_input("有声作品缺少专辑编号"))?,
-                )
-                .map_err(AppError::invalid_input)?;
+                )?;
             }
             _ => return Err(AppError::invalid_input("不支持的收藏类型")),
         }
@@ -348,14 +366,13 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
         novel_id: i64,
         media_id: Option<i64>,
     ) -> AppResult<()> {
-        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
+        validate_novel_id(novel_id)?;
         match kind {
             "novel" | "comic" => {}
             "audio" => {
-                validate_novel_id(
+                validate_album_id(
                     media_id.ok_or_else(|| AppError::invalid_input("有声作品缺少专辑编号"))?,
-                )
-                .map_err(AppError::invalid_input)?;
+                )?;
             }
             _ => return Err(AppError::invalid_input("不支持的收藏类型")),
         }

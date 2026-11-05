@@ -3,6 +3,8 @@
 //! 本模块只负责运行时、共享状态、平台插件、媒体协议和 IPC 命令的注册；
 //! 业务规则位于 `application`，外部系统访问位于 `adapters`。
 
+#[macro_use]
+mod logging;
 mod adapters;
 mod application;
 mod commands;
@@ -13,12 +15,6 @@ use adapters::media::OnlineMediaState;
 use adapters::platform::initialize_device_identity;
 use application::ports::DownloadGateway;
 use application::state::AuthSessionState;
-#[cfg(not(target_os = "android"))]
-use adapters::sfacg::source::SfSource;
-#[cfg(not(target_os = "android"))]
-use application::signin::SigninService;
-#[cfg(not(target_os = "android"))]
-use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(not(target_os = "android"))]
 use tauri::{
     menu::{Menu, MenuItem},
@@ -74,71 +70,6 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "android"))]
-fn civil_date_from_days(days: i64) -> (i64, u32, u32) {
-    let shifted = days + 719_468;
-    let era = if shifted >= 0 { shifted } else { shifted - 146_096 } / 146_097;
-    let day_of_era = (shifted - era * 146_097) as u64;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era as i64 + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_part = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_part + 2) / 5 + 1;
-    let month = if month_part < 10 {
-        month_part + 3
-    } else {
-        month_part - 9
-    };
-    (
-        if month <= 2 { year + 1 } else { year },
-        month as u32,
-        day as u32,
-    )
-}
-
-#[cfg(not(target_os = "android"))]
-fn beijing_date_and_hour() -> (String, u32) {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        + 8 * 60 * 60;
-    let days = (seconds / 86_400) as i64;
-    let hour = ((seconds % 86_400) / 3_600) as u32;
-    let (year, month, day) = civil_date_from_days(days);
-    (format!("{year:04}-{month:02}-{day:02}"), hour)
-}
-
-#[cfg(not(target_os = "android"))]
-fn spawn_auto_signin(app: tauri::AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        let mut last_attempt = String::new();
-        loop {
-            let (date, hour) = beijing_date_and_hour();
-            if hour >= 12 && last_attempt != date {
-                let enabled = adapters::storage::NativeStorage::new(app.clone())
-                    .settings()
-                    .map(|settings| settings.signin.auto_signin_enabled)
-                    .unwrap_or(false);
-                if enabled {
-                    if let Ok(remote) = SfSource::connect(&app).await {
-                        if remote.has_app_session() {
-                            last_attempt = date.clone();
-                            match SigninService::new(&remote).auto_sign_in(&date).await {
-                                Ok(true) => eprintln!("[signin] {date} 自动签到成功"),
-                                Ok(false) => eprintln!("[signin] {date} 已签到"),
-                                Err(error) => eprintln!("[signin] {date} 自动签到失败：{error}"),
-                            }
-                        }
-                    }
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(10 * 60)).await;
-        }
-    });
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// 构建并运行 Tauri 应用。
 ///
@@ -148,6 +79,7 @@ fn spawn_auto_signin(app: tauri::AppHandle) {
 /// # Panics
 /// Tauri 上下文创建失败或事件循环无法启动时会 panic。
 pub fn run() {
+    logging::init_from_env();
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .manage(AuthSessionState::default())
@@ -186,7 +118,7 @@ pub fn run() {
                 let _ = app.state::<AuthSessionState>().merge_web(web_session);
             }
             #[cfg(not(target_os = "android"))]
-            spawn_auto_signin(handle.clone());
+            adapters::auto_signin::spawn(handle.clone());
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -281,15 +213,4 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-#[cfg(all(test, not(target_os = "android")))]
-mod tests {
-    use super::civil_date_from_days;
-
-    #[test]
-    fn converts_days_to_civil_dates() {
-        assert_eq!(civil_date_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_date_from_days(20_759), (2026, 11, 2));
-    }
 }

@@ -1,4 +1,5 @@
 use super::error::AppApiError;
+use crate::domain::error::AppError;
 use crate::adapters::sfacg::cookie::filter_cookie_header;
 use crate::adapters::sfacg::device::{DeviceProfile, SF_APP_VERSION, SF_PACKAGE};
 use crate::domain::auth::UserProfile;
@@ -84,15 +85,15 @@ impl super::AppClient {
     ///
     /// 登录命令创建 `SfSource` 时，进程内会话仍不包含本次登录的 Cookie。
     /// 因此显式构建一个仅使用该 Cookie 的客户端，避免拿登录前快照或旧会话上报。
-    pub(crate) async fn register_device_for_session(&self, app_cookie: &str) -> Result<(), String> {
-        let client = Self::new(self.device_snapshot()?, Some(app_cookie.to_string()))?;
+    pub(crate) async fn register_device_for_session(&self, app_cookie: &str) -> Result<(), AppApiError> {
+        let client = Self::new(Some(app_cookie.to_string()))?;
         client.register_device().await
     }
 
     /// 冷启动设备登记、读取渠道、完整登记并激活。
     ///
     /// `initChannel` 尚未取得时，登记请求的 User-Agent 最后一段使用厂商名。
-    async fn startup_device_flow(&self) -> Result<(), String> {
+    async fn startup_device_flow(&self) -> Result<(), AppApiError> {
         self.update_device(|device| device.init_channel.clear())?;
         let startup_device = self.device_snapshot()?;
         self.post_public_data(
@@ -113,7 +114,7 @@ impl super::AppClient {
     }
 
     /// 读取服务端登记的 OAID 和 `initChannel`。
-    async fn refresh_device_info(&self) -> Result<(), String> {
+    async fn refresh_device_info(&self) -> Result<(), AppApiError> {
         let device = self.device_snapshot()?;
         let query = [
             ("deviceId", device.device_id.clone()),
@@ -143,6 +144,7 @@ impl super::AppClient {
                 device.init_channel = value;
             }
         })
+        .map_err(AppApiError::from)
     }
 
     /// 将当前安装登记到已登录账号。
@@ -150,17 +152,16 @@ impl super::AppClient {
     /// 官方 App 在登录后读取账号编号，再提交基础设备登记并上报激活。
     /// 部分内容接口在设备未登记时返回 `401/507`，因此这里必须使用与请求签名
     /// 相同的 `deviceId`。
-    pub(crate) async fn register_device(&self) -> Result<(), String> {
+    pub(crate) async fn register_device(&self) -> Result<(), AppApiError> {
         let user = self
             .send_get("/user", &[("expand", SF_USER_EXPAND.to_string())])
-            .await
-            .map_err(|error| error.describe("/user"))?;
+            .await?;
         let account_id = user
             .get("accountId")
             .and_then(Value::as_i64)
-            .ok_or_else(|| "SF App 未返回账户编号".to_string())?;
+            .ok_or_else(|| AppApiError::local("SF App 未返回账户编号".to_string()))?;
         if account_id <= 0 {
-            return Err("SF 账号编号无效".to_string());
+            return Err(AppApiError::local("SF 账号编号无效".to_string()));
         }
         if self.device_snapshot()?.init_channel.is_empty() {
             self.refresh_device_info().await?;
@@ -189,7 +190,7 @@ impl super::AppClient {
         &self,
         username: &str,
         password: &str,
-    ) -> Result<String, String> {
+    ) -> Result<String, AppApiError> {
         self.startup_device_flow().await?;
         let response = self
             .signed_request(reqwest::Method::POST, "/sessions", false)?
@@ -200,7 +201,7 @@ impl super::AppClient {
             }))
             .send()
             .await
-            .map_err(|error| format!("SF App 登录请求失败：{error}"))?;
+            .map_err(|error| AppError::upstream(format!("SF App 登录请求失败：{error}")))?;
         let status = response.status();
         let set_cookies = response
             .headers()
@@ -218,33 +219,30 @@ impl super::AppClient {
             .and_then(Value::as_i64);
         if !status.is_success() || api_http_code != Some(200) {
             let error = AppApiError::from_response(status.as_u16(), &body);
-            eprintln!(
+            log_warn!(
                 "[sfacg] App login rejected: http={}, api_code={:?}, error_code={:?}",
                 status.as_u16(),
                 error.api_http_code,
                 error.api_error_code,
             );
-            return Err(format!("登录失败：{}", error.describe("/sessions")));
+            return Err(AppApiError::local(format!("登录失败：{error}")));
         }
-        cookie.ok_or_else(|| "SF App 登录成功但未返回 App 会话 Cookie".to_string())
+        cookie.ok_or_else(|| AppApiError::local("SF App 登录成功但未返回 App 会话 Cookie".to_string()))
     }
 
-    /// 获取小说正文解密所需的 App 章节正文及归属元数据（小说 ID、卷 ID）。
-    ///
-    /// # 参数
-    /// * `chapter_id` - SF App 章节编号。
+    /// 读取当前账号资料。
     ///
     /// # 错误
-    /// 章节编号无效、上游未返回正文或缺少作品、分卷标识时返回错误。
+    /// 会话失效、设备未登记或上游返回异常时返回错误。
     pub(crate) async fn get_user_profile(&self) -> Result<UserProfile, AppApiError> {
         if self
             .device_snapshot()
-            .map_err(AppApiError::local)?
+            .map_err(AppApiError::from)?
             .init_channel
             .is_empty()
         {
             if let Err(error) = self.refresh_device_info().await {
-                eprintln!("[sfacg] App device channel refresh failed: {error}");
+                log_warn!("[sfacg] App device channel refresh failed: {error}");
             }
         }
         let user = self
@@ -256,9 +254,9 @@ impl super::AppClient {
             Err(error) if error.is_session_expired() => return Err(error),
             Err(error) if error.is_account_risk_controlled() => return Err(error),
             Err(error) => {
-                eprintln!(
+                log_debug!(
                     "[sfacg] App ticket count unavailable: {}",
-                    error.describe("/user/tickets")
+                    error.to_string()
                 );
                 None
             }

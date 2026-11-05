@@ -10,6 +10,7 @@ use crate::domain::content::{
     ApiChapterContent, OnlineAudioTrack, OnlineComicChapter, OnlineTextChapter,
 };
 use crate::domain::download::DownloadJob;
+use crate::domain::ids::NovelId;
 use crate::domain::error::AppResult;
 use crate::domain::library::{
     BookDetail, ExportFile, LibraryComicChapter, LibraryEntry, StoredChapter,
@@ -46,15 +47,15 @@ pub(crate) trait RemoteGateway: Send + Sync {
         size: i64,
     ) -> AppResult<BookCommentReplyPage>;
     /// 读取小说详情。
-    async fn novel_detail(&self, novel_id: i64) -> AppResult<NovelDetail>;
+    async fn novel_detail(&self, novel_id: NovelId) -> AppResult<NovelDetail>;
     /// 读取有声专辑对应的作品详情。
-    async fn audio_detail(&self, album_id: i64, novel_id: i64) -> AppResult<NovelDetail>;
+    async fn audio_detail(&self, album_id: i64, novel_id: NovelId) -> AppResult<NovelDetail>;
     /// 读取漫画作品详情。
     async fn comic_detail(&self, comic_id: i64) -> AppResult<NovelDetail>;
     /// 读取文字分卷与章节。
-    async fn text_volumes(&self, novel_id: i64) -> AppResult<Vec<ChapterVolume>>;
+    async fn text_volumes(&self, novel_id: NovelId) -> AppResult<Vec<ChapterVolume>>;
     /// 解析作品对应的有声专辑编号。
-    async fn audio_album_id(&self, novel_id: i64, title_hint: Option<&str>) -> AppResult<i64>;
+    async fn audio_album_id(&self, novel_id: NovelId, title_hint: Option<&str>) -> AppResult<i64>;
     /// 读取有声专辑标题与章节。
     async fn audio_catalog(
         &self,
@@ -73,12 +74,8 @@ pub(crate) trait RemoteGateway: Send + Sync {
     /// 读取当前账号的公开书架。
     async fn bookshelf(&self, force_refresh: bool) -> AppResult<PublicShelf>;
     /// 收藏小说、有声专辑或漫画。
-    async fn add_favorite(
-        &self,
-        kind: &str,
-        novel_id: i64,
-        media_id: Option<i64>,
-    ) -> AppResult<()>;
+    async fn add_favorite(&self, kind: &str, novel_id: i64, media_id: Option<i64>)
+        -> AppResult<()>;
     /// 取消小说、有声专辑或漫画收藏。
     async fn remove_favorite(
         &self,
@@ -111,7 +108,7 @@ pub(crate) trait RemoteGateway: Send + Sync {
     /// 读取网页章节正文。
     async fn web_chapter_content(
         &self,
-        novel_id: i64,
+        novel_id: NovelId,
         volume_id: i64,
         chapter_id: i64,
     ) -> AppResult<String>;
@@ -150,7 +147,11 @@ pub(crate) trait LibraryStore: Send + Sync {
     /// 删除本地书籍。
     fn delete(&self, name: &str) -> AppResult<()>;
     /// 读取某类媒体的已下载章节编号。
-    fn downloaded_ids(&self, kind: &str, title: Option<&str>) -> AppResult<HashSet<i64>>;
+    fn downloaded_ids(
+        &self,
+        kind: crate::domain::download::MediaKind,
+        scope: crate::domain::library::BookScope<'_>,
+    ) -> AppResult<HashSet<i64>>;
     /// 打开下载目录。
     async fn open_download_directory(&self) -> AppResult<()>;
     /// 确保外部存储权限可用。
@@ -180,14 +181,14 @@ pub(crate) trait DownloadGateway: Send + Sync {
     /// 创建文字下载任务。
     async fn create_text(
         &self,
-        novel_id: i64,
+        novel_id: NovelId,
         title: String,
         chapter_ids: Vec<i64>,
     ) -> AppResult<DownloadJob>;
     /// 创建有声下载任务。
     async fn create_audio(
         &self,
-        novel_id: i64,
+        novel_id: NovelId,
         album_id: Option<i64>,
         title: String,
         chapter_ids: Vec<i64>,
@@ -216,7 +217,7 @@ pub(crate) trait DownloadGateway: Send + Sync {
 #[async_trait]
 pub(crate) trait OnlineReader: Send + Sync {
     /// 读取在线文字章节。
-    async fn load_text(&self, novel_id: i64, chapter_id: i64) -> AppResult<OnlineTextChapter>;
+    async fn load_text(&self, novel_id: NovelId, chapter_id: i64) -> AppResult<OnlineTextChapter>;
     /// 读取在线漫画章节。
     async fn load_comic(
         &self,

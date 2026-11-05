@@ -1,6 +1,8 @@
 //! 本地书库的持久化与展示模型。
 
+use crate::domain::download::MediaKind;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// 一个本地存储书籍的渲染进程安全摘要。
 #[derive(Debug, Serialize)]
@@ -159,6 +161,49 @@ pub(crate) struct BookManifest {
     /// 已下载的漫画章节编号。
     #[serde(default)]
     pub(crate) downloaded_comic_chapter_ids: Option<Vec<i64>>,
+}
+
+impl BookManifest {
+    /// 返回指定媒体类型已下载的章节编号。
+    pub(crate) fn downloaded_ids(&self, kind: MediaKind) -> HashSet<i64> {
+        let ids = match kind {
+            MediaKind::Text => &self.downloaded_text_chapter_ids,
+            MediaKind::Audio => &self.downloaded_audio_chapter_ids,
+            MediaKind::Comic => &self.downloaded_comic_chapter_ids,
+        };
+        ids.iter().flatten().copied().collect()
+    }
+
+    /// 判断清单是否属于指定作品。
+    ///
+    /// 元数据缺少编号时返回 true，保持旧书库的可见性。
+    pub(crate) fn belongs_to(&self, kind: MediaKind, novel_id: Option<i64>) -> bool {
+        let Some(expected) = novel_id else {
+            return true;
+        };
+        match self.work_id(kind) {
+            Some(actual) => actual == expected,
+            None => true,
+        }
+    }
+
+    /// 返回用于跨书匹配的作品编号；有声使用所属小说编号。
+    fn work_id(&self, kind: MediaKind) -> Option<i64> {
+        match kind {
+            MediaKind::Text => self.novel.as_ref().and_then(|value| value.id),
+            MediaKind::Audio => self.audio.as_ref().and_then(|value| value.catalog_id),
+            MediaKind::Comic => self.comic.as_ref().and_then(|value| value.id),
+        }
+    }
+}
+
+/// 定位书库中的书籍范围：已知目录名时只读一本，否则按作品编号在库内匹配。
+#[derive(Clone, Copy, Default)]
+pub(crate) struct BookScope<'a> {
+    /// 本地书籍目录名。
+    pub(crate) title: Option<&'a str>,
+    /// 作品编号；缺少时不做过滤。
+    pub(crate) novel_id: Option<i64>,
 }
 
 /// 一种媒体类型的持久化来源元数据。

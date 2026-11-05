@@ -3,7 +3,7 @@
 use crate::application::ports::DownloadGateway;
 use crate::domain::download::DownloadJob;
 use crate::domain::error::{AppError, AppResult};
-use crate::domain::ids::validate_positive_id;
+use crate::domain::ids::{validate_positive_id, NovelId};
 
 /// 负责校验下载请求并委托给下载适配器的应用服务。
 pub(crate) struct DownloadService<'a, G: DownloadGateway> {
@@ -31,18 +31,11 @@ impl<'a, G: DownloadGateway> DownloadService<'a, G> {
     /// 编号、标题或章节选择非法，或网关拒绝创建任务时返回错误。
     pub(crate) async fn create_text(
         &self,
-        novel_id: i64,
+        novel_id: NovelId,
         title: String,
         chapter_ids: Vec<i64>,
     ) -> AppResult<DownloadJob> {
-        validate_download(
-            &title,
-            &chapter_ids,
-            "小说标题无效",
-            "章节选择无效",
-            novel_id,
-            "小说",
-        )?;
+        validate_download(&title, &chapter_ids, "小说标题无效", "章节选择无效")?;
         self.gateway.create_text(novel_id, title, chapter_ids).await
     }
 
@@ -58,21 +51,14 @@ impl<'a, G: DownloadGateway> DownloadService<'a, G> {
     /// 编号、标题或章节选择非法，或网关拒绝创建任务时返回错误。
     pub(crate) async fn create_audio(
         &self,
-        novel_id: i64,
+        novel_id: NovelId,
         album_id: Option<i64>,
         title: String,
         chapter_ids: Vec<i64>,
     ) -> AppResult<DownloadJob> {
-        validate_download(
-            &title,
-            &chapter_ids,
-            "小说标题无效",
-            "章节选择无效",
-            novel_id,
-            "小说",
-        )?;
+        validate_download(&title, &chapter_ids, "小说标题无效", "章节选择无效")?;
         if let Some(album_id) = album_id {
-            validate_positive_id(album_id, "有声专辑").map_err(AppError::invalid_input)?;
+            validate_positive_id(album_id, "有声专辑")?;
         }
         self.gateway
             .create_audio(novel_id, album_id, title, chapter_ids)
@@ -96,14 +82,8 @@ impl<'a, G: DownloadGateway> DownloadService<'a, G> {
         title: String,
         chapter_ids: Vec<i64>,
     ) -> AppResult<DownloadJob> {
-        validate_download(
-            &title,
-            &chapter_ids,
-            "漫画标题无效",
-            "漫画章节选择无效",
-            comic_id,
-            "漫画",
-        )?;
+        validate_positive_id(comic_id, "漫画")?;
+        validate_download(&title, &chapter_ids, "漫画标题无效", "漫画章节选择无效")?;
         self.gateway
             .create_comic(comic_id, source_path, title, chapter_ids)
             .await
@@ -168,10 +148,7 @@ fn validate_download(
     chapter_ids: &[i64],
     title_error: &str,
     chapter_error: &str,
-    id: i64,
-    id_label: &str,
 ) -> AppResult<()> {
-    validate_positive_id(id, id_label).map_err(AppError::invalid_input)?;
     if title.trim().is_empty() || title.chars().count() > 200 {
         return Err(AppError::invalid_input(title_error));
     }

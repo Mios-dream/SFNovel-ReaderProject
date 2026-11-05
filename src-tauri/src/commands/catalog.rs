@@ -1,25 +1,12 @@
 //! 远程目录、详情和书架命令。
 
-use crate::adapters::sfacg::source::SfSource;
-use crate::adapters::storage::NativeStorage;
 use crate::application::catalog::CatalogService;
 use crate::domain::catalog::{
     AudioCatalog, BookCommentPage, BookCommentReplyPage, BookshelfCollection, ChapterVolume,
     ComicCatalog, DiscoverFeed, NovelDetail, SearchNovel,
 };
-use crate::domain::error::AppError;
-
-/// 组装目录命令所需的远程来源和本地书库。
-///
-/// # 参数
-/// - `app`：Tauri 应用句柄。
-///
-/// # 错误
-/// SF 内容源初始化失败时返回错误。
-async fn service_parts(app: &tauri::AppHandle) -> Result<(SfSource, NativeStorage), AppError> {
-    let remote = SfSource::connect(app).await.map_err(AppError::upstream)?;
-    Ok((remote, NativeStorage::new(app.clone())))
-}
+use crate::domain::error::AppResult;
+use crate::domain::ids::NovelId;
 
 #[tauri::command]
 /// 搜索 SF 作品。
@@ -33,12 +20,9 @@ async fn service_parts(app: &tauri::AppHandle) -> Result<(SfSource, NativeStorag
 pub(crate) async fn search_novels(
     app: tauri::AppHandle,
     query: String,
-) -> Result<Vec<SearchNovel>, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
-    CatalogService::new(&remote, &storage)
-        .search(&query)
-        .await
-        .map_err(AppError::into_message)
+) -> AppResult<Vec<SearchNovel>> {
+    let (remote, storage) = super::runtime(&app).await?;
+    CatalogService::new(&remote, &storage).search(&query).await
 }
 
 #[tauri::command]
@@ -53,12 +37,11 @@ pub(crate) async fn search_novels(
 pub(crate) async fn get_discover_feed(
     app: tauri::AppHandle,
     type_id: Option<i64>,
-) -> Result<DiscoverFeed, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<DiscoverFeed> {
+    let (remote, storage) = super::runtime(&app).await?;
     CatalogService::new(&remote, &storage)
         .discover(type_id)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -83,12 +66,11 @@ pub(crate) async fn get_book_comments(
     page: i64,
     size: i64,
     reviews: bool,
-) -> Result<BookCommentPage, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<BookCommentPage> {
+    let (remote, storage) = super::runtime(&app).await?;
     CatalogService::new(&remote, &storage)
         .book_comments(&kind, novel_id, media_id, page, size, reviews)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -111,12 +93,11 @@ pub(crate) async fn get_comment_replies(
     reviews: bool,
     page: i64,
     size: i64,
-) -> Result<BookCommentReplyPage, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<BookCommentReplyPage> {
+    let (remote, storage) = super::runtime(&app).await?;
     CatalogService::new(&remote, &storage)
         .comment_replies(&kind, comment_id, reviews, page, size)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -131,12 +112,12 @@ pub(crate) async fn get_comment_replies(
 pub(crate) async fn get_novel_details(
     app: tauri::AppHandle,
     novel_id: i64,
-) -> Result<NovelDetail, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<NovelDetail> {
+    let (remote, storage) = super::runtime(&app).await?;
+    let novel_id = NovelId::new(novel_id)?;
     CatalogService::new(&remote, &storage)
         .novel_detail(novel_id)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -153,12 +134,12 @@ pub(crate) async fn get_audio_details(
     app: tauri::AppHandle,
     album_id: i64,
     novel_id: i64,
-) -> Result<NovelDetail, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<NovelDetail> {
+    let (remote, storage) = super::runtime(&app).await?;
+    let novel_id = NovelId::new(novel_id)?;
     CatalogService::new(&remote, &storage)
         .audio_detail(album_id, novel_id)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -173,12 +154,12 @@ pub(crate) async fn get_audio_details(
 pub(crate) async fn get_chapter_volumes(
     app: tauri::AppHandle,
     novel_id: i64,
-) -> Result<Vec<ChapterVolume>, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<Vec<ChapterVolume>> {
+    let (remote, storage) = super::runtime(&app).await?;
+    let novel_id = NovelId::new(novel_id)?;
     CatalogService::new(&remote, &storage)
         .chapter_volumes(novel_id)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -197,12 +178,12 @@ pub(crate) async fn get_audio_chapters(
     novel_id: i64,
     album_id: Option<i64>,
     title_hint: Option<String>,
-) -> Result<AudioCatalog, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<AudioCatalog> {
+    let (remote, storage) = super::runtime(&app).await?;
+    let novel_id = NovelId::new(novel_id)?;
     CatalogService::new(&remote, &storage)
         .audio_catalog(novel_id, album_id, title_hint)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -221,12 +202,11 @@ pub(crate) async fn get_comic_chapters(
     comic_id: i64,
     source_path: Option<String>,
     title_hint: Option<String>,
-) -> Result<ComicCatalog, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<ComicCatalog> {
+    let (remote, storage) = super::runtime(&app).await?;
     CatalogService::new(&remote, &storage)
         .comic_catalog(comic_id, source_path, title_hint)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -241,12 +221,11 @@ pub(crate) async fn get_comic_chapters(
 pub(crate) async fn get_comic_details(
     app: tauri::AppHandle,
     comic_id: i64,
-) -> Result<NovelDetail, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<NovelDetail> {
+    let (remote, storage) = super::runtime(&app).await?;
     CatalogService::new(&remote, &storage)
         .comic_detail(comic_id)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -261,12 +240,11 @@ pub(crate) async fn get_comic_details(
 pub(crate) async fn get_bookshelf(
     app: tauri::AppHandle,
     force_refresh: Option<bool>,
-) -> Result<BookshelfCollection, String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<BookshelfCollection> {
+    let (remote, storage) = super::runtime(&app).await?;
     CatalogService::new(&remote, &storage)
         .bookshelf(force_refresh)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -285,12 +263,11 @@ pub(crate) async fn add_remote_favorite(
     kind: String,
     novel_id: i64,
     media_id: Option<i64>,
-) -> Result<(), String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<()> {
+    let (remote, storage) = super::runtime(&app).await?;
     CatalogService::new(&remote, &storage)
         .add_favorite(&kind, novel_id, media_id)
         .await
-        .map_err(AppError::into_message)
 }
 
 #[tauri::command]
@@ -309,10 +286,9 @@ pub(crate) async fn remove_remote_favorite(
     kind: String,
     novel_id: i64,
     media_id: Option<i64>,
-) -> Result<(), String> {
-    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+) -> AppResult<()> {
+    let (remote, storage) = super::runtime(&app).await?;
     CatalogService::new(&remote, &storage)
         .remove_favorite(&kind, novel_id, media_id)
         .await
-        .map_err(AppError::into_message)
 }

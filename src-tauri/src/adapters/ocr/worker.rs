@@ -1,5 +1,6 @@
 //! 桌面端常驻 Python OCR worker。
 
+use crate::domain::error::{AppError, AppResult};
 use crate::adapters::ocr::format_ocr_novel_text;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -80,13 +81,13 @@ impl PersistentOcrWorker {
     ///
     /// # 错误
     /// 进程启动失败、标准通道缺失时返回错误消息。
-    fn start(worker: PathBuf, model: PathBuf, bundled: bool) -> Result<Self, String> {
+    fn start(worker: PathBuf, model: PathBuf, bundled: bool) -> AppResult<Self> {
         let mut command = if bundled {
             Command::new(&worker)
         } else {
             let project_directory = worker
                 .parent()
-                .ok_or_else(|| "OCR worker 项目目录无效".to_string())?;
+                .ok_or_else(|| AppError::internal("OCR worker 项目目录无效"))?;
             let mut command = Command::new("uv");
             command
                 .arg("run")
@@ -106,21 +107,21 @@ impl PersistentOcrWorker {
             .spawn()
             .map_err(|error| {
                 if bundled {
-                    format!("无法启动随包 OCR worker：{error}")
+                    AppError::internal(format!("无法启动随包 OCR worker：{error}"))
                 } else {
-                    format!(
+                    AppError::internal(format!(
                         "无法启动 uv OCR 环境：{error}。请先运行 uv sync --project src-tauri/ocr-worker"
-                    )
+                    ))
                 }
             })?;
         let input = child
             .stdin
             .take()
-            .ok_or_else(|| "OCR worker 未提供输入通道".to_string())?;
+            .ok_or_else(|| AppError::internal("OCR worker 未提供输入通道"))?;
         let output = child
             .stdout
             .take()
-            .ok_or_else(|| "OCR worker 未提供输出通道".to_string())?;
+            .ok_or_else(|| AppError::internal("OCR worker 未提供输出通道"))?;
         Ok(Self {
             worker,
             model,
@@ -223,7 +224,7 @@ impl PersistentOcrWorker {
 ///
 /// # 错误
 /// 资源路径无法解析或资源文件缺失时返回错误消息。
-fn desktop_ocr_resources(app: &tauri::AppHandle) -> Result<DesktopOcrResources, String> {
+fn desktop_ocr_resources(app: &tauri::AppHandle) -> AppResult<DesktopOcrResources> {
     #[cfg(debug_assertions)]
     {
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -246,11 +247,11 @@ fn desktop_ocr_resources(app: &tauri::AppHandle) -> Result<DesktopOcrResources, 
     let worker = app
         .path()
         .resolve(executable, BaseDirectory::Resource)
-        .map_err(|error| format!("无法定位 OCR worker：{error}"))?;
+        .map_err(|error| AppError::internal(format!("无法定位 OCR worker：{error}")))?;
     let model = app
         .path()
         .resolve(RECOGNITION_MODEL_RESOURCE, BaseDirectory::Resource)
-        .map_err(|error| format!("无法定位 OCR 识别模型：{error}"))?;
+        .map_err(|error| AppError::internal(format!("无法定位 OCR 识别模型：{error}")))?;
     if worker.is_file() && model.is_file() {
         return Ok(DesktopOcrResources {
             worker,
@@ -258,7 +259,7 @@ fn desktop_ocr_resources(app: &tauri::AppHandle) -> Result<DesktopOcrResources, 
             bundled: true,
         });
     }
-    Err("OCR worker 或共享识别模型未随应用安装。请重新安装桌面应用".to_string())
+    Err(AppError::internal("OCR worker 或共享识别模型未随应用安装。请重新安装桌面应用"))
 }
 
 /// 识别图片并把结果格式化为小说正文。
@@ -274,7 +275,7 @@ pub(super) async fn recognize(
     app: &tauri::AppHandle,
     source: PathBuf,
     segments_dir: Option<PathBuf>,
-) -> Result<String, String> {
+) -> AppResult<String> {
     let resources = desktop_ocr_resources(app)?;
     let worker_state = app.state::<DesktopOcrState>().worker.clone();
     let result = run_worker(
@@ -308,11 +309,11 @@ async fn run_worker(
     bundled: bool,
     source: PathBuf,
     segments_dir: Option<PathBuf>,
-) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+) -> AppResult<String> {
+    tokio::task::spawn_blocking(move || -> AppResult<String> {
         let mut current = worker_state
             .lock()
-            .map_err(|_| "OCR worker 状态不可用".to_string())?;
+            .map_err(|_| AppError::internal("OCR worker 状态不可用"))?;
         let needs_restart = current
             .as_mut()
             .map(|worker_process| {
@@ -331,19 +332,19 @@ async fn run_worker(
         }
         let request_result = current
             .as_mut()
-            .ok_or_else(|| "OCR worker 未初始化".to_string())?
+            .ok_or_else(|| AppError::internal("OCR worker 未初始化"))?
             .request(&source, segments_dir.as_deref());
         match request_result {
             Ok(text) => Ok(text),
-            Err(WorkerRequestError::Ocr(error)) => Err(error),
+            Err(WorkerRequestError::Ocr(error)) => Err(AppError::internal(error)),
             Err(WorkerRequestError::Transport(error)) => {
                 if let Some(worker_process) = current.take() {
                     worker_process.stop();
                 }
-                Err(error)
+                Err(AppError::internal(error))
             }
         }
     })
     .await
-    .map_err(|error| format!("OCR worker 意外退出：{error}"))?
+    .map_err(|error| AppError::internal(format!("OCR worker 意外退出：{error}")))?
 }

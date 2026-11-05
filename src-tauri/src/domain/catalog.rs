@@ -245,42 +245,23 @@ pub(crate) struct ChapterSummary {
     pub(crate) is_vip: bool,
     /// 当前会话购买该章节仍需支付的火券数量。
     pub(crate) need_fire_money: i64,
-    /// 目录标记的正文形态。
-    pub(crate) content_kind: TextContentKind,
     /// 当前会话可确认的访问状态。
     pub(crate) access_state: TextAccessState,
     /// 该章节是否已经存在于本地书库。
     pub(crate) downloaded: bool,
 }
 
-/// 网页文字目录标记的章节正文形态。
+/// 当前会话对某章节的访问状态。
+///
+/// 只保留目录能确认的两种结果：上游不返回据以判断「会话过期」或「无法判断」的
+/// 字段，因此不设对应变体，避免类型声明出实际上永远不会出现的状态。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub(crate) enum TextContentKind {
-    /// 可直接读取的文字正文。
-    Text,
-    /// 需要登录或解锁权限的图片正文。
-    ImageVip,
-    /// 需要恢复字典解密的加密正文。
-    EncryptedVip,
-    /// 目录未给出足够信息判断正文形态。
-    Unknown,
-}
-
-/// 一次网页目录读取可确认的章节访问状态。
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub(crate) enum TextAccessState {
-    /// 仅凭目录无法判断访问权限。
-    Unknown,
     /// 当前会话可读取该章节。
     Available,
     /// 当前会话不可读取该章节。
     Unavailable,
-    /// 网页会话已失效，需重新登录。
-    SessionExpired,
 }
 
 /// 返回给渲染进程且不含会话数据的已登录 SF 书架。
@@ -293,6 +274,7 @@ pub(crate) struct BookshelfCollection {
 }
 
 /// 仅内部使用的有声章节记录。
+#[derive(Clone)]
 pub(crate) struct AudioChapter {
     /// 有声章节编号。
     pub(crate) id: i64,

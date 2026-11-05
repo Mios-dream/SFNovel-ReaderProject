@@ -1,5 +1,6 @@
 //! 应用设置、正文恢复字典与平台存储权限。
 
+use crate::domain::error::{AppError, AppResult};
 use super::atomic::{read_or_default, write_atomically};
 use super::paths::{content_dictionary_path, settings_path};
 use crate::domain::settings::{AppSettings, ContentDictionaryResult};
@@ -15,7 +16,7 @@ const DEFAULT_CONTENT_DICTIONARY: &str = include_str!("../../../../sfacg-content
 ///
 /// # 错误
 /// 设置文件读取或解析失败时返回错误消息。
-pub(crate) fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, String> {
+pub(crate) fn load_settings(app: &tauri::AppHandle) -> AppResult<AppSettings> {
     read_or_default(&settings_path(app)?, "应用设置")
 }
 
@@ -23,19 +24,8 @@ pub(crate) fn load_settings(app: &tauri::AppHandle) -> Result<AppSettings, Strin
 ///
 /// # 错误
 /// 路径解析、序列化或写入失败时返回错误消息。
-pub(crate) fn save_settings(app: &tauri::AppHandle, settings: &AppSettings) -> Result<(), String> {
+pub(crate) fn save_settings(app: &tauri::AppHandle, settings: &AppSettings) -> AppResult<()> {
     write_atomically(&settings_path(app)?, settings, "应用设置")
-}
-
-/// 判断字符是否属于恢复字典允许的汉字区间。
-///
-/// # 参数
-/// - `character`：待判断的字符。
-fn is_han_character(character: char) -> bool {
-    matches!(
-        character,
-        '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}'
-    )
 }
 
 /// 过滤恢复字典，只保留单字到单字的汉字映射。
@@ -52,8 +42,10 @@ fn valid_content_dictionary(value: Value) -> HashMap<String, String> {
             let replacement = value.as_str()?;
             if key.chars().count() != 1
                 || replacement.chars().count() != 1
-                || !key.chars().all(is_han_character)
-                || !replacement.chars().all(is_han_character)
+                || !key.chars().all(crate::domain::settings::is_han_character)
+                || !replacement
+                    .chars()
+                    .all(crate::domain::settings::is_han_character)
             {
                 return None;
             }
@@ -68,18 +60,18 @@ fn valid_content_dictionary(value: Value) -> HashMap<String, String> {
 /// 字典读取、JSON 解析或默认字典初始化写入失败时返回错误消息。
 pub(crate) fn load_content_dictionary(
     app: &tauri::AppHandle,
-) -> Result<HashMap<String, String>, String> {
+) -> AppResult<HashMap<String, String>> {
     let path = content_dictionary_path(app)?;
     if path.exists() {
         let contents =
-            fs::read_to_string(&path).map_err(|error| format!("无法读取正文恢复字典：{error}"))?;
+            fs::read_to_string(&path).map_err(|error| AppError::storage(format!("无法读取正文恢复字典：{error}")))?;
         let value = serde_json::from_str::<Value>(&contents)
-            .map_err(|error| format!("正文恢复字典格式无效：{error}"))?;
+            .map_err(|error| AppError::storage(format!("正文恢复字典格式无效：{error}")))?;
         return Ok(valid_content_dictionary(value));
     }
     let defaults = valid_content_dictionary(
         serde_json::from_str(DEFAULT_CONTENT_DICTIONARY)
-            .map_err(|error| format!("内置正文恢复字典格式无效：{error}"))?,
+            .map_err(|error| AppError::storage(format!("内置正文恢复字典格式无效：{error}")))?,
     );
     write_content_dictionary(app, &defaults)?;
     Ok(defaults)
@@ -92,7 +84,7 @@ pub(crate) fn load_content_dictionary(
 pub(crate) fn write_content_dictionary(
     app: &tauri::AppHandle,
     dictionary: &HashMap<String, String>,
-) -> Result<(), String> {
+) -> AppResult<()> {
     write_atomically(&content_dictionary_path(app)?, dictionary, "正文恢复字典")
 }
 
@@ -100,7 +92,7 @@ pub(crate) fn write_content_dictionary(
 ///
 /// # 错误
 /// 字典无法读取时返回错误消息。
-pub(crate) fn dictionary_size(app: &tauri::AppHandle) -> Result<ContentDictionaryResult, String> {
+pub(crate) fn dictionary_size(app: &tauri::AppHandle) -> AppResult<ContentDictionaryResult> {
     let dictionary = load_content_dictionary(app)?;
     Ok(ContentDictionaryResult {
         size: dictionary.len(),
@@ -121,7 +113,7 @@ pub(crate) fn decode_api_content(
     app: &tauri::AppHandle,
     content: &str,
     is_content_encrypted: bool,
-) -> Result<String, String> {
+) -> AppResult<String> {
     if !is_content_encrypted {
         return Ok(content.to_string());
     }
@@ -144,7 +136,7 @@ pub(crate) fn decode_api_content(
 ///
 /// # 错误
 /// 策略读取失败或平台权限请求失败时返回错误消息。
-pub(crate) async fn ensure_external_storage_access(app: &tauri::AppHandle) -> Result<bool, String> {
+pub(crate) async fn ensure_external_storage_access(app: &tauri::AppHandle) -> AppResult<bool> {
     if !load_settings(app)?.storage.use_external_storage {
         return Ok(true);
     }
@@ -167,14 +159,14 @@ pub(crate) async fn ensure_external_storage_access(app: &tauri::AppHandle) -> Re
 ///
 /// # 错误
 /// 系统临时目录无法解析时返回错误消息。
-pub(crate) fn export_temp_path(app: &tauri::AppHandle, extension: &str) -> Result<PathBuf, String> {
+pub(crate) fn export_temp_path(app: &tauri::AppHandle, extension: &str) -> AppResult<PathBuf> {
     use tauri::Manager;
     app.path()
         .temp_dir()
         .map(|directory| {
             directory.join(format!(".sf-export-{}.{}", uuid::Uuid::new_v4(), extension))
         })
-        .map_err(|error| format!("无法解析导出临时目录：{error}"))
+        .map_err(|error| AppError::storage(format!("无法解析导出临时目录：{error}")))
 }
 
 /// 把临时导出文件写入 Android `content://` 目标。
@@ -190,11 +182,11 @@ pub(crate) async fn android_write_export(
     _app: &tauri::AppHandle,
     _source: &std::path::Path,
     _uri: &str,
-) -> Result<(), String> {
+) -> AppResult<()> {
     #[cfg(target_os = "android")]
     return crate::adapters::platform::android::write_export_to_uri(_app, _source, _uri).await;
     #[cfg(not(target_os = "android"))]
-    Err("当前平台不支持 content:// 导出位置".to_string())
+    Err(AppError::storage("当前平台不支持 content:// 导出位置"))
 }
 
 #[cfg(test)]

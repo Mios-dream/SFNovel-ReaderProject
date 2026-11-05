@@ -1,16 +1,16 @@
 //! 在线浏览用例的原生适配器。
 
+use super::inline_image::{split as split_inline_images, InlineSegment};
 use super::protocol::validate_sfacg_asset_url;
 use super::{online_media_url, OnlineMediaResource, OnlineMediaState};
-use crate::adapters::ocr::recognize_image;
-use crate::adapters::sfacg::app::is_risk_control_failure;
 use crate::adapters::sfacg::source::SfSource;
 use crate::adapters::storage::paths::online_cache_directory;
 use crate::adapters::storage::NativeStorage;
 use crate::application::ports::OnlineReader;
-use crate::domain::catalog::TextContentKind;
+use crate::application::ports::RemoteGateway;
 use crate::domain::content::{OnlineAudioTrack, OnlineComicChapter, OnlineTextChapter};
 use crate::domain::error::{AppError, AppResult};
+use crate::domain::ids::NovelId;
 use async_trait::async_trait;
 use std::fs;
 use std::path::Path;
@@ -42,10 +42,8 @@ impl OnlineReader for OnlineReaderAdapter {
     ///
     /// # 错误
     /// 目录、正文或图片读取失败时返回上游错误。
-    async fn load_text(&self, novel_id: i64, chapter_id: i64) -> AppResult<OnlineTextChapter> {
-        load_text(&self.app, novel_id, chapter_id)
-            .await
-            .map_err(AppError::upstream)
+    async fn load_text(&self, novel_id: NovelId, chapter_id: i64) -> AppResult<OnlineTextChapter> {
+        load_text(&self.app, novel_id, chapter_id).await
     }
 
     /// 读取在线漫画章节，并为页面登记媒体令牌。
@@ -65,9 +63,7 @@ impl OnlineReader for OnlineReaderAdapter {
         chapter_title: &str,
         _source_path: Option<&str>,
     ) -> AppResult<OnlineComicChapter> {
-        load_comic(&self.app, comic_id, chapter_id, chapter_title)
-            .await
-            .map_err(AppError::upstream)
+        load_comic(&self.app, comic_id, chapter_id, chapter_title).await
     }
 
     /// 读取在线音频并登记本地流式播放令牌。
@@ -85,9 +81,7 @@ impl OnlineReader for OnlineReaderAdapter {
         chapter_title: &str,
         chapter_volume: &str,
     ) -> AppResult<OnlineAudioTrack> {
-        load_audio(&self.app, chapter_id, chapter_title, chapter_volume)
-            .await
-            .map_err(AppError::upstream)
+        load_audio(&self.app, chapter_id, chapter_title, chapter_volume).await
     }
 }
 
@@ -102,11 +96,13 @@ impl OnlineReader for OnlineReaderAdapter {
 /// 章节不在目录中、正文读取失败或缓存写入失败时返回错误消息。
 async fn load_text(
     app: &tauri::AppHandle,
-    novel_id: i64,
+    novel_id: NovelId,
     chapter_id: i64,
-) -> Result<OnlineTextChapter, String> {
+) -> AppResult<OnlineTextChapter> {
     let source = SfSource::connect(app).await?;
     let catalog = source.text_volumes(novel_id).await?;
+    // 后续步骤只用于拼 URL、做缓存目录名和日志，统一回到基础整数编号。
+    let novel_id = novel_id.get();
     let mut selected = None;
     for volume in &catalog {
         if let Some(chapter) = volume
@@ -118,7 +114,7 @@ async fn load_text(
             break;
         }
     }
-    let (volume, chapter) = selected.ok_or_else(|| "该章节不在当前作品目录中".to_string())?;
+    let (volume, chapter) = selected.ok_or_else(|| AppError::not_found("该章节不在当前作品目录中"))?;
     let cache_root = online_cache_directory(app)?;
     let image_directory = cache_root.join("text").join(novel_id.to_string());
     let referer = format!(
@@ -126,49 +122,54 @@ async fn load_text(
         volume.volume_id
     );
     let storage = NativeStorage::new(app.clone());
-    let mut content = match chapter.content_kind {
-        TextContentKind::ImageVip | TextContentKind::EncryptedVip => {
-            match source
-                .try_direct_text_chapter(chapter_id, |raw, encrypted| {
-                    storage.decode_api_content(raw, encrypted)
-                })
-                .await
-            {
-                Some(Ok(content)) => content,
-                Some(Err(error)) => return Err(error),
-                None => {
-                    load_vip_text_content(
-                        app,
-                        &source,
-                        &cache_root.join("vip"),
-                        novel_id,
-                        chapter_id,
-                    )
-                    .await?
-                }
-            }
-        }
-        TextContentKind::Text | TextContentKind::Unknown => {
-            match source
-                .read_chapter_text(novel_id, volume.volume_id, chapter_id, |raw, encrypted| {
-                    storage.decode_api_content(raw, encrypted)
-                })
-                .await
-            {
-                Ok(result) => result.content,
-                Err(error) if source.has_app_session() || is_risk_control_failure(&error) => {
-                    return Err(error)
-                }
-                Err(error) => load_vip_text_content(
+    // 读取设置失败不应阻断阅读，退化为不保留 OCR 中间文件。
+    let keep_process_files = storage
+        .settings()
+        .map(|settings| settings.download.ocr_process_files_enabled)
+        .unwrap_or(false);
+    let vip_cache = cache_root.join("vip");
+    let mut content = if chapter.is_vip {
+        match source
+            .try_direct_text_chapter(chapter_id, |raw, encrypted| {
+                storage.decode_api_content(raw, encrypted)
+            })
+            .await
+        {
+            Some(Ok(content)) => content,
+            Some(Err(error)) => return Err(error),
+            None => {
+                load_vip_text_content(
                     app,
                     &source,
-                    &cache_root.join("vip"),
+                    &vip_cache,
                     novel_id,
                     chapter_id,
+                    keep_process_files,
                 )
-                .await
-                .map_err(|vip_error| format!("{error}；VIP 图片正文不可用：{vip_error}"))?,
+                .await?
             }
+        }
+    } else {
+        match source
+            .read_chapter_text(novel_id, volume.volume_id, chapter_id, |raw, encrypted| {
+                storage.decode_api_content(raw, encrypted)
+            })
+            .await
+        {
+            Ok(result) => result.content,
+            Err(error) if source.has_app_session() || error.is_risk_control() => return Err(error),
+            Err(error) => load_vip_text_content(
+                app,
+                &source,
+                &vip_cache,
+                novel_id,
+                chapter_id,
+                keep_process_files,
+            )
+            .await
+            .map_err(|vip_error| {
+                AppError::upstream(format!("{error}；VIP 图片正文不可用：{vip_error}"))
+            })?,
         }
     };
     let images = if content.contains("[img=") {
@@ -209,23 +210,25 @@ async fn load_comic(
     comic_id: i64,
     chapter_id: i64,
     chapter_title: &str,
-) -> Result<OnlineComicChapter, String> {
+) -> AppResult<OnlineComicChapter> {
     let directory = online_cache_directory(app)?
         .join("comics")
         .join(comic_id.to_string())
         .join(chapter_id.to_string());
-    fs::create_dir_all(&directory).map_err(|error| format!("无法创建漫画在线缓存目录：{error}"))?;
+    fs::create_dir_all(&directory).map_err(|error| AppError::storage(format!("无法创建漫画在线缓存目录：{error}")))?;
     let client = SfSource::connect(app).await?;
-    let catalog = client.comic_catalog(comic_id).await?;
+    let catalog = client
+        .comic_catalog(comic_id)
+        .await?;
     let path_name = catalog
         .iter()
         .find(|chapter| chapter.id == chapter_id)
         .map(|chapter| chapter.path_name.as_str())
-        .ok_or_else(|| "该章节不在当前漫画目录中".to_string())?;
+        .ok_or_else(|| AppError::not_found("该章节不在当前漫画目录中"))?;
     let referer = format!("https://m.sfacg.com/comic/{comic_id}/");
     let image_urls = client.comic_images(comic_id, path_name).await?;
     if image_urls.is_empty() {
-        return Err("该漫画章节没有可读取的页面".to_string());
+        return Err(AppError::not_found("该漫画章节没有可读取的页面"));
     }
     let media = app.state::<OnlineMediaState>();
     let mut pages = Vec::with_capacity(image_urls.len());
@@ -260,7 +263,7 @@ async fn load_audio(
     chapter_id: i64,
     chapter_title: &str,
     chapter_volume: &str,
-) -> Result<OnlineAudioTrack, String> {
+) -> AppResult<OnlineAudioTrack> {
     let client = SfSource::connect(app).await?;
     let source = client.audio_source(chapter_id).await?;
     let source = validate_sfacg_asset_url(&source)?;
@@ -275,49 +278,6 @@ async fn load_audio(
         volume: chapter_volume.to_string(),
         url: online_media_url("audio", &token),
     })
-}
-
-/// 根据文件签名和 MIME 类型选择图片扩展名。
-///
-/// # 参数
-/// - `content_type`：上游响应的 MIME 类型。
-/// - `bytes`：图片内容。
-fn image_extension(content_type: &str, bytes: &[u8]) -> &'static str {
-    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        "gif"
-    } else if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        "png"
-    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
-        "webp"
-    } else if content_type.contains("image/png") {
-        "png"
-    } else if content_type.contains("image/gif") {
-        "gif"
-    } else if content_type.contains("image/webp") {
-        "webp"
-    } else if content_type.contains("image/avif") {
-        "avif"
-    } else {
-        "jpg"
-    }
-}
-
-/// 通过临时文件替换方式写入在线浏览缓存。
-///
-/// # 参数
-/// - `target`：最终缓存路径，文件扩展名必须已确定。
-/// - `bytes`：图片内容。
-/// - `extension`：用于临时文件后缀的扩展名。
-///
-/// # 错误
-/// 写入、替换或重命名失败时返回错误消息。
-fn write_cache_file(target: &Path, bytes: &[u8], extension: &str) -> Result<(), String> {
-    let temporary = target.with_extension(format!("{extension}.part"));
-    fs::write(&temporary, bytes).map_err(|error| format!("无法写入在线浏览缓存：{error}"))?;
-    if target.exists() {
-        fs::remove_file(target).map_err(|error| format!("无法替换在线浏览缓存：{error}"))?;
-    }
-    fs::rename(&temporary, target).map_err(|error| format!("无法完成在线浏览缓存写入：{error}"))
 }
 
 /// 下载并缓存一张受保护的上游图片。
@@ -338,39 +298,19 @@ async fn cache_remote_image(
     url: &str,
     referer: &str,
     target_without_extension: &Path,
-) -> Result<String, String> {
+) -> AppResult<String> {
     let url = validate_sfacg_asset_url(url)?;
-    let response = client
-        .asset_request(
-            url.as_str(),
-            referer,
-            "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-        )
-        .send()
-        .await
-        .map_err(|error| format!("无法读取在线图片：{error}"))?
-        .error_for_status()
-        .map_err(|error| format!("在线图片请求被拒绝：{error}"))?;
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| format!("无法读取在线图片数据：{error}"))?;
-    if bytes.is_empty() {
-        return Err("在线图片内容为空".to_string());
-    }
-    let extension = image_extension(&content_type, &bytes);
+    let image = super::fetch::fetch_remote_image(client, url.as_str(), referer, None).await?;
+    let extension = super::fetch::image_extension(&image.content_type, &image.bytes);
     let target = target_without_extension.with_extension(extension);
-    write_cache_file(&target, &bytes, extension)?;
+    crate::adapters::storage::replace_file(&target, &image.bytes, "在线浏览缓存")?;
     Ok(target.to_string_lossy().to_string())
 }
 
 /// 将正文中的图片标记替换为缓存图片占位符。
+///
+/// 标记解析由 `super::inline_image::split` 完成，与下载侧共用同一套规则；
+/// 这里只决定"取图成功写占位符、失败写占位文本"的降级策略。
 ///
 /// # 参数
 /// - `client`：已认证的 SF 内容源。
@@ -392,27 +332,20 @@ async fn cache_text_images(
     chapter_id: i64,
     referer: &str,
     content: &str,
-) -> Result<(String, Vec<String>), String> {
-    fs::create_dir_all(directory).map_err(|error| format!("无法创建正文图片缓存目录：{error}"))?;
+) -> AppResult<(String, Vec<String>)> {
+    fs::create_dir_all(directory).map_err(|error| AppError::storage(format!("无法创建正文图片缓存目录：{error}")))?;
     let mut output = String::with_capacity(content.len());
     let mut images = Vec::new();
-    let mut cursor = 0;
-    while let Some(marker_offset) = content[cursor..].find("[img=") {
-        let marker_start = cursor + marker_offset;
-        let Some(metadata_end_offset) = content[marker_start..].find(']') else {
-            break;
+
+    for segment in split_inline_images(content) {
+        let url = match segment {
+            InlineSegment::Text(text) => {
+                output.push_str(text);
+                continue;
+            }
+            InlineSegment::Image(url) => url,
         };
-        let url_start = marker_start + metadata_end_offset + 1;
-        let Some(url_end_offset) = content[url_start..].find("[/img]") else {
-            break;
-        };
-        let url_end = url_start + url_end_offset;
-        let url = content[url_start..url_end].trim();
-        if url.is_empty() {
-            cursor = url_end + "[/img]".len();
-            continue;
-        }
-        output.push_str(&content[cursor..marker_start]);
+
         let index = images.len();
         let target = directory.join(format!("chapter-{chapter_id}-image-{index}"));
         match cache_remote_image(client, url, referer, &target).await {
@@ -421,22 +354,24 @@ async fn cache_text_images(
                 images.push(path);
             }
             Err(error) => {
-                if is_risk_control_failure(&error) {
+                if error.is_risk_control() {
                     return Err(error);
                 }
-                eprintln!(
+                log_warn!(
                     "[sfacg] online text image skipped: novel_id={novel_id}, chapter_id={chapter_id}, error={error}"
                 );
                 output.push_str("\n[插图暂时无法加载]\n");
             }
         }
-        cursor = url_end + "[/img]".len();
     }
-    output.push_str(&content[cursor..]);
+
     Ok((output, images))
 }
 
 /// 下载 VIP 图片正文，执行 OCR 并返回识别文本。
+///
+/// 与下载任务共用 `super::vip::recognize_vip_chapter`，因此「是否保留 OCR 中间图」
+/// 这类设置对在线阅读同样生效，不会出现同一章因入口不同而结果不同。
 ///
 /// # 参数
 /// - `app`：应用句柄。
@@ -444,6 +379,7 @@ async fn cache_text_images(
 /// - `cache_directory`：VIP 图片缓存目录。
 /// - `novel_id`：小说编号。
 /// - `chapter_id`：章节编号。
+/// - `keep_process_files`：是否保留 OCR 中间切片。
 ///
 /// # 错误
 /// 图片读取、缓存写入或 OCR 失败时返回错误消息。
@@ -453,11 +389,30 @@ async fn load_vip_text_content(
     cache_directory: &Path,
     novel_id: i64,
     chapter_id: i64,
-) -> Result<String, String> {
-    let image = source.read_vip_image_chapter(novel_id, chapter_id).await?;
-    fs::create_dir_all(cache_directory)
-        .map_err(|error| format!("无法创建 VIP 正文缓存目录：{error}"))?;
-    let source = cache_directory.join(format!("chapter-{chapter_id}.{}", image.extension));
-    write_cache_file(&source, &image.bytes, image.extension)?;
-    recognize_image(app, source, None).await
+    keep_process_files: bool,
+) -> AppResult<String> {
+    // 识别结果按章节缓存：同一章的图片正文不会变，重复打开时不必再跑一次 OCR。
+    let cached = cache_directory.join(format!("chapter-{chapter_id}.txt"));
+    if let Ok(content) = fs::read_to_string(&cached) {
+        if !content.trim().is_empty() {
+            return Ok(content);
+        }
+    }
+    let recognized = super::vip::recognize_vip_chapter(
+        app,
+        source,
+        cache_directory,
+        novel_id,
+        chapter_id,
+        keep_process_files,
+    )
+    .await?;
+    if !recognized.content.trim().is_empty() {
+        crate::adapters::storage::replace_file(
+            &cached,
+            recognized.content.as_bytes(),
+            "VIP 正文识别缓存",
+        )?;
+    }
+    Ok(recognized.content)
 }

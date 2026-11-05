@@ -1,10 +1,12 @@
+use super::error::AppApiError;
 use super::constants::AUDIO_CHAPTER_EXPAND;
 use super::parse_audio::{
     audio_catalog_title, audio_source_from_payload, audio_volume_entries, walk_audio_catalog,
 };
 use super::AppClient;
+use crate::domain::error::AppError;
 use crate::domain::catalog::AudioChapter;
-use crate::domain::ids::validate_novel_id;
+use crate::domain::ids::{validate_album_id, validate_chapter_id};
 
 impl AppClient {
     /// 读取 App 有声专辑的分卷和完整章节目录。
@@ -22,14 +24,14 @@ impl AppClient {
         &self,
         album_id: i64,
         title_hint: Option<&str>,
-    ) -> Result<(String, Vec<AudioChapter>), String> {
-        validate_novel_id(album_id)?;
+    ) -> Result<(String, Vec<AudioChapter>), AppApiError> {
+        validate_album_id(album_id)?;
         let volume_payload = self
             .get_data(&format!("/albums/{album_id}/volumes"), &[])
             .await?;
         let volumes = audio_volume_entries(&volume_payload);
         if volumes.is_empty() {
-            return Err("SF App 有声目录没有返回分卷".to_string());
+            return Err(AppApiError::local("SF App 有声目录没有返回分卷".to_string()));
         }
         let volume_titles = volumes
             .iter()
@@ -44,7 +46,7 @@ impl AppClient {
                     &[("expand", AUDIO_CHAPTER_EXPAND.to_string())],
                 )
                 .await
-                .map_err(|error| format!("SF App 有声分卷 {volume_id} 读取失败：{error}"))?;
+                .map_err(|error| AppError::upstream(format!("SF App 有声分卷 {volume_id} 读取失败：{error}")))?;
             walk_audio_catalog(
                 &payload,
                 Some(*volume_id),
@@ -55,9 +57,9 @@ impl AppClient {
             );
         }
         if chapters.is_empty() {
-            return Err("SF App 有声目录没有返回章节".to_string());
+            return Err(AppApiError::local("SF App 有声目录没有返回章节".to_string()));
         }
-        eprintln!(
+        log_debug!(
             "[sfacg] App audio catalog loaded: album_id={album_id}, chapters={}",
             chapters.len()
         );
@@ -76,7 +78,7 @@ impl AppClient {
                 audio_catalog_title(&detail).unwrap_or_else(|| fallback_title.to_string())
             }
             Err(error) => {
-                eprintln!(
+                log_debug!(
                     "[sfacg] App audio title unavailable: album_id={album_id}, error={error}"
                 );
                 fallback_title.to_string()
@@ -92,8 +94,8 @@ impl AppClient {
     pub(crate) async fn find_audio_chapter_source(
         &self,
         chapter_id: i64,
-    ) -> Result<Option<String>, String> {
-        validate_novel_id(chapter_id)?;
+    ) -> Result<Option<String>, AppApiError> {
+        validate_chapter_id(chapter_id)?;
         let payload = self
             .get_data(
                 &format!("/albumchaps/{chapter_id}"),
