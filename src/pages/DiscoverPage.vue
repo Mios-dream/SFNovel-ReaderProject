@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
-import { computed, inject, onMounted, ref } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
-  ArrowRight,
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
   Eye,
-  Flame,
   LoaderCircle,
   RotateCw,
   Search,
@@ -28,12 +28,27 @@ const home = ref<DiscoverFeed>();
 const homeLoading = ref(false);
 const homeError = ref("");
 const activeCategory = ref<number>();
+const activeSlideIndex = ref(0);
+const carouselPaused = ref(false);
+const heroTint = ref("rgb(226 148 100)");
 let homeRequest = 0;
+let carouselTimer: number | undefined;
+let tintRequest = 0;
+const coverTints = new Map<string, string>();
 
-const featured = computed(() => home.value?.featured);
 const categories = computed(() => home.value?.categories || []);
 const ranking = computed(() => home.value?.ranking || []);
 const recent = computed(() => home.value?.recent || []);
+const heroSlides = computed(() => {
+  const slides: Novel[] = [];
+  if (home.value?.featured) slides.push(home.value.featured);
+  for (const novel of ranking.value) {
+    if (!slides.some((slide) => slide.novelId === novel.novelId))
+      slides.push(novel);
+  }
+  return slides;
+});
+const activeSlide = computed(() => heroSlides.value[activeSlideIndex.value]);
 
 async function loadHome(typeId?: number) {
   const request = ++homeRequest;
@@ -44,7 +59,10 @@ async function loadHome(typeId?: number) {
     const feed = await invoke<DiscoverFeed>("get_discover_feed", {
       typeId: typeId ?? null,
     });
-    if (request === homeRequest) home.value = feed;
+    if (request === homeRequest) {
+      home.value = feed;
+      activeSlideIndex.value = 0;
+    }
   } catch (error) {
     if (request === homeRequest)
       homeError.value = nativeErrorMessage(error, "首页内容加载失败");
@@ -62,6 +80,110 @@ function openNovel(novel: Novel) {
   desk.openRemoteBookDetail(novel);
 }
 
+function showSlide(index: number) {
+  const total = heroSlides.value.length;
+  if (!total) return;
+  activeSlideIndex.value = (index + total) % total;
+}
+
+function previousSlide() {
+  showSlide(activeSlideIndex.value - 1);
+}
+
+function nextSlide() {
+  showSlide(activeSlideIndex.value + 1);
+}
+
+function conciseDescription(value?: string) {
+  return value?.replace(/\s+/g, " ").trim() || "暂无简介";
+}
+
+function updateHeroTint(cover?: string) {
+  const request = ++tintRequest;
+  const fallback = "rgb(226 148 100)";
+  if (!cover) {
+    heroTint.value = fallback;
+    return;
+  }
+  const cached = coverTints.get(cover);
+  if (cached) {
+    heroTint.value = cached;
+    return;
+  }
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+  image.decoding = "async";
+  image.onload = () => {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 32;
+      canvas.height = 32;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return;
+      context.drawImage(image, 0, 0, 32, 32);
+      const pixels = context.getImageData(0, 0, 32, 32).data;
+      const buckets = new Map<
+        number,
+        { red: number; green: number; blue: number; weight: number }
+      >();
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (pixels[index + 3] < 180) continue;
+        const red = pixels[index];
+        const green = pixels[index + 1];
+        const blue = pixels[index + 2];
+        const high = Math.max(red, green, blue);
+        const low = Math.min(red, green, blue);
+        const lightness = (high + low) / 2;
+        if (lightness < 28 || lightness > 238) continue;
+        const key = ((red >> 4) << 8) | ((green >> 4) << 4) | (blue >> 4);
+        const bucket = buckets.get(key) || {
+          red: 0,
+          green: 0,
+          blue: 0,
+          weight: 0,
+        };
+        const weight = 12 + high - low;
+        bucket.red += red * weight;
+        bucket.green += green * weight;
+        bucket.blue += blue * weight;
+        bucket.weight += weight;
+        buckets.set(key, bucket);
+      }
+      let best:
+        | { red: number; green: number; blue: number; weight: number }
+        | undefined;
+      for (const bucket of buckets.values()) {
+        if (!best || bucket.weight > best.weight) best = bucket;
+      }
+      if (!best || request !== tintRequest) return;
+      const color = `rgb(${Math.round(best.red / best.weight)} ${Math.round(
+        best.green / best.weight,
+      )} ${Math.round(best.blue / best.weight)})`;
+      coverTints.set(cover, color);
+      heroTint.value = color;
+    } catch {
+      if (request === tintRequest) heroTint.value = fallback;
+    }
+  };
+  image.onerror = () => {
+    if (request === tintRequest) heroTint.value = fallback;
+  };
+  image.src = cover;
+}
+
+function restartCarousel() {
+  if (carouselTimer != null) window.clearInterval(carouselTimer);
+  carouselTimer = undefined;
+  if (
+    heroSlides.value.length < 2 ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  )
+    return;
+  carouselTimer = window.setInterval(() => {
+    if (!carouselPaused.value) nextSlide();
+  }, 6500);
+}
+
 function formatMetric(value?: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "";
   if (value >= 100_000_000) return `${trimMetric(value / 100_000_000)}亿`;
@@ -73,7 +195,16 @@ function trimMetric(value: number) {
   return value >= 100 ? value.toFixed(0) : value.toFixed(1).replace(/\.0$/, "");
 }
 
+watch(heroSlides, restartCarousel, { flush: "post" });
+watch(carouselPaused, restartCarousel);
+watch(activeSlideIndex, restartCarousel);
+watch(() => activeSlide.value?.novelCover, updateHeroTint, { immediate: true });
+
 onMounted(() => void loadHome());
+onBeforeUnmount(() => {
+  if (carouselTimer != null) window.clearInterval(carouselTimer);
+  tintRequest += 1;
+});
 </script>
 
 <template>
@@ -86,53 +217,90 @@ onMounted(() => void loadHome());
             <span>正在载入推荐</span>
           </section>
 
-          <section v-else-if="featured" class="hero">
-            <div
-              v-if="featured.novelCover"
-              class="hero-backdrop"
-              :style="{ backgroundImage: `url('${featured.novelCover}')` }"
-              aria-hidden="true"
-            />
-            <div class="hero-inner">
-              <div class="hero-copy">
-                <span class="hero-kicker"
-                  ><Flame :size="14" fill="currentColor" />本周热门</span
+          <section
+            v-else-if="activeSlide"
+            class="hero"
+            :style="{ '--hero-tint': heroTint }"
+            role="region"
+            aria-roledescription="轮播图"
+            aria-label="本周热门"
+            @mouseenter="carouselPaused = true"
+            @mouseleave="carouselPaused = false"
+            @focusin="carouselPaused = true"
+            @focusout="carouselPaused = false"
+          >
+            <Transition name="hero-slide" mode="out-in">
+              <div :key="activeSlide.novelId" class="hero-slide">
+                <img
+                  v-if="activeSlide.novelCover"
+                  class="hero-art"
+                  :src="activeSlide.novelCover"
+                  :alt="`${activeSlide.novelName} 封面`"
+                />
+                <BookOpen v-else class="hero-art-placeholder" :size="40" />
+                <div
+                  class="hero-inner"
+                  role="link"
+                  tabindex="0"
+                  :aria-label="`查看 ${activeSlide.novelName}`"
+                  @click="openNovel(activeSlide)"
+                  @keydown.enter="openNovel(activeSlide)"
                 >
-                <h1>{{ featured.novelName }}</h1>
-                <p class="hero-author">
-                  {{ featured.authorName || "未知作者" }}
-                </p>
-                <p class="hero-summary">
-                  {{ featured.description || "暂无简介" }}
-                </p>
-                <div class="hero-meta">
-                  <span v-if="featured.score != null"
-                    ><Star :size="14" fill="currentColor" />{{
-                      featured.score.toFixed(1)
-                    }}</span
-                  >
-                  <span v-if="featured.viewCount != null"
-                    ><Eye :size="14" />{{
-                      formatMetric(featured.viewCount)
-                    }}</span
-                  >
-                  <span>{{ featured.isFinish ? "已完结" : "连载中" }}</span>
+                  <div class="hero-copy">
+                    <h1>{{ activeSlide.novelName }}</h1>
+                    <p class="hero-author">
+                      著 / {{ activeSlide.authorName || "未知作者" }}
+                    </p>
+                  </div>
+                  <div class="hero-description">
+                    <p>{{ conciseDescription(activeSlide.description) }}</p>
+                    <div class="hero-meta">
+                      <span v-if="activeSlide.score != null"
+                        ><Star :size="13" fill="currentColor" />{{
+                          activeSlide.score.toFixed(1)
+                        }}</span
+                      >
+                      <span v-if="activeSlide.viewCount != null"
+                        ><Eye :size="13" />{{
+                          formatMetric(activeSlide.viewCount)
+                        }}</span
+                      >
+                      <span>{{
+                        activeSlide.isFinish ? "已完结" : "连载中"
+                      }}</span>
+                    </div>
+                  </div>
                 </div>
-                <button class="hero-cta" @click="openNovel(featured)">
-                  查看作品<ArrowRight :size="18" />
-                </button>
+              </div>
+            </Transition>
+            <div v-if="heroSlides.length > 1" class="hero-controls">
+              <button
+                class="hero-arrow"
+                type="button"
+                aria-label="上一部热门作品"
+                @click="previousSlide"
+              >
+                <ChevronLeft :size="16" />
+              </button>
+              <div class="hero-dots" role="tablist" aria-label="热门作品">
+                <button
+                  v-for="(novel, index) in heroSlides"
+                  :key="novel.novelId"
+                  type="button"
+                  role="tab"
+                  :class="{ active: index === activeSlideIndex }"
+                  :aria-label="`查看第 ${index + 1} 部热门作品`"
+                  :aria-selected="index === activeSlideIndex"
+                  @click="showSlide(index)"
+                />
               </div>
               <button
-                class="hero-cover"
-                :aria-label="`查看 ${featured.novelName}`"
-                @click="openNovel(featured)"
+                class="hero-arrow"
+                type="button"
+                aria-label="下一部热门作品"
+                @click="nextSlide"
               >
-                <img
-                  v-if="featured.novelCover"
-                  :src="featured.novelCover"
-                  :alt="`${featured.novelName} 封面`"
-                />
-                <BookOpen v-else :size="48" />
+                <ChevronRight :size="16" />
               </button>
             </div>
           </section>
@@ -152,7 +320,9 @@ onMounted(() => void loadHome());
               autocomplete="off"
               placeholder="搜索书名、作者或关键词"
               aria-label="搜索作品"
-              @input="desk.query.value = ($event.target as HTMLInputElement).value"
+              @input="
+                desk.query.value = ($event.target as HTMLInputElement).value
+              "
             />
             <button
               class="primary-button"
@@ -218,7 +388,12 @@ onMounted(() => void loadHome());
                     }}</span>
                   </span>
                   <strong class="rank-title">{{ novel.novelName }}</strong>
-                  <span class="rank-author">{{ novel.authorName }}</span>
+                  <!-- <span class="rank-author">{{ novel.authorName }}</span> -->
+                  <span v-if="novel.tags?.length" class="rank-tags">
+                    <span v-for="tag in novel.tags.slice(0, 2)" :key="tag">{{
+                      tag
+                    }}</span>
+                  </span>
                   <span class="rank-meta">
                     <span v-if="novel.score != null"
                       ><Star :size="12" fill="currentColor" />{{
@@ -262,7 +437,9 @@ onMounted(() => void loadHome());
                       <span v-if="novel.latestChapterTitle"
                         >更新至 {{ novel.latestChapterTitle }}</span
                       >
-                      <time v-else>{{ desk.formatDate(novel.lastUpdateTime) }}</time>
+                      <time v-else>{{
+                        desk.formatDate(novel.lastUpdateTime)
+                      }}</time>
                     </span>
                   </span>
                 </button>
@@ -272,14 +449,19 @@ onMounted(() => void loadHome());
         </template>
 
         <template v-else>
-          <form class="search-box glass search-box-active" @submit.prevent="desk.search">
+          <form
+            class="search-box glass search-box-active"
+            @submit.prevent="desk.search"
+          >
             <Search :size="21" />
             <input
               :value="desk.query.value"
               autocomplete="off"
               placeholder="搜索书名、作者或关键词"
               aria-label="搜索作品"
-              @input="desk.query.value = ($event.target as HTMLInputElement).value"
+              @input="
+                desk.query.value = ($event.target as HTMLInputElement).value
+              "
             />
             <button
               class="primary-button"
@@ -349,162 +531,207 @@ onMounted(() => void loadHome());
 }
 .hero {
   position: relative;
-  min-height: 318px;
+  --hero-art-width: clamp(280px, 36%, 400px);
+  min-height: 252px;
+  isolation: isolate;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.82);
+  /* border: 1px solid rgba(255, 255, 255, 0.3); */
   border-radius: 24px;
-  background: linear-gradient(115deg, #fff9f3 8%, #ffeadf 58%, #f8cbb2);
-  box-shadow: 0 16px 40px rgba(137, 76, 55, 0.13);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(18, 14, 17, 0.88) 0%,
+      rgba(18, 14, 17, 0.58) 58%,
+      rgba(18, 14, 17, 0.12) 100%
+    ),
+    var(--hero-tint, rgb(226 148 100));
+  box-shadow: 0 18px 42px rgba(77, 47, 54, 0.2);
 }
-.hero::after {
+.hero-slide {
+  position: relative;
+  min-height: 252px;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.hero-art {
   position: absolute;
-  inset: 0;
-  background: linear-gradient(
+  inset: 0 0 0 auto;
+  z-index: 0;
+  width: var(--hero-art-width);
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  filter: saturate(1.04);
+  -webkit-mask-image: linear-gradient(
     90deg,
-    rgba(255, 249, 243, 0.98) 0%,
-    rgba(255, 245, 237, 0.92) 47%,
-    rgba(255, 235, 223, 0.18) 100%
+    transparent 0%,
+    rgba(0, 0, 0, 0.08) 8%,
+    rgba(0, 0, 0, 0.42) 17%,
+    rgba(0, 0, 0, 0.86) 24%,
+    #000 32%
   );
-  content: "";
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.08) 8%,
+    rgba(0, 0, 0, 0.42) 17%,
+    rgba(0, 0, 0, 0.86) 24%,
+    #000 32%
+  );
 }
-.hero-backdrop {
+.hero-art-placeholder {
   position: absolute;
-  inset: -34px -18px -34px 37%;
-  background-position: center 32%;
-  background-size: cover;
-  filter: blur(20px) saturate(1.08);
-  opacity: 0.52;
-  transform: scale(1.08);
+  top: 50%;
+  right: calc(var(--hero-art-width) / 2);
+  z-index: 0;
+  color: rgba(255, 255, 255, 0.72);
+  transform: translate(50%, -50%);
 }
 .hero-inner {
   position: relative;
-  z-index: 1;
-  display: flex;
-  min-height: 318px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 44px;
-  padding: 34px 42px;
+  z-index: 2;
+  display: grid;
+  min-height: 252px;
+  grid-template-columns: minmax(0, 1fr) calc(var(--hero-art-width) * 0.7);
+  grid-template-rows: 1fr auto;
+  gap: 8px 36px;
+  padding: 24px 42px 46px;
+  border-radius: inherit;
+  cursor: pointer;
+  outline: none;
+}
+.hero-inner:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.88);
 }
 .hero-copy {
   display: flex;
-  max-width: 690px;
   min-width: 0;
   flex-direction: column;
-  align-items: flex-start;
-}
-.hero-kicker {
-  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 10px;
-  border: 1px solid #f0bea4;
-  border-radius: 999px;
-  color: #a95436;
-  background: rgba(255, 238, 227, 0.88);
-  font-size: 12px;
-  font-weight: 600;
+  justify-content: center;
+  padding-top: 4px;
 }
 .hero h1 {
   display: -webkit-box;
-  margin: 16px 0 7px;
+  max-width: 760px;
+  margin: 0;
   overflow: hidden;
-  color: #523832;
+  color: #fff;
   font-family: KaTongFont, "Microsoft YaHei", sans-serif;
-  font-size: clamp(31px, 3.4vw, 45px);
-  line-height: 1.2;
+  font-size: clamp(27px, 2.9vw, 38px);
+  line-height: 1.18;
+  letter-spacing: 0.02em;
+  text-align: center;
   text-wrap: balance;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 .hero-author {
-  margin: 0;
-  color: #9b6f61;
-  font-size: 14px;
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  letter-spacing: 0.02em;
 }
-.hero-summary {
+.hero-description {
+  display: flex;
+  min-width: 0;
+  grid-column: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 8px 18px 9px 13px;
+  border-left: 3px solid var(--theme-color);
+  background: linear-gradient(
+    90deg,
+    rgba(20, 17, 19, 0.46) 0%,
+    rgba(20, 17, 19, 0.24) 64%,
+    rgba(20, 17, 19, 0) 100%
+  );
+}
+.hero-description > p {
   display: -webkit-box;
-  max-width: 660px;
-  margin: 13px 0 0;
+  margin: 0;
   overflow: hidden;
-  color: #80655c;
-  font-size: 14px;
-  line-height: 1.75;
-  white-space: pre-line;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  line-height: 1.6;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
 }
 .hero-meta {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
-}
-.hero-meta span {
-  display: inline-flex;
-  min-height: 27px;
   align-items: center;
-  gap: 4px;
-  padding: 0 9px;
-  border: 1px solid rgba(227, 164, 132, 0.42);
-  border-radius: 8px;
-  color: #8b5d4d;
-  background: rgba(255, 252, 248, 0.62);
+  gap: 11px;
+  color: rgba(255, 255, 255, 0.72);
   font-size: 12px;
 }
-.hero-meta span:first-child {
-  color: #b46535;
-}
-.hero-cta {
+.hero-meta > span {
   display: inline-flex;
-  min-height: 42px;
+  align-items: center;
+  gap: 3px;
+}
+.hero-controls {
+  position: absolute;
+  right: 0;
+  bottom: 15px;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+.hero-arrow {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.12);
+  place-items: center;
+  transition:
+    background-color 150ms ease,
+    transform 150ms ease;
+}
+.hero-arrow:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.hero-arrow:active {
+  transform: scale(0.94);
+}
+.hero-dots {
+  display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 19px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: 11px;
-  color: #fff;
-  background: var(--theme-color);
-  box-shadow: 0 8px 16px rgba(185, 98, 59, 0.24);
-  font-size: 14px;
-  font-weight: 600;
-  transition:
-    background-color 160ms ease,
-    transform 160ms ease,
-    box-shadow 160ms ease;
 }
-.hero-cta:hover {
-  background: var(--theme-color-dark);
-  box-shadow: 0 10px 20px rgba(185, 98, 59, 0.3);
-  transform: translateY(-1px);
-}
-.hero-cover {
-  display: grid;
-  width: 188px;
-  height: 260px;
-  flex: 0 0 188px;
-  overflow: hidden;
+.hero-dots button {
+  width: 6px;
+  height: 6px;
   padding: 0;
-  border: 5px solid rgba(255, 250, 245, 0.9);
-  border-radius: 15px;
-  color: #a56b54;
-  background: #f2d4c3;
-  box-shadow: 0 18px 34px rgba(92, 48, 34, 0.24);
-  place-items: center;
-  transform: rotate(2deg);
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.42);
   transition:
-    transform 200ms ease-out,
-    box-shadow 200ms ease-out;
+    width 180ms ease,
+    background-color 180ms ease;
 }
-.hero-cover:hover {
-  box-shadow: 0 23px 42px rgba(92, 48, 34, 0.3);
-  transform: rotate(0deg) translateY(-3px);
+.hero-dots button.active {
+  width: 20px;
+  background: #fff;
 }
-.hero-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.hero-slide-enter-active {
+  transition: opacity 250ms ease-out;
+}
+.hero-slide-leave-active {
+  transition: opacity 200ms ease-in;
+}
+.hero-slide-enter-from,
+.hero-slide-leave-to {
+  opacity: 0;
 }
 .home-loading {
   display: flex;
@@ -725,6 +952,23 @@ onMounted(() => void loadHome());
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.rank-tags {
+  display: flex;
+  min-height: 20px;
+  gap: 4px;
+  overflow: hidden;
+}
+.rank-tags span {
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: #956653;
+  background: rgba(247, 228, 216, 0.86);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .rank-meta {
   display: flex;
   min-height: 18px;
@@ -907,75 +1151,59 @@ onMounted(() => void loadHome());
     overflow: visible;
   }
   .hero {
-    min-height: 258px;
+    --hero-art-width: clamp(138px, 43%, 172px);
+    min-height: 218px;
     border-radius: 20px;
   }
-  .hero::after {
-    background: linear-gradient(
-      90deg,
-      rgba(255, 249, 243, 0.98) 0%,
-      rgba(255, 242, 232, 0.84) 68%,
-      rgba(255, 235, 223, 0.12) 100%
-    );
-  }
-  .hero-backdrop {
-    inset: -20px -12px -20px 24%;
-    opacity: 0.46;
+  .hero-slide {
+    min-height: 218px;
   }
   .hero-inner {
-    min-height: 258px;
-    align-items: flex-end;
-    gap: 13px;
-    padding: 24px 18px 25px;
+    min-height: 218px;
+    gap: 8px 10px;
+    padding: 16px 16px 40px;
   }
   .hero-copy {
-    flex: 1 1 auto;
-  }
-  .hero-kicker {
-    padding: 5px 9px;
-    font-size: 12px;
+    padding-top: 0;
   }
   .hero h1 {
-    margin-top: 12px;
-    font-size: clamp(25px, 7.5vw, 31px);
+    font-size: clamp(21px, 6.2vw, 25px);
+    line-height: 1.2;
     -webkit-line-clamp: 2;
   }
   .hero-author {
+    margin-top: 6px;
     font-size: 12px;
   }
-  .hero-summary {
-    margin-top: 9px;
+  .hero-description {
+    gap: 8px;
+    padding: 7px 12px 8px 10px;
+    border-left-width: 3px;
+  }
+  .hero-description > p {
     font-size: 12px;
-    line-height: 1.65;
-    -webkit-line-clamp: 2;
+    line-height: 1.55;
   }
   .hero-meta {
-    gap: 6px;
-    margin-top: 10px;
-  }
-  .hero-meta span {
-    min-height: 24px;
-    padding: 0 7px;
-    font-size: 12px;
-  }
-  .hero-meta span:nth-child(3) {
     display: none;
   }
-  .hero-cta {
-    min-height: 38px;
-    margin-top: 13px;
-    padding: 0 13px;
-    font-size: 12px;
+  .hero-controls {
+    bottom: 9px;
+    gap: 7px;
   }
-  .hero-cover {
-    width: 91px;
-    height: 129px;
-    flex-basis: 91px;
-    border-width: 3px;
-    border-radius: 10px;
+  .hero-arrow {
+    width: 24px;
+    height: 24px;
+  }
+  .hero-dots button {
+    width: 5px;
+    height: 5px;
+  }
+  .hero-dots button.active {
+    width: 16px;
   }
   .home-loading {
-    min-height: 258px;
+    min-height: 218px;
   }
   .search-box {
     margin-top: 10px;
@@ -1049,8 +1277,10 @@ onMounted(() => void loadHome());
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hero-cta,
-  .hero-cover,
+  .hero-arrow,
+  .hero-dots button,
+  .hero-slide-enter-active,
+  .hero-slide-leave-active,
   .primary-button,
   .category-list button,
   .rank-cover,

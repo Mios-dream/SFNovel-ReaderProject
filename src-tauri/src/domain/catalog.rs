@@ -31,6 +31,9 @@ pub(crate) struct SearchNovel {
     /// 作品简介。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) description: Option<String>,
+    /// 作品标签。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tags: Option<Vec<String>>,
     /// 作品分类编号。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) type_id: Option<i64>,

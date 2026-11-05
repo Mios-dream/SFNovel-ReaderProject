@@ -1,5 +1,5 @@
 use super::parse_detail::{detail_from_audio_payload, detail_from_novel_payload};
-use super::parsing::{json_bool_field, json_i64_field, json_text_field};
+use super::parsing::{json_bool_field, json_i64_field, json_text_field, parse_tags};
 use super::AppClient;
 use crate::domain::catalog::{
     BookComment, BookCommentPage, BookCommentReply, BookCommentReplyPage, DiscoverCategory,
@@ -193,7 +193,7 @@ impl AppClient {
         let mut ranking_query = vec![
             ("page", "0".to_string()),
             ("size", "7".to_string()),
-            ("expand", "intro".to_string()),
+            ("expand", "intro,sysTags".to_string()),
         ];
         if let Some(type_id) = type_id {
             ranking_query.push(("typeId", type_id.to_string()));
@@ -211,7 +211,7 @@ impl AppClient {
         let mut recent_query = vec![
             ("page", "0".to_string()),
             ("size", "9".to_string()),
-            ("expand", "intro".to_string()),
+            ("expand", "intro,sysTags".to_string()),
         ];
         if let Some(type_id) = type_id {
             recent_query.push(("tid", type_id.to_string()));
@@ -445,6 +445,10 @@ fn search_novel(item: &Value, kind: &str) -> Option<SearchNovel> {
                     && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
             }),
         description: json_text_field(item, &["intro", "description"]),
+        tags: parse_tags(
+            item.get("sysTags")
+                .or_else(|| item.get("expand").and_then(|expand| expand.get("sysTags"))),
+        ),
         type_id: json_i64_field(item, &["typeId"]),
         is_finish: json_bool_field(item, &["isFinish", "isFinished"]),
         score: item.get("point").and_then(Value::as_f64),
