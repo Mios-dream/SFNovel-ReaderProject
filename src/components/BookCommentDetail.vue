@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { invoke } from "@tauri-apps/api/core";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { Heart, LoaderCircle, MessageCircle, X } from "@lucide/vue";
-import type { BookComment, BookCommentReply, BookCommentReplyPage } from "../types";
-import { nativeErrorMessage } from "../composables/deskShared";
+import type { BookComment, BookCommentReply } from "../types";
+import { useRemote } from "../desk";
+import { nativeErrorMessage } from "../utils/native";
 
 const props = defineProps<{
   comment: BookComment;
@@ -11,6 +11,8 @@ const props = defineProps<{
   reviews: boolean;
 }>();
 const emit = defineEmits<{ close: [] }>();
+
+const remote = useRemote();
 
 const replies = ref<BookCommentReply[]>([]);
 const loading = ref(false);
@@ -60,7 +62,7 @@ async function load(reset = true) {
     loadingMore.value = true;
   }
   try {
-    const result = await invoke<BookCommentReplyPage>("get_comment_replies", {
+    const result = await remote.fetchReplies({
       kind: props.kind,
       commentId: props.comment.commentId,
       reviews: props.reviews,

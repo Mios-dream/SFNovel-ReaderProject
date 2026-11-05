@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { inject } from "vue";
-import { useRouter } from "vue-router";
 import {
   BookOpen,
   ChevronRight,
@@ -14,27 +12,24 @@ import {
   Trash2,
 } from "@lucide/vue";
 import PageFrame from "../components/PageFrame.vue";
-import { deskInjectionKey } from "../deskContext";
 import type { Book } from "../types";
 
-function requireDesk() {
-  const desk = inject(deskInjectionKey);
-  if (!desk) throw new Error("Desk context is unavailable");
-  return desk;
-}
+import { useJobs, useLibrary, useWorkspace } from "../desk";
+import { formatMonthDay } from "../utils/format";
 
-const desk = requireDesk();
-const router = useRouter();
+const jobs = useJobs();
+const library = useLibrary();
+const workspace = useWorkspace();
+
 
 async function openBook(book: Book) {
-  if (await desk.loadLocalBook(book.name)) {
-    await router.push(`/library/${encodeURIComponent(book.name)}`);
+  if (await library.loadLocalBook(book.name)) {
+    await workspace.navigate("libraryDetail", book.name);
   }
 }
 
 async function openDiscover() {
-  desk.navigate("discover");
-  await router.push("/discover");
+  await workspace.navigate("discover");
 }
 
 // 本地书库同时展示已完成作品和仍在运行的任务，操作通过事件交给父级处理。
@@ -48,8 +43,8 @@ async function openDiscover() {
           <p class="eyebrow">LOCAL LIBRARY</p>
           <h2>
             {{
-              desk.library.value.length
-                ? `共 ${desk.library.value.length} 本本地作品`
+              library.books.value.length
+                ? `共 ${library.books.value.length} 本本地作品`
                 : "本地书库"
             }}
           </h2>
@@ -57,39 +52,39 @@ async function openDiscover() {
         <div class="library-actions">
           <button
             class="open-download-button"
-            :disabled="desk.openingDownloadDirectory.value"
+            :disabled="library.openingDownloadDirectory.value"
             aria-label="打开下载目录"
             title="打开下载目录"
-            @click="desk.openDownloadDirectory"
+            @click="library.openDownloadDirectory"
           >
             <FolderOpen :size="17" /><span>{{
-              desk.openingDownloadDirectory.value ? "正在打开" : "打开下载目录"
+              library.openingDownloadDirectory.value ? "正在打开" : "打开下载目录"
             }}</span>
           </button>
           <button
             class="manage-button"
-            :class="{ active: desk.libraryManaging.value }"
-            :disabled="!desk.library.value.length"
-            :aria-label="desk.libraryManaging.value ? '完成管理' : '管理本地作品'"
-            :title="desk.libraryManaging.value ? '完成管理' : '管理本地作品'"
-            @click="desk.libraryManaging.value = !desk.libraryManaging.value"
+            :class="{ active: library.libraryManaging.value }"
+            :disabled="!library.books.value.length"
+            :aria-label="library.libraryManaging.value ? '完成管理' : '管理本地作品'"
+            :title="library.libraryManaging.value ? '完成管理' : '管理本地作品'"
+            @click="library.libraryManaging.value = !library.libraryManaging.value"
           >
             <Settings2 :size="17" /><span>{{
-              desk.libraryManaging.value ? "完成管理" : "管理"
+              library.libraryManaging.value ? "完成管理" : "管理"
             }}</span>
           </button>
         </div>
       </section>
       <section
-        v-if="desk.libraryJobs.value.length"
+        v-if="jobs.libraryJobs.value.length"
         class="library-downloads glass"
       >
         <div class="library-downloads-head">
           <strong>下载进度</strong
-          ><span>{{ desk.libraryJobs.value.length }} 个任务</span>
+          ><span>{{ jobs.libraryJobs.value.length }} 个任务</span>
         </div>
         <article
-          v-for="job in desk.libraryJobs.value"
+          v-for="job in jobs.libraryJobs.value"
           :key="job.id"
           class="library-download-row"
         >
@@ -104,26 +99,26 @@ async function openDiscover() {
             v-if="job.status === 'paused'"
             class="text-button"
             title="继续下载"
-            @click="desk.resumeJob(job)"
+            @click="jobs.resumeJob(job)"
           >
             <Play :size="14" />继续下载</button
           ><button
             v-else-if="job.status === 'downloading' || job.status === 'queued'"
             class="text-button"
             title="暂停下载"
-            @click="desk.pauseJob(job)"
+            @click="jobs.pauseJob(job)"
           >
             <Pause :size="14" />暂停
           </button>
         </article>
       </section>
       <section
-        v-if="desk.library.value.length"
+        v-if="library.books.value.length"
         class="library-grid"
-        :class="{ managing: desk.libraryManaging.value }"
+        :class="{ managing: library.libraryManaging.value }"
       >
         <article
-          v-for="book in desk.library.value"
+          v-for="book in library.books.value"
           :key="book.name"
           class="library-card glass"
           :class="{ 'clickable-card': true }"
@@ -139,10 +134,10 @@ async function openDiscover() {
               :alt="`${book.name} 封面`" /><BookOpen v-else :size="34"
           /></span>
           <button
-            v-if="desk.libraryManaging.value"
+            v-if="library.libraryManaging.value"
             class="delete-badge"
             title="删除本地内容"
-            @click.stop="desk.deleteBook(book)"
+            @click.stop="library.deleteBook(book)"
           >
             <Trash2 :size="15" /><span>删除</span>
           </button>
@@ -153,7 +148,7 @@ async function openDiscover() {
                 book.author
               }}</small
               ><small class="library-updated"
-                >最近写入 {{ desk.formatDate(book.updatedAt) }}</small
+                >最近写入 {{ formatMonthDay(book.updatedAt) }}</small
               >
             </div>
             <div class="format-icons" aria-label="已下载格式">

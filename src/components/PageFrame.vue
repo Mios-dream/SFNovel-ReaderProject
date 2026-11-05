@@ -1,33 +1,23 @@
 <script setup lang="ts">
-import { computed, inject } from "vue";
+import { computed } from "vue";
 import { CloudDownload } from "@lucide/vue";
-import { useRoute, useRouter } from "vue-router";
+
 import AppSidebar from "./AppSidebar.vue";
-import { deskInjectionKey } from "../deskContext";
 import type { ViewName } from "../types";
 
-function requireDesk() {
-  const desk = inject(deskInjectionKey);
-  if (!desk) throw new Error("Desk context is unavailable");
-  return desk;
-}
+import { useAuth, useBookshelf, useJobs, useLibrary, useSettings, useWorkspace } from "../desk";
 
-const desk = requireDesk();
-const route = useRoute();
-const router = useRouter();
-const active = computed<ViewName>(() => {
-  if (route.path === "/bookshelf") return "bookshelf";
-  if (route.path === "/remote-book")
-    return desk.remoteDetailReturnView.value === "discover"
-      ? "discover"
-      : "bookshelf";
-  if (route.path === "/library") return "library";
-  return "discover";
-});
+const auth = useAuth();
+const bookshelf = useBookshelf();
+const jobs = useJobs();
+const library = useLibrary();
+const settings = useSettings();
+const workspace = useWorkspace();
 
-async function navigate(view: ViewName) {
-  desk.navigate(view);
-  await router.push(`/${view}`);
+const active = computed<ViewName>(() => workspace.activeEntry());
+
+function navigate(view: ViewName) {
+  void workspace.navigate(view);
 }
 </script>
 
@@ -35,23 +25,23 @@ async function navigate(view: ViewName) {
   <div class="page-frame">
     <AppSidebar
       :active="active"
-      :bookshelf-count="desk.bookshelf.value.length"
-      :library-count="desk.library.value.length"
-      :auth="desk.auth.value"
-      :profile="desk.accountProfile.value"
+      :bookshelf-count="bookshelf.bookshelf.value.length"
+      :library-count="library.books.value.length"
+      :auth="auth.auth.value"
+      :profile="auth.accountProfile.value"
       @navigate="navigate"
-      @account="desk.openAccount"
-      @settings="desk.openSettings"
+      @account="auth.openAccount"
+      @settings="settings.openSettings"
     />
     <slot />
     <button
       class="queue-fab"
       title="打开下载列表"
-      @click="desk.queueOpen.value = true"
+      @click="jobs.queueOpen.value = true"
     >
       <CloudDownload :size="22" />
-      <span v-if="desk.runningJobs.value.length" class="queue-count">
-        {{ desk.runningJobs.value.length }}
+      <span v-if="jobs.runningJobs.value.length" class="queue-count">
+        {{ jobs.runningJobs.value.length }}
       </span>
     </button>
   </div>

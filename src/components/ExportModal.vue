@@ -8,13 +8,11 @@ import {
   Images,
   X,
 } from "@lucide/vue";
-
-type Media = "novel" | "audio" | "comic";
-type ExportFormat = "epub" | "markdown" | "txt" | "audio" | "comic";
+import type { ExportFormat, MediaType } from "../types";
 
 const props = defineProps<{
   open: boolean;
-  media: Media;
+  media: MediaType;
   textChapterCount: number;
   audioChapterCount: number;
   comicChapterCount: number;
@@ -25,8 +23,9 @@ const emit = defineEmits<{
   export: [format: ExportFormat];
 }>();
 
-const title = (media: Media) =>
-  media === "novel" ? "小说" : media === "audio" ? "有声" : "漫画";
+function title(media: MediaType) {
+  return media === "novel" ? "小说" : media === "audio" ? "有声" : "漫画";
+}
 </script>
 
 <template>

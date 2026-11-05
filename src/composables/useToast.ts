@@ -1,6 +1,10 @@
 import { ref } from "vue";
+import { messageOf } from "../utils/native";
 
 export type ToastType = "info" | "success" | "warning" | "error";
+
+/** 域注入的提示函数；默认实现是 `showToast`，测试或预览可替换。 */
+export type Notify = (message: string, type?: ToastType) => void;
 
 export type ToastItem = {
   id: number;
@@ -17,16 +21,6 @@ function clearToastTimer(id: number) {
   if (timer === undefined) return;
   window.clearTimeout(timer);
   timers.delete(id);
-}
-
-export function errorMessage(error: unknown, fallback: string) {
-  if (typeof error === "string" && error.trim()) return error.trim();
-  if (error instanceof Error && error.message.trim()) return error.message.trim();
-  if (error && typeof error === "object") {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message.trim();
-  }
-  return fallback;
 }
 
 export function dismissToast(id: number) {
@@ -57,7 +51,7 @@ export function showToast(
 }
 
 export function reportError(error: unknown, fallback: string) {
-  const message = errorMessage(error, fallback);
+  const message = messageOf(error, fallback);
   console.error(`[SF Novel Flow] ${fallback}`, error);
   return showToast(message, "error");
 }

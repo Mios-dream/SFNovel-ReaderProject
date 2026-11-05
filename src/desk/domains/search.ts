@@ -1,14 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { Novel } from "../types";
-import { nativeErrorMessage, type Notify } from "./deskShared";
+import type { Novel } from "../../types";
+import { nativeErrorMessage } from "../../utils/native";
+import type { Notify } from "../../composables/useToast";
 
-type UseNovelSearchOptions = {
+type SearchDeskOptions = {
   refreshAuthStatus: () => Promise<void>;
   notify: Notify;
 };
 
-export function useNovelSearch({ refreshAuthStatus, notify }: UseNovelSearchOptions) {
+export function createSearchDesk({ refreshAuthStatus, notify }: SearchDeskOptions) {
   const query = ref("");
   const results = ref<Novel[]>([]);
   const loading = ref(false);
@@ -39,3 +40,6 @@ export function useNovelSearch({ refreshAuthStatus, notify }: UseNovelSearchOpti
 
   return { query, results, loading, searched, search, clearSearch };
 }
+
+/** 该域对外暴露的完整上下文；页面只应通过 `useSearch` 取用。 */
+export type SearchDesk = ReturnType<typeof createSearchDesk>;

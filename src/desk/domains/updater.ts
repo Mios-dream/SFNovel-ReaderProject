@@ -1,7 +1,8 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ref } from "vue";
-import { nativeErrorMessage, type Notify } from "./deskShared";
+import { nativeErrorMessage } from "../../utils/native";
+import type { Notify } from "../../composables/useToast";
 
 export type UpdateStatus = "idle" | "checking" | "available" | "error";
 
@@ -15,7 +16,13 @@ export type UpdateInfo = {
 const RELEASES_URL =
   "https://github.com/Mios-dream/SFNovel-ReaderProject/releases";
 
-export function useUpdater(notify: Notify) {
+type UpdaterDeskOptions = {
+  notify: Notify;
+  /** 由设置页触发检查时先收起设置弹窗。 */
+  closeSettings: () => void;
+};
+
+export function createUpdaterDesk({ notify, closeSettings }: UpdaterDeskOptions) {
   const currentVersion = ref("未知");
   const status = ref<UpdateStatus>("idle");
   const info = ref<UpdateInfo>();
@@ -78,6 +85,12 @@ export function useUpdater(notify: Notify) {
     modalOpen.value = false;
   }
 
+  /** 设置页的「检查更新」：先关闭设置，再按用户主动触发的方式检查。 */
+  function checkFromSettings() {
+    closeSettings();
+    void checkForUpdate(true);
+  }
+
   return {
     currentVersion,
     status,
@@ -89,5 +102,9 @@ export function useUpdater(notify: Notify) {
     openReleases,
     showUpdate,
     closeModal,
+    checkFromSettings,
   };
 }
+
+/** 该域对外暴露的完整上下文；页面只应通过 `useUpdater` 取用。 */
+export type UpdaterDesk = ReturnType<typeof createUpdaterDesk>;

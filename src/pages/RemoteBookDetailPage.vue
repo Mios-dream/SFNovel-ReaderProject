@@ -2,7 +2,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   computed,
-  inject,
   nextTick,
   ref,
   watch,
@@ -28,27 +27,24 @@ import {
   Ticket,
   X,
 } from "@lucide/vue";
-import { useRouter } from "vue-router";
 import BookCommentCard from "../components/BookCommentCard.vue";
 import DiscussionDanmaku from "../components/DiscussionDanmaku.vue";
 import DiscussionTabs from "../components/DiscussionTabs.vue";
 import { useBookDiscussions } from "../composables/useBookDiscussions";
-import { deskInjectionKey } from "../deskContext";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import { reportError } from "../composables/useToast";
-import type { BookComment, Chapter, ChapterMode } from "../types";
+import type { BookComment, Chapter, MediaType } from "../types";
+import { formatMetric, formatSourceDate, scoreToneClass } from "../utils/format";
 
-function requireDesk() {
-  const value = inject(deskInjectionKey);
-  if (!value) throw new Error("Desk context is unavailable");
-  return value;
-}
+import { useOnline, usePicker, useRemote, useWorkspace } from "../desk";
 
-const desk = requireDesk();
-const router = useRouter();
-const novel = computed(() => desk.remoteBook.value);
-type RemoteMediaType = "novel" | "audio" | "comic";
-const mediaTypes: RemoteMediaType[] = ["novel", "audio", "comic"];
+const online = useOnline();
+const picker = usePicker();
+const remote = useRemote();
+const workspace = useWorkspace();
+
+const novel = computed(() => remote.remoteBook.value);
+const mediaTypes: MediaType[] = ["novel", "audio", "comic"];
 const descriptionExpanded = ref(false);
 const descriptionModalOpen = ref(false);
 const {
@@ -59,32 +55,32 @@ const {
   selectTab: selectDiscussionTab,
   reload: reloadDiscussion,
 } = useBookDiscussions(novel, 6);
-const mode = computed<ChapterMode>(() =>
+const mode = computed<MediaType>(() =>
   novel.value?.bookshelfType === "audio"
     ? "audio"
     : novel.value?.bookshelfType === "comic"
       ? "comic"
-      : "text",
+      : "novel",
 );
-const remoteMedia = computed(() => desk.remoteMedia.value);
-const remoteMediaDetecting = computed(() => desk.remoteMediaDetecting.value);
+const remoteMedia = computed(() => remote.remoteMedia.value);
+const remoteMediaDetecting = computed(() => remote.remoteMediaDetecting.value);
 const mobileSwitchMediaTypes = computed(() =>
   mediaTypes.filter((media) => media !== selectedMedia.value),
 );
 const directoryOpen = ref(false);
 const directoryElement = ref<HTMLElement>();
-const directoryLoading = computed(() => desk.directoryLoading.value);
-const directoryError = computed(() => desk.directoryError.value);
-const textVolumes = computed(() => desk.textVolumes.value);
-const audioChapters = computed(() => desk.audioChapters.value);
-const comicChapters = computed(() => desk.comicChapters.value);
+const directoryLoading = computed(() => online.directoryLoading.value);
+const directoryError = computed(() => online.directoryError.value);
+const textVolumes = computed(() => online.textVolumes.value);
+const audioChapters = computed(() => online.audioChapters.value);
+const comicChapters = computed(() => online.comicChapters.value);
 const audioVolumes = computed(() => groupChaptersByVolume(audioChapters.value));
 const comicVolumes = computed(() => groupChaptersByVolume(comicChapters.value));
-const selectedMedia = computed<RemoteMediaType>(
+const selectedMedia = computed<MediaType>(
   () => novel.value?.bookshelfType || "novel",
 );
 const currentDirectoryCount = computed(() =>
-  mode.value === "text"
+  mode.value === "novel"
     ? textVolumes.value.reduce(
         (count, volume) => count + volume.chapters.length,
         0,
@@ -128,31 +124,47 @@ type RemoteDrawerRow =
       index?: number;
       height: number;
     };
-const desktopDirectoryRows = computed<RemoteDesktopRow[]>(() => {
+type RemoteDirectoryVolume = {
+  title: string;
+  chapters: RemoteDirectoryChapter[];
+};
+
+/**
+ * 把当前内容类型的在线目录归一成分卷结构。
+ *
+ * 三种内容的字段名不同：文字章节是 `chapId` + `accessState === "available"`，
+ * 音视频是 `id` + `isUnlocked`。这份映射原先在桌面与抽屉两个构建器里各写一遍，
+ * 改漏一处不会报错，只会让 VIP 标记或解锁状态显示错误。
+ */
+const directoryVolumes = computed<RemoteDirectoryVolume[]>(() => {
+  if (mode.value === "novel") {
+    return textVolumes.value.map((volume) => ({
+      title: volume.title,
+      chapters: volume.chapters.map((chapter) => ({
+        id: chapter.chapId,
+        title: chapter.title,
+        isVip: chapter.isVip,
+        isUnlocked: chapter.accessState === "available",
+      })),
+    }));
+  }
+
   const volumes =
-    mode.value === "text"
-      ? textVolumes.value.map((volume) => ({
-          title: volume.title,
-          chapters: volume.chapters.map((chapter) => ({
-            id: chapter.chapId,
-            title: chapter.title,
-            isVip: chapter.isVip,
-            isUnlocked: chapter.accessState === "available",
-          })),
-        }))
-      : (mode.value === "audio" ? audioVolumes.value : comicVolumes.value).map(
-          (volume) => ({
-            title: volume.title,
-            chapters: volume.chapters.map((chapter) => ({
-              id: chapter.id,
-              title: chapter.title,
-              isVip: chapter.isVip,
-              isUnlocked: chapter.isUnlocked,
-            })),
-          }),
-        );
+    mode.value === "audio" ? audioVolumes.value : comicVolumes.value;
+  return volumes.map((volume) => ({
+    title: volume.title,
+    chapters: volume.chapters.map((chapter) => ({
+      id: chapter.id,
+      title: chapter.title,
+      isVip: chapter.isVip,
+      isUnlocked: chapter.isUnlocked,
+    })),
+  }));
+});
+
+const desktopDirectoryRows = computed<RemoteDesktopRow[]>(() => {
   const rows: RemoteDesktopRow[] = [];
-  volumes.forEach((volume, volumeIndex) => {
+  directoryVolumes.value.forEach((volume, volumeIndex) => {
     if (volumeIndex > 0)
       rows.push({
         kind: "gap",
@@ -175,10 +187,11 @@ const desktopDirectoryRows = computed<RemoteDesktopRow[]>(() => {
   });
   return rows;
 });
+
 const drawerDirectoryRows = computed<RemoteDrawerRow[]>(() => {
   const rows: RemoteDrawerRow[] = [];
-  if (mode.value === "text") {
-    textVolumes.value.forEach((volume, volumeIndex) => {
+  if (mode.value === "novel") {
+    directoryVolumes.value.forEach((volume, volumeIndex) => {
       if (volumeIndex > 0)
         rows.push({
           kind: "gap",
@@ -194,30 +207,31 @@ const drawerDirectoryRows = computed<RemoteDrawerRow[]>(() => {
       for (const chapter of volume.chapters)
         rows.push({
           kind: "chapter",
-          key: `drawer-text-${volumeIndex}-${chapter.chapId}`,
-          id: chapter.chapId,
+          key: `drawer-text-${volumeIndex}-${chapter.id}`,
+          id: chapter.id,
           title: chapter.title,
           isVip: chapter.isVip,
-          isUnlocked: chapter.accessState === "available",
+          isUnlocked: chapter.isUnlocked,
           height: 48,
         });
     });
-  } else {
-    const chapters =
-      mode.value === "audio" ? audioChapters.value : comicChapters.value;
-    chapters.forEach((chapter, index) =>
-      rows.push({
-        kind: "chapter",
-        key: `drawer-${mode.value}-${chapter.id}`,
-        id: chapter.id,
-        title: chapter.title,
-        isVip: chapter.isVip,
-        isUnlocked: chapter.isUnlocked,
-        index: mode.value === "audio" ? index : undefined,
-        height: 48,
-      }),
-    );
+    return rows;
   }
+
+  // 音视频不展示分卷标题，直接平铺；index 用于播放队列定位。
+  const chapters = directoryVolumes.value.flatMap((volume) => volume.chapters);
+  chapters.forEach((chapter, index) =>
+    rows.push({
+      kind: "chapter",
+      key: `drawer-${mode.value}-${chapter.id}`,
+      id: chapter.id,
+      title: chapter.title,
+      isVip: chapter.isVip,
+      isUnlocked: chapter.isUnlocked,
+      index: mode.value === "audio" ? index : undefined,
+      height: 48,
+    }),
+  );
   return rows;
 });
 const {
@@ -244,8 +258,8 @@ function setDrawerDirectoryElement(
   drawerDirectoryList.value =
     element instanceof HTMLElement ? element : undefined;
 }
-const isFavorite = computed(() => desk.isRemoteFavorite(novel.value));
-const favoriteBusy = computed(() => desk.isRemoteFavoriteLoading(novel.value));
+const isFavorite = computed(() => remote.isRemoteFavorite(novel.value));
+const favoriteBusy = computed(() => remote.isRemoteFavoriteLoading(novel.value));
 const remoteStatusLabel = computed(() =>
   novel.value?.isFinish == null
     ? ""
@@ -273,39 +287,33 @@ const bookFacts = computed(() => {
 });
 
 function goBack() {
-  desk.closeRemoteBookDetail();
+  remote.closeRemoteBookDetail();
 }
 function openComments() {
-  void router.push({
-    path: "/remote-book/comments",
-    query: { tab: discussionTab.value },
-  });
+  workspace.openComments(discussionTab.value);
 }
 function openComment(comment: BookComment) {
-  void router.push({
-    path: "/remote-book/comments",
-    query: { tab: discussionTab.value, comment: String(comment.commentId) },
-  });
+  workspace.openComments(discussionTab.value, comment.commentId);
 }
 function openDownload() {
-  if (novel.value) void desk.openChapterPicker(novel.value, mode.value);
+  if (novel.value) void picker.openChapterPicker(novel.value, mode.value);
 }
 function startOnline(chapterId?: number) {
   const work = novel.value;
   if (!work) return;
-  desk.startOnlineReading(work, mode.value, chapterId);
+  workspace.startOnlineReading(work, mode.value, chapterId);
 }
 
 function favoriteWork() {
   const work = novel.value;
-  if (work) void desk.toggleRemoteFavorite(work);
+  if (work) void remote.toggleRemoteFavorite(work);
 }
 
-function selectMedia(media: RemoteMediaType) {
-  if (remoteMedia.value[media]) desk.selectRemoteMedia(media);
+function selectMedia(media: MediaType) {
+  if (remoteMedia.value[media]) remote.selectRemoteMedia(media);
 }
 
-function mediaTitle(media: RemoteMediaType) {
+function mediaTitle(media: MediaType) {
   return media === "audio"
     ? "有声小说"
     : media === "comic"
@@ -313,7 +321,7 @@ function mediaTitle(media: RemoteMediaType) {
       : "小说原著";
 }
 
-function mediaDescription(media: RemoteMediaType) {
+function mediaDescription(media: MediaType) {
   if (remoteMedia.value[media]) {
     return media === selectedMedia.value ? "当前查看" : "可切换查看";
   }
@@ -324,7 +332,7 @@ async function ensureDirectory(force = false) {
   const work = novel.value;
   if (!work) return;
   try {
-    await desk.primeOnlineDirectory(work, mode.value, force);
+    await online.primeOnlineDirectory(work, mode.value, force);
   } catch {
     // 错误保存在共享目录状态中，由详情页和阅读器共同展示。
   }
@@ -374,34 +382,6 @@ watch(
   },
   { immediate: true },
 );
-function formatMetric(value?: number) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
-  if (Math.abs(value) >= 100_000_000)
-    return `${trimMetric(value / 100_000_000)}亿`;
-  if (Math.abs(value) >= 10_000) return `${trimMetric(value / 10_000)}万`;
-  return Math.round(value).toLocaleString("zh-CN");
-}
-function trimMetric(value: number) {
-  return value >= 100 ? value.toFixed(0) : value.toFixed(1).replace(/\.0$/, "");
-}
-function scoreToneClass(value?: number) {
-  return typeof value !== "number"
-    ? "score-unknown"
-    : value >= 9
-      ? "score-excellent"
-      : value >= 8
-        ? "score-good"
-        : value >= 6
-          ? "score-average"
-          : "score-low";
-}
-function formatSourceDate(value?: string) {
-  if (!value) return "--";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleDateString("zh-CN");
-}
 function groupChaptersByVolume(chapters: Chapter[]) {
   const groups = new Map<string, Chapter[]>();
   for (const chapter of chapters) {
@@ -942,7 +922,7 @@ function groupChaptersByVolume(chapters: Chapter[]) {
       </button>
     </header>
     <div class="detail-loading">
-      {{ desk.remoteBookLoading.value ? "正在读取作品详情" : "未找到远程作品" }}
+      {{ remote.remoteBookLoading.value ? "正在读取作品详情" : "未找到远程作品" }}
     </div>
   </main>
 </template>
@@ -1100,13 +1080,9 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   font: inherit;
   font-size: 12px;
 }
-.remote-latest-panel,
 .remote-directory-panel {
   min-width: 0;
   border-radius: 17px;
-}
-.remote-latest-panel {
-  padding: 20px;
 }
 .remote-directory-panel {
   display: flex;
@@ -1140,30 +1116,6 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   border-radius: 5px;
   color: #b8664e;
   background: #fff0e7;
-  font-size: 11px;
-}
-.remote-latest-row {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
-.remote-latest-row > div {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 7px;
-}
-.remote-latest-row strong {
-  overflow: hidden;
-  color: #625149;
-  font-size: 13px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.remote-latest-row small {
-  color: #a5968b;
   font-size: 11px;
 }
 .latest-badge {

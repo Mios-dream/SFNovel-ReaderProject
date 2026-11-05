@@ -42,8 +42,9 @@ const avatarLabel = computed(() => props.profile?.nickName.slice(0, 1) || "S");
  * @param value The account value to display; missing values are shown as unknown.
  * @returns The locale-formatted number suitable for the profile template.
  */
-const balance = (value: number | null) =>
-  value === null ? "未知" : new Intl.NumberFormat("zh-CN").format(value);
+function balance(value: number | null) {
+  return value === null ? "未知" : new Intl.NumberFormat("zh-CN").format(value);
+}
 </script>
 
 <template>

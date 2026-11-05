@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { AuthStatus, UserProfile } from "../types";
-import { nativeErrorMessage, type Notify } from "./deskShared";
+import type { AuthStatus, UserProfile } from "../../types";
+import { nativeErrorMessage } from "../../utils/native";
+import type { Notify } from "../../composables/useToast";
 
 const ACCOUNT_PROFILE_CACHE_MS = 5 * 60 * 1000;
 
-export function useDeskAuth(notify: Notify) {
+export function createAuthDesk(notify: Notify) {
   const auth = ref<AuthStatus>({ authenticated: false, appAuthenticated: false, webAuthenticated: false });
   const credentialsOpen = ref(false);
   const credentialsTab = ref<"official" | "password">("official");
@@ -185,6 +186,16 @@ export function useDeskAuth(notify: Notify) {
     openCredentials("password");
   }
 
+  /**
+   * 音频播放的登录门禁：App 凭证缺失时提示并拒绝播放。
+   * @returns 是否允许继续播放。
+   */
+  function requireAudioPlaybackAccess() {
+    if (auth.value.appAuthenticated) return true;
+    notify("音频地址为空，请登录 App 凭证后播放", "warning");
+    return false;
+  }
+
   return {
     auth,
     credentialsOpen,
@@ -207,5 +218,9 @@ export function useDeskAuth(notify: Notify) {
     manageConnections,
     openCredentials,
     openAppCredentials,
+    requireAudioPlaybackAccess,
   };
 }
+
+/** 该域对外暴露的完整上下文；页面只应通过 `useAuth` 取用。 */
+export type AuthDesk = ReturnType<typeof createAuthDesk>;

@@ -1,7 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
 import { computed, reactive, ref, watch, type ComputedRef } from "vue";
-import type { BookComment, BookCommentPage, Novel } from "../types";
-import { nativeErrorMessage } from "./deskShared";
+import type { BookComment, Novel } from "../types";
+import { useRemote } from "../desk";
+import { nativeErrorMessage } from "../utils/native";
 
 export type DiscussionTab = "comments" | "reviews";
 
@@ -34,6 +34,7 @@ export function useBookDiscussions(
   pageSize: number,
   initialTab: DiscussionTab = "comments",
 ) {
+  const remote = useRemote();
   const activeTab = ref<DiscussionTab>(initialTab);
   const states = reactive<Record<DiscussionTab, DiscussionState>>({
     comments: emptyDiscussion(),
@@ -63,10 +64,10 @@ export function useBookDiscussions(
       state.error = "";
     }
     try {
-      const result = await invoke<BookCommentPage>("get_book_comments", {
+      const result = await remote.fetchComments({
         kind: work.bookshelfType || "novel",
         novelId: work.novelId,
-        mediaId: work.mediaId ?? null,
+        mediaId: work.mediaId,
         page,
         size: pageSize,
         reviews: tab === "reviews",

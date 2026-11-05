@@ -5,16 +5,22 @@ import {
   Headphones,
   Image as ImageIcon,
 } from "@lucide/vue";
-import type { Novel } from "../types";
+import { computed } from "vue";
+import type { MediaType, Novel } from "../types";
 
-defineProps<{
+const props = defineProps<{
   novel: Novel;
   formatDate: (value: string) => string;
 }>();
 
+/** 作品可下载的内容形态；上游未标注时按小说处理。 */
+const bookType = computed<MediaType>(
+  () => props.novel.bookshelfType || "novel",
+);
+
 // 卡片主体进入详情，右侧操作按钮向父级发出对应的下载请求。
 const emit = defineEmits<{
-  select: [novel: Novel, mode: "text" | "audio" | "comic"];
+  select: [novel: Novel, mode: MediaType];
   detail: [novel: Novel];
 }>();
 </script>
@@ -75,17 +81,7 @@ const emit = defineEmits<{
               ? `选择漫画章节并下载：${novel.novelName}`
               : `选择章节并下载：${novel.novelName}`
         "
-        @click.stop="
-          emit(
-            'select',
-            novel,
-            novel.bookshelfType === 'audio'
-              ? 'audio'
-              : novel.bookshelfType === 'comic'
-                ? 'comic'
-                : 'text',
-          )
-        "
+        @click.stop="emit('select', novel, bookType)"
       >
         <Headphones
           v-if="novel.bookshelfType === 'audio'"

@@ -45,7 +45,7 @@
             :class="{ active: mode === item.mode }"
             @click="emit('switch-mode', item.mode)"
           >
-            <BookOpen v-if="item.mode === 'text'" :size="15" />
+            <BookOpen v-if="item.mode === 'novel'" :size="15" />
             <Headphones v-else :size="15" />{{ item.label }}
           </button>
         </nav>
@@ -148,12 +148,12 @@ import {
   LockKeyholeOpen,
 } from "@lucide/vue";
 import { useVirtualRows } from "../composables/useVirtualRows";
-import type { Chapter, ChapterMode, ChapterVolume, Novel } from "../types";
+import type { Chapter, ChapterVolume, MediaType, Novel } from "../types";
 
 const props = defineProps<{
   open: boolean;
   novel?: Novel;
-  mode: ChapterMode;
+  mode: MediaType;
   loading: boolean;
   volumes: ChapterVolume[];
   audioChapters: Chapter[];
@@ -166,7 +166,7 @@ const emit = defineEmits<{
   "update:selectedIds": [value: number[]];
   toggleAll: [];
   confirm: [];
-  "switch-mode": [mode: ChapterMode];
+  "switch-mode": [mode: MediaType];
 }>();
 
 type TextChapter = ChapterVolume["chapters"][number];
@@ -211,13 +211,13 @@ const PICKER_CHAPTER_HEIGHT = 38;
  */
 function canDownload(chapter: SelectableChapter) {
   if (chapter.downloaded) return false;
-  if (props.mode === "text") return chapter.accessState === "available";
+  if (props.mode === "novel") return chapter.accessState === "available";
   if (props.mode === "comic") return chapter.isUnlocked !== false;
   return !chapter.isVip || chapter.isUnlocked === true;
 }
 
 const allChapters = computed<SelectableChapter[]>(() =>
-  props.mode === "text"
+  props.mode === "novel"
     ? props.volumes.flatMap((volume) => volume.chapters)
     : props.mode === "audio"
       ? props.audioChapters
@@ -234,8 +234,8 @@ const audioVolumes = computed<AudioVolume[]>(() => {
   return [...grouped.values()];
 });
 const downloadModes = computed(() => {
-  const modes: Array<{ mode: ChapterMode; label: string }> = [];
-  if (props.volumes.length) modes.push({ mode: "text", label: "小说" });
+  const modes: Array<{ mode: MediaType; label: string }> = [];
+  if (props.volumes.length) modes.push({ mode: "novel", label: "小说" });
   if (props.audioChapters.length) modes.push({ mode: "audio", label: "有声" });
   return modes;
 });
@@ -287,7 +287,7 @@ function pickerChapterRow(
   chapter: SelectableChapter,
 ): PickerChapterRow {
   const unlocked =
-    props.mode === "text"
+    props.mode === "novel"
       ? chapter.accessState === "available"
       : chapter.isUnlocked === true;
   return {
@@ -304,7 +304,7 @@ function pickerChapterRow(
         ? unlocked
           ? "已解锁"
           : "VIP 章节"
-        : props.mode === "text" && unlocked
+        : props.mode === "novel" && unlocked
           ? "已解锁"
           : "VIP",
     canSelect: canDownload(chapter),
@@ -314,7 +314,7 @@ function pickerChapterRow(
 const pickerRows = computed<PickerRow[]>(() => {
   const selected = selectedIdSet.value;
   const rows: PickerRow[] = [];
-  if (props.mode === "text") {
+  if (props.mode === "novel") {
     props.volumes.forEach((volume) => {
       const ids = volume.chapters
         .filter(canDownload)
@@ -523,24 +523,6 @@ function toggleChapter(id: number, checked: boolean) {
 .download-tab.active {
   color: #fff;
   background: var(--theme-color);
-}
-.close-button {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  display: grid;
-  width: 40px;
-  height: 40px;
-  border: 0;
-  border-radius: 13px;
-  color: #a17367;
-  background: rgba(255, 255, 255, 0.7);
-  place-items: center;
-  transition: 0.2s;
-}
-.close-button:hover {
-  color: var(--theme-color-dark);
-  background: #fff0e7;
 }
 .chapter-subtitle {
   overflow: hidden;

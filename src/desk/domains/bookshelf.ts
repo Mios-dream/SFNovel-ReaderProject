@@ -1,22 +1,23 @@
 import { invoke } from "@tauri-apps/api/core";
 import { computed, ref, watch, type Ref } from "vue";
-import type { AuthStatus, Novel } from "../types";
-import { nativeErrorMessage, type Notify } from "./deskShared";
+import type { AuthStatus, Novel } from "../../types";
+import { nativeErrorMessage } from "../../utils/native";
+import type { Notify } from "../../composables/useToast";
 
 type BookshelfResponse = { categories: string[]; items: Novel[] };
-type UseDeskBookshelfOptions = {
+type BookshelfDeskOptions = {
   auth: Ref<AuthStatus>;
   refreshAuthStatus: () => Promise<void>;
   requestCredentials: () => void;
   notify: Notify;
 };
 
-export function useDeskBookshelf({
+export function createBookshelfDesk({
   auth,
   refreshAuthStatus,
   requestCredentials,
   notify,
-}: UseDeskBookshelfOptions) {
+}: BookshelfDeskOptions) {
   const bookshelf = ref<Novel[]>([]);
   const bookshelfGroupNames = ref<string[]>([]);
   const bookshelfLoading = ref(false);
@@ -142,3 +143,6 @@ export function useDeskBookshelf({
     setBookshelfPage,
   };
 }
+
+/** 该域对外暴露的完整上下文；页面只应通过 `useBookshelf` 取用。 */
+export type BookshelfDesk = ReturnType<typeof createBookshelfDesk>;

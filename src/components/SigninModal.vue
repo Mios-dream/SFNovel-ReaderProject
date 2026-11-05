@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { invoke } from "@tauri-apps/api/core";
 import {
   CalendarCheck2,
   Check,
@@ -8,56 +7,35 @@ import {
   Ticket,
   X,
 } from "@lucide/vue";
-import { computed, ref, watch } from "vue";
-import { reportError, showToast } from "../composables/useToast";
-import type {
-  AppSettings,
-  SigninOverview,
-  SigninPrize,
-  SigninReward,
-  SigninWeekItem,
-} from "../types";
+import { computed, watch } from "vue";
+import { useSignin } from "../desk";
+import type { SigninPrize, SigninReward, SigninWeekItem } from "../types";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
-type BeijingDate = { year: number; month: number; day: number };
-
-function beijingDate(): BeijingDate {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const value = (type: string) =>
-    Number(parts.find((part) => part.type === type)?.value || 0);
-  return {
-    year: value("year"),
-    month: value("month"),
-    day: value("day"),
-  };
-}
-
-function dateKey(date: BeijingDate) {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.year}-${pad(date.month)}-${pad(date.day)}`;
-}
-
-const today = ref(beijingDate());
-const overview = ref<SigninOverview>();
-const loading = ref(false);
-const signing = ref(false);
-const claimingConfigId = ref<number>();
-const autoSigninEnabled = ref(false);
-const autoSigninSaving = ref(false);
 const isAndroid = /Android/i.test(navigator.userAgent);
 const autoSigninTime = isAndroid ? "每天 12:00" : "应用运行时检查";
-let requestGeneration = 0;
+
+const {
+  overview,
+  loading,
+  signing,
+  claimingConfigId,
+  autoSigninSaving,
+  autoSigninEnabled,
+  isToday,
+  canClaim,
+  open: openSignin,
+  submit,
+  claim,
+  toggleAutoSignin,
+  dismiss,
+} = useSignin();
 
 const week = computed(() => overview.value?.week.slice(0, 7) || []);
 const todaySigned = computed(() =>
-  week.value.some((item) => weekItemToday(item) && item.isSignIn),
+  week.value.some((item) => isToday(item.date) && item.isSignIn),
 );
 const weekSignedCount = computed(
   () => week.value.filter((item) => item.isSignIn).length,
@@ -74,78 +52,16 @@ const weeklyReward = computed(() => {
 });
 const weeklyPrizes = computed(() => weeklyReward.value?.rewards || []);
 
-async function refreshAll() {
-  const generation = ++requestGeneration;
-  today.value = beijingDate();
-  loading.value = true;
-  try {
-    const value = await invoke<SigninOverview>("get_signin_overview");
-    if (generation === requestGeneration) overview.value = value;
-  } catch (reason) {
-    if (generation === requestGeneration) {
-      reportError(reason, "读取签到信息失败");
-    }
-  } finally {
-    if (generation === requestGeneration) loading.value = false;
-  }
+function submitSignin() {
+  void submit();
 }
 
-async function submitSignin() {
-  if (todaySigned.value || signing.value || loading.value) return;
-  signing.value = true;
-  try {
-    await invoke("submit_signin", { date: dateKey(today.value) });
-    showToast("签到成功", "success");
-    await refreshAll();
-  } catch (reason) {
-    reportError(reason, "签到失败");
-  } finally {
-    signing.value = false;
-  }
+function claimReward(reward: SigninReward) {
+  void claim(reward);
 }
 
-async function loadAutoSignin() {
-  try {
-    const settings = await invoke<AppSettings>("get_settings");
-    autoSigninEnabled.value = settings.signin.autoSigninEnabled;
-  } catch (reason) {
-    reportError(reason, "读取自动签到设置失败");
-  }
-}
-
-async function toggleAutoSignin() {
-  if (autoSigninSaving.value) return;
-  const next = !autoSigninEnabled.value;
-  autoSigninSaving.value = true;
-  try {
-    const settings = await invoke<AppSettings>("get_settings");
-    settings.signin.autoSigninEnabled = next;
-    await invoke("save_settings", { settings });
-    autoSigninEnabled.value = next;
-    showToast(next ? "已开启自动签到" : "已关闭自动签到", "success");
-  } catch (reason) {
-    reportError(reason, "更新自动签到设置失败");
-  } finally {
-    autoSigninSaving.value = false;
-  }
-}
-
-async function claimReward(reward: SigninReward) {
-  if (!canClaim(reward) || claimingConfigId.value !== undefined) return;
-  claimingConfigId.value = reward.configId;
-  try {
-    await invoke("claim_signin_reward", { configId: reward.configId });
-    showToast("奖励已领取", "success");
-    await refreshAll();
-  } catch (reason) {
-    reportError(reason, "领取签到奖励失败");
-  } finally {
-    claimingConfigId.value = undefined;
-  }
-}
-
-function canClaim(reward: SigninReward) {
-  return reward.status === 0 && !reward.isFinish && reward.configId > 0;
+function weekItemToday(item: SigninWeekItem) {
+  return isToday(item.date);
 }
 
 function rewardState(reward: SigninReward) {
@@ -177,20 +93,11 @@ function weekDayLabel(item: SigninWeekItem) {
   ];
 }
 
-function weekItemToday(item: SigninWeekItem) {
-  return item.date.slice(0, 10) === dateKey(today.value);
-}
-
 watch(
   () => props.open,
   (isOpen) => {
-    if (isOpen) {
-      void refreshAll();
-      void loadAutoSignin();
-      return;
-    }
-    requestGeneration += 1;
-    loading.value = false;
+    if (isOpen) void openSignin();
+    else dismiss();
   },
   { immediate: true },
 );

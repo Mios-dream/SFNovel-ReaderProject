@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import {
   ArrowUpRight,
   BookOpen,
@@ -17,19 +17,16 @@ import {
   useBookDiscussions,
   type DiscussionTab,
 } from "../composables/useBookDiscussions";
-import { deskInjectionKey } from "../deskContext";
 import type { BookComment } from "../types";
 
-function requireDesk() {
-  const desk = inject(deskInjectionKey);
-  if (!desk) throw new Error("Desk context is unavailable");
-  return desk;
-}
+import { useRemote, useWorkspace } from "../desk";
 
-const desk = requireDesk();
+const remote = useRemote();
+const workspace = useWorkspace();
+
 const route = useRoute();
 const router = useRouter();
-const novel = computed(() => desk.remoteBook.value);
+const novel = computed(() => remote.remoteBook.value);
 const initialTab: DiscussionTab =
   route.query.tab === "reviews" ? "reviews" : "comments";
 const { activeTab, current, highlights, selectTab, loadMore, reload } =
@@ -107,11 +104,11 @@ function handleScroll() {
 }
 
 function goBack() {
-  void router.push(novel.value ? "/remote-book" : "/discover");
+  void workspace.navigate(novel.value ? "remoteDetail" : "discover");
 }
 
 function goDetail() {
-  if (novel.value) void router.push("/remote-book");
+  if (novel.value) void workspace.navigate("remoteDetail");
 }
 
 function openComment(comment: BookComment) {
@@ -401,35 +398,6 @@ watch(
 .topbar-path strong {
   color: #5c493f;
   font-weight: 600;
-}
-.topbar-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
-}
-.detail-link {
-  display: inline-flex;
-  min-height: 38px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-  border: 1px solid #e6d4c7;
-  border-radius: 12px;
-  color: #69564b;
-  background: rgba(255, 253, 250, 0.82);
-  font: inherit;
-  font-size: 12px;
-  transition:
-    border-color 160ms ease,
-    color 160ms ease,
-    background-color 160ms ease;
-}
-.detail-link:hover {
-  border-color: #ddb29c;
-  color: #a9573c;
-  background: #fffaf6;
 }
 .feedback-layout {
   display: grid;
@@ -824,20 +792,6 @@ watch(
   .topbar-path strong {
     display: none;
   }
-  .detail-link {
-    width: 40px;
-    height: 40px;
-    min-height: 40px;
-    justify-content: center;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: #f5f3f0;
-  }
-  .detail-link span,
-  .detail-link svg:last-child {
-    display: none;
-  }
   .feedback-layout {
     display: block;
     width: 100%;
@@ -895,7 +849,6 @@ watch(
 }
 @media (prefers-reduced-motion: reduce) {
   .back-button,
-  .detail-link,
   .context-detail,
   .skeleton-avatar,
   .skeleton-line {

@@ -2,7 +2,6 @@
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import {
   computed,
-  inject,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -22,21 +21,25 @@ import {
   MapPin,
 } from "@lucide/vue";
 import { useRouter } from "vue-router";
-import { deskInjectionKey } from "../deskContext";
-import type { OnlineTextChapter } from "../types";
 import {
   usePagedReader,
   type ReaderChapterPart,
   type ReaderStyle,
 } from "../reader";
+import {
+  parseLocalChapterParts,
+  parseOnlineChapterParts,
+} from "../reader/chapterParts";
+import type { DisplayMode } from "../types";
+import { asRecord, readPreference, writePreference } from "../utils/preferences";
 
-function requireDesk() {
-  const desk = inject(deskInjectionKey);
-  if (!desk) throw new Error("Desk context is unavailable");
-  return desk;
-}
+import { useAuth, useLibrary, useOnline, useWorkspace } from "../desk";
 
-type DisplayMode = "vertical" | "paged";
+const auth = useAuth();
+const library = useLibrary();
+const reading = useOnline();
+const workspace = useWorkspace();
+
 type ReaderPanel = "font" | "mode";
 
 const READER_PREFERENCES_KEY = "sf-novel-flow.reader-preferences";
@@ -64,47 +67,48 @@ function clampFontSize(value: number) {
   return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, value));
 }
 
-function readReaderPreferences(): ReaderPreferences {
-  if (typeof window === "undefined") return { ...defaultReaderPreferences };
-  try {
-    const stored = window.localStorage.getItem(READER_PREFERENCES_KEY);
-    if (!stored) return { ...defaultReaderPreferences };
-    const parsed = JSON.parse(stored) as Partial<ReaderPreferences>;
-    return {
-      displayMode:
-        parsed.displayMode === "vertical" || parsed.displayMode === "paged"
-          ? parsed.displayMode
-          : defaultReaderPreferences.displayMode,
-      fontSize:
-        typeof parsed.fontSize === "number" && Number.isFinite(parsed.fontSize)
-          ? clampFontSize(Math.round(parsed.fontSize))
-          : defaultReaderPreferences.fontSize,
-      lineHeight:
-        lineHeightOptions.find((option) => option.value === parsed.lineHeight)
-          ?.value ?? defaultReaderPreferences.lineHeight,
-    };
-  } catch {
-    return { ...defaultReaderPreferences };
-  }
+/** 校验存量偏好：选项集合变化后旧值要被丢弃，而不是带进渲染。 */
+function sanitizeReaderPreferences(raw: unknown): ReaderPreferences {
+  const parsed = asRecord(raw) as Partial<ReaderPreferences>;
+  return {
+    displayMode:
+      parsed.displayMode === "vertical" || parsed.displayMode === "paged"
+        ? parsed.displayMode
+        : defaultReaderPreferences.displayMode,
+    fontSize:
+      typeof parsed.fontSize === "number" && Number.isFinite(parsed.fontSize)
+        ? clampFontSize(Math.round(parsed.fontSize))
+        : defaultReaderPreferences.fontSize,
+    lineHeight:
+      lineHeightOptions.find((option) => option.value === parsed.lineHeight)
+        ?.value ?? defaultReaderPreferences.lineHeight,
+  };
 }
 
-const desk = requireDesk();
+function readReaderPreferences(): ReaderPreferences {
+  return readPreference(
+    READER_PREFERENCES_KEY,
+    sanitizeReaderPreferences,
+    () => ({ ...defaultReaderPreferences }),
+  );
+}
+
 const router = useRouter();
 const readerElement = ref<HTMLElement>();
 const readerCanvas = ref<HTMLCanvasElement>();
-const online = computed(() => desk.readerSource.value === "online");
-const book = computed(() => desk.localBook.value);
+const online = computed(() => workspace.readerSource.value === "online");
+const book = computed(() => library.localBook.value);
 const chapter = computed(() =>
-  online.value ? desk.textChapter.value : desk.localChapter.value,
+  online.value ? reading.textChapter.value : library.localChapter.value,
 );
 const bookName = computed(() =>
   online.value
-    ? desk.onlineBook.value?.novelName || "在线小说"
+    ? reading.onlineBook.value?.novelName || "在线小说"
     : book.value?.name || "本地阅读",
 );
 const imageDirectory = computed(() => book.value?.imageDirectory || "");
 const chapters = computed(() => {
-  if (online.value) return desk.textChapters.value;
+  if (online.value) return reading.textChapters.value;
   return (book.value?.chapterVolumes || []).flatMap((volume) =>
     volume.chapters.map((item) => ({ ...item, volume: volume.volume })),
   );
@@ -118,7 +122,7 @@ type DirectoryChapter = {
 type DirectoryVolume = { title: string; chapters: DirectoryChapter[] };
 const directoryVolumes = computed<DirectoryVolume[]>(() => {
   if (online.value) {
-    return desk.textVolumes.value.map((volume) => ({
+    return reading.textVolumes.value.map((volume) => ({
       title: volume.title,
       chapters: volume.chapters.map((item) => ({
         id: item.chapId,
@@ -218,14 +222,14 @@ const verticalProgress = ref(0);
 const chapterLoading = ref(false);
 const requestedChapterId = ref<number>();
 const onlineError = computed(() =>
-  online.value ? desk.chapterError.value || desk.directoryError.value : "",
+  online.value ? reading.chapterError.value || reading.directoryError.value : "",
 );
 const onlineLoading = computed(
   () =>
-    online.value && (desk.chapterLoading.value || desk.directoryLoading.value),
+    online.value && (reading.chapterLoading.value || reading.directoryLoading.value),
 );
 const onlineNeedsAuth = computed(
-  () => online.value && !desk.auth.value.authenticated,
+  () => online.value && !auth.auth.value.authenticated,
 );
 const readerStatusTitle = computed(() => {
   if (chapterLoading.value || onlineLoading.value)
@@ -245,58 +249,11 @@ function chapterImageSource(relativePath: string) {
  * 把章节 markdown 内容拆分为文本段与插图，两种显示模式共用。
  * 同时用于当前章节与预渲染的相邻章节。
  */
-function parseLocalChapterParts(rawContent: string): ReaderChapterPart[] {
-  const content = rawContent.replace(/^##\s+.+\r?\n+/, "");
-  const pattern = /!\[([^\]]*)\]\((imgs[\\/][^)]+)\)/g;
-  const parts: ReaderChapterPart[] = [];
-  let lastIndex = 0;
-  for (const match of content.matchAll(pattern)) {
-    const index = match.index || 0;
-    if (index > lastIndex)
-      parts.push({ type: "text", value: content.slice(lastIndex, index) });
-    parts.push({
-      type: "image",
-      alt: match[1] || "章节插图",
-      src: chapterImageSource(match[2]),
-    });
-    lastIndex = index + match[0].length;
-  }
-  if (lastIndex < content.length)
-    parts.push({ type: "text", value: content.slice(lastIndex) });
-  return parts;
-}
-
-/** 把在线章节的文本与图片占位符拆分为统一阅读块。 */
-function parseOnlineChapterParts(
-  payload: OnlineTextChapter,
-): ReaderChapterPart[] {
-  const pattern = /\{\{image:(\d+)\}\}/g;
-  const parts: ReaderChapterPart[] = [];
-  let lastIndex = 0;
-  for (const match of payload.content.matchAll(pattern)) {
-    const index = match.index || 0;
-    const text = payload.content.slice(lastIndex, index).trim();
-    if (text) parts.push({ type: "text", value: text });
-    const src = payload.images[Number(match[1])];
-    if (src)
-      parts.push({
-        type: "image",
-        alt: `${payload.title} 插图`,
-        src,
-      });
-    lastIndex = index + match[0].length;
-  }
-  const tail = payload.content.slice(lastIndex).trim();
-  if (tail) parts.push({ type: "text", value: tail });
-  return parts;
-}
-
 const chapterParts = computed<ReaderChapterPart[]>(() => {
-  const payload = chapter.value;
-  if (!payload) return [];
-  if (online.value && desk.textChapter.value)
-    return parseOnlineChapterParts(desk.textChapter.value);
-  return parseLocalChapterParts(payload.content);
+  if (!chapter.value) return [];
+  if (online.value && reading.textChapter.value)
+    return parseOnlineChapterParts(reading.textChapter.value);
+  return parseLocalChapterParts(chapter.value.content, chapterImageSource);
 });
 
 /**
@@ -385,17 +342,17 @@ async function prepareNeighbor(direction: "previous" | "next") {
     direction === "previous" ? previousChapter.value : nextChapter.value;
   if (!target) return undefined;
   if (online.value) {
-    const payload = await desk.peekOnlineTextChapter(target.id);
+    const payload = await reading.peekOnlineTextChapter(target.id);
     if (!payload) return undefined;
     return {
       parts: parseOnlineChapterParts(payload),
       title: payload.title,
     };
   }
-  const content = await desk.peekLocalChapter(target.id);
+  const content = await library.peekLocalChapter(target.id);
   if (!content) return undefined;
   return {
-    parts: parseLocalChapterParts(content.content),
+    parts: parseLocalChapterParts(content.content, chapterImageSource),
     title: content.title,
   };
 }
@@ -413,8 +370,8 @@ async function openChapter(
   chapterLoading.value = true;
   requestedChapterId.value = chapterId;
   try {
-    if (online.value) await desk.openOnlineTextChapter(chapterId);
-    else await desk.openLocalChapter(chapterId);
+    if (online.value) await reading.openOnlineTextChapter(chapterId);
+    else await library.openLocalChapter(chapterId);
     if (chapter.value?.id !== chapterId) return;
     directoryOpen.value = false;
     await nextTick();
@@ -428,19 +385,18 @@ async function openChapter(
 
 function goBack() {
   if (online.value) {
-    desk.backFromOnlineReading();
+    workspace.backFromOnlineReading();
     return;
   }
-  desk.navigate("libraryDetail");
-  void router.push(`/library/${encodeURIComponent(bookName.value)}`);
+  void workspace.navigate("libraryDetail", bookName.value);
 }
 
 async function retryOnlineLoad() {
   try {
-    await desk.loadDirectory(true);
+    await reading.loadDirectory(true);
     const targetId =
       requestedChapterId.value ||
-      desk.pendingChapterId.value ||
+      reading.pendingChapterId.value ||
       chapters.value[0]?.id;
     if (targetId) await openChapter(targetId);
   } catch {
@@ -449,19 +405,11 @@ async function retryOnlineLoad() {
 }
 
 function saveReaderPreferences() {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      READER_PREFERENCES_KEY,
-      JSON.stringify({
-        displayMode: displayMode.value,
-        fontSize: fontSize.value,
-        lineHeight: lineHeight.value,
-      }),
-    );
-  } catch {
-    // Storage can be unavailable in restricted browser contexts.
-  }
+  writePreference(READER_PREFERENCES_KEY, {
+    displayMode: displayMode.value,
+    fontSize: fontSize.value,
+    lineHeight: lineHeight.value,
+  } satisfies ReaderPreferences);
 }
 
 function changeFontSize(delta: number) {
@@ -552,7 +500,7 @@ function showDirectory() {
 }
 
 async function revealCurrentChapter() {
-  if (!directoryOpen.value || desk.directoryLoading.value) return;
+  if (!directoryOpen.value || reading.directoryLoading.value) return;
   await nextTick();
   const list = directoryList.value;
   if (!list) return;
@@ -579,17 +527,17 @@ function handleDirectoryScroll() {
 
 onMounted(async () => {
   if (online.value) {
-    if (!desk.onlineBook.value) {
+    if (!reading.onlineBook.value) {
       void router.replace("/remote-book");
       return;
     }
     try {
-      await desk.loadDirectory();
+      await reading.loadDirectory();
       const targetId =
-        desk.textChapter.value?.id ||
-        desk.pendingChapterId.value ||
+        reading.textChapter.value?.id ||
+        reading.pendingChapterId.value ||
         chapters.value[0]?.id;
-      if (targetId && desk.textChapter.value?.id !== targetId)
+      if (targetId && reading.textChapter.value?.id !== targetId)
         await openChapter(targetId);
     } catch {
       // 错误已保存在共享状态中并由页面展示。
@@ -600,22 +548,22 @@ onMounted(async () => {
     void router.replace("/library");
     return;
   }
-  desk.navigate("reader");
+  workspace.navigate("reader");
   await nextTick();
   updateScrollProgress();
 });
 
 watch(
-  () => desk.pendingChapterId.value,
+  () => reading.pendingChapterId.value,
   (chapterId) => {
-    if (online.value && chapterId && desk.textChapter.value?.id !== chapterId) {
+    if (online.value && chapterId && reading.textChapter.value?.id !== chapterId) {
       void openChapter(chapterId);
     }
   },
 );
 
 watch(
-  [directoryOpen, () => desk.directoryLoading.value, () => chapter.value?.id],
+  [directoryOpen, () => reading.directoryLoading.value, () => chapter.value?.id],
   () => void revealCurrentChapter(),
 );
 
@@ -659,7 +607,7 @@ onBeforeUnmount(() => {
       <button
         v-if="onlineNeedsAuth"
         type="button"
-        @click="desk.openCredentials('official')"
+        @click="auth.openCredentials('official')"
       >
         连接登录
       </button>
@@ -885,7 +833,7 @@ onBeforeUnmount(() => {
       <button
         v-if="onlineNeedsAuth"
         type="button"
-        @click="desk.openCredentials('official')"
+        @click="auth.openCredentials('official')"
       >
         连接登录
       </button>
@@ -928,14 +876,14 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </header>
-        <div v-if="desk.directoryLoading.value" class="directory-state">
+        <div v-if="reading.directoryLoading.value" class="directory-state">
           <LoaderCircle class="spin" :size="24" />正在读取目录
         </div>
         <div
-          v-else-if="desk.directoryError.value"
+          v-else-if="reading.directoryError.value"
           class="directory-state error"
         >
-          {{ desk.directoryError.value }}
+          {{ reading.directoryError.value }}
           <button type="button" @click="retryOnlineLoad">重试</button>
         </div>
         <div
@@ -1523,15 +1471,6 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   align-items: center;
   gap: 10px;
-}
-.directory-count {
-  padding: 4px 9px;
-  border-radius: 999px;
-  color: #a85a39;
-  background: rgba(226, 148, 100, 0.16);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
 }
 .directory-close {
   display: inline-flex;

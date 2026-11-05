@@ -7,7 +7,7 @@ import {
   X,
 } from "@lucide/vue";
 import { computed } from "vue";
-import type { UpdateInfo, UpdateStatus } from "../composables/useUpdater";
+import type { UpdateInfo, UpdateStatus } from "../desk";
 
 const props = defineProps<{
   open: boolean;

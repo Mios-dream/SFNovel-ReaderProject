@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import {
   BookMarked,
   ChevronLeft,
@@ -11,15 +11,14 @@ import {
 } from "@lucide/vue";
 import NovelCard from "../components/NovelCard.vue";
 import PageFrame from "../components/PageFrame.vue";
-import { deskInjectionKey } from "../deskContext";
 
-function requireDesk() {
-  const desk = inject(deskInjectionKey);
-  if (!desk) throw new Error("Desk context is unavailable");
-  return desk;
-}
+import { useBookshelf, usePicker, useRemote } from "../desk";
+import { formatMonthDay } from "../utils/format";
 
-const desk = requireDesk();
+const bookshelf = useBookshelf();
+const picker = usePicker();
+const remote = useRemote();
+
 
 const searchOpen = ref(false);
 const shelfQuery = ref("");
@@ -30,14 +29,14 @@ const normalizedQuery = computed(() =>
 const searchResults = computed(() => {
   const query = normalizedQuery.value;
   if (!query) return [];
-  return desk.filteredBookshelf.value.filter((novel) =>
+  return bookshelf.filteredBookshelf.value.filter((novel) =>
     `${novel.novelName}\n${novel.authorName}`
       .toLocaleLowerCase()
       .includes(query),
   );
 });
 const visibleBookshelf = computed(() =>
-  normalizedQuery.value ? searchResults.value : desk.pagedBookshelf.value,
+  normalizedQuery.value ? searchResults.value : bookshelf.pagedBookshelf.value,
 );
 
 function openSearch() {
@@ -75,10 +74,10 @@ function jumpToPage(event: Event) {
   const input = event.target as HTMLInputElement;
   const requestedPage = Number(input.value);
   const page = Number.isInteger(requestedPage)
-    ? Math.min(Math.max(requestedPage, 1), desk.bookshelfTotalPages.value)
-    : desk.bookshelfPage.value;
+    ? Math.min(Math.max(requestedPage, 1), bookshelf.bookshelfTotalPages.value)
+    : bookshelf.bookshelfPage.value;
   input.value = String(page);
-  desk.setBookshelfPage(page);
+  bookshelf.setBookshelfPage(page);
 }
 </script>
 
@@ -90,11 +89,11 @@ function jumpToPage(event: Event) {
           <p class="eyebrow">SFACG BOOKSHELF</p>
           <h2>
             {{
-              desk.bookshelfLoading.value
+              bookshelf.bookshelfLoading.value
                 ? "正在同步书架"
                 : normalizedQuery
                   ? `找到 ${searchResults.length} 本收藏`
-                  : `共 ${desk.bookshelf.value.length} 本收藏`
+                  : `共 ${bookshelf.bookshelf.value.length} 本收藏`
             }}
           </h2>
         </div>
@@ -113,11 +112,11 @@ function jumpToPage(event: Event) {
           <button
             class="icon-button"
             title="刷新书架"
-            :disabled="desk.bookshelfLoading.value"
-            @click="desk.refreshBookshelf()"
+            :disabled="bookshelf.bookshelfLoading.value"
+            @click="bookshelf.refreshBookshelf()"
           >
             <RefreshCw
-              :class="{ spin: desk.bookshelfLoading.value }"
+              :class="{ spin: bookshelf.bookshelfLoading.value }"
               :size="19"
             />
           </button>
@@ -153,20 +152,20 @@ function jumpToPage(event: Event) {
         </Transition>
       </section>
       <div
-        v-if="desk.bookshelfLoading.value && !desk.bookshelf.value.length"
+        v-if="bookshelf.bookshelfLoading.value && !bookshelf.bookshelf.value.length"
         class="empty-state"
       >
         <LoaderCircle class="spin" :size="28" />
         <p>正在读取书架</p>
       </div>
-      <template v-else-if="desk.bookshelf.value.length">
+      <template v-else-if="bookshelf.bookshelf.value.length">
         <div class="bookshelf-toolbar" aria-label="书架分类">
           <button
-            v-for="category in desk.bookshelfCategories.value"
+            v-for="category in bookshelf.bookshelfCategories.value"
             :key="category"
             class="category-tab"
-            :class="{ active: desk.bookshelfCategory.value === category }"
-            @click="desk.selectBookshelfCategory(category)"
+            :class="{ active: bookshelf.bookshelfCategory.value === category }"
+            @click="bookshelf.selectBookshelfCategory(category)"
           >
             {{ category }}
           </button>
@@ -176,9 +175,9 @@ function jumpToPage(event: Event) {
             v-for="novel in visibleBookshelf"
             :key="`${novel.novelId}-${novel.mediaId || ''}-${novel.bookshelfName || '默认书架'}-${novel.bookshelfType || 'novel'}`"
             :novel="novel"
-            :format-date="desk.formatDate"
-            @select="desk.openChapterPicker"
-            @detail="desk.openRemoteBookDetail"
+            :format-date="formatMonthDay"
+            @select="picker.openChapterPicker"
+            @detail="remote.openRemoteBookDetail"
           />
         </div>
         <div v-else class="empty-state">
@@ -193,15 +192,15 @@ function jumpToPage(event: Event) {
           </p>
         </div>
         <nav
-          v-if="!normalizedQuery && desk.bookshelfTotalPages.value > 1"
+          v-if="!normalizedQuery && bookshelf.bookshelfTotalPages.value > 1"
           class="pagination"
           aria-label="书架分页"
         >
           <button
             class="icon-button"
             title="上一页"
-            :disabled="desk.bookshelfPage.value === 1"
-            @click="desk.setBookshelfPage(desk.bookshelfPage.value - 1)"
+            :disabled="bookshelf.bookshelfPage.value === 1"
+            @click="bookshelf.setBookshelfPage(bookshelf.bookshelfPage.value - 1)"
           >
             <ChevronLeft :size="18" /></button
           ><span class="page-status">第</span
@@ -209,23 +208,23 @@ function jumpToPage(event: Event) {
             class="page-jump"
             type="number"
             inputmode="numeric"
-            :value="desk.bookshelfPage.value"
+            :value="bookshelf.bookshelfPage.value"
             min="1"
-            :max="desk.bookshelfTotalPages.value"
+            :max="bookshelf.bookshelfTotalPages.value"
             step="1"
             aria-label="输入页码跳转"
             title="输入页码后按回车或移开焦点跳转"
             @change="jumpToPage"
             @keydown.enter.prevent="jumpToPage"
           /><span class="page-status"
-            >/ {{ desk.bookshelfTotalPages.value }} 页</span
+            >/ {{ bookshelf.bookshelfTotalPages.value }} 页</span
           ><button
             class="icon-button"
             title="下一页"
             :disabled="
-              desk.bookshelfPage.value === desk.bookshelfTotalPages.value
+              bookshelf.bookshelfPage.value === bookshelf.bookshelfTotalPages.value
             "
-            @click="desk.setBookshelfPage(desk.bookshelfPage.value + 1)"
+            @click="bookshelf.setBookshelfPage(bookshelf.bookshelfPage.value + 1)"
           >
             <ChevronRight :size="18" />
           </button>

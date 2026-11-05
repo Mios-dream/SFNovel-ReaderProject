@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import {
   computed,
-  inject,
   onMounted,
   ref,
   watch,
   type ComponentPublicInstance,
 } from "vue";
-import type { LocalWorkMetadata } from "../types";
+import type { ExportFormat, LocalWorkMetadata, MediaType } from "../types";
 import { useRoute, useRouter } from "vue-router";
 import {
   BookOpen,
@@ -29,21 +28,17 @@ import {
 } from "@lucide/vue";
 import ExportModal from "../components/ExportModal.vue";
 import { useVirtualRows } from "../composables/useVirtualRows";
-import { deskInjectionKey } from "../deskContext";
+import { formatMetric, formatSourceDate, scoreToneClass } from "../utils/format";
 
-function requireDesk() {
-  const desk = inject(deskInjectionKey);
-  if (!desk) throw new Error("Desk context is unavailable");
-  return desk;
-}
+import { useLibrary, useWorkspace } from "../desk";
 
-const desk = requireDesk();
+const library = useLibrary();
+const workspace = useWorkspace();
+
 const route = useRoute();
 const router = useRouter();
-const book = computed(() => desk.localBook.value);
-const exporting = desk.exportingFormat;
-type MediaType = "novel" | "audio" | "comic";
-type ChapterMode = "text" | "audio" | "comic";
+const book = computed(() => library.localBook.value);
+const exporting = library.exportingFormat;
 const mediaTypes: MediaType[] = ["novel", "audio", "comic"];
 
 const textChapterCount = computed(() =>
@@ -54,13 +49,26 @@ const textChapterCount = computed(() =>
 );
 const audioChapterCount = computed(() => book.value?.audioTracks.length ?? 0);
 const comicChapterCount = computed(() => book.value?.comicChapters.length ?? 0);
-const selectedMediaType = ref<MediaType>(
-  textChapterCount.value
-    ? "novel"
-    : audioChapterCount.value
-      ? "audio"
-      : "comic",
-);
+
+/** 三类内容的章节数，供切换按钮、导出可用性与初始选中统一取值。 */
+const mediaChapterCounts = computed<Record<MediaType, number>>(() => ({
+  novel: textChapterCount.value,
+  audio: audioChapterCount.value,
+  comic: comicChapterCount.value,
+}));
+
+/**
+ * 按 文字 → 有声 → 漫画 的顺序取第一个有内容的类型。
+ *
+ * # 参数
+ * - `fallback`：三种内容都为空时返回的类型。详情页兜底漫画（空目录），
+ *   侧栏兜底小说，故由调用方决定。
+ */
+function firstMediaWithContent(fallback: MediaType): MediaType {
+  return mediaTypes.find((media) => mediaChapterCounts.value[media] > 0) ?? fallback;
+}
+
+const selectedMediaType = ref<MediaType>(firstMediaWithContent("comic"));
 const emptyWork: LocalWorkMetadata = {
   id: 0,
   title: "未命名作品",
@@ -74,24 +82,10 @@ const currentWork = computed<LocalWorkMetadata>(
 const firstTextChapterId = computed(
   () => book.value?.chapterVolumes[0]?.chapters[0]?.id,
 );
-const chapterMode = ref<ChapterMode>(
-  textChapterCount.value ? "text" : audioChapterCount.value ? "audio" : "comic",
-);
-const desktopContentTab = ref<MediaType>(
-  textChapterCount.value
-    ? "novel"
-    : audioChapterCount.value
-      ? "audio"
-      : comicChapterCount.value
-        ? "comic"
-        : "novel",
-);
-const desktopDirectoryCount = computed(() =>
-  desktopContentTab.value === "novel"
-    ? textChapterCount.value
-    : desktopContentTab.value === "audio"
-      ? audioChapterCount.value
-      : comicChapterCount.value,
+const chapterMode = ref<MediaType>(firstMediaWithContent("comic"));
+const desktopContentTab = ref<MediaType>(firstMediaWithContent("novel"));
+const desktopDirectoryCount = computed(
+  () => mediaChapterCounts.value[desktopContentTab.value],
 );
 type LocalDirectoryRow =
   | { kind: "gap"; key: string; height: number }
@@ -112,108 +106,116 @@ type LocalDirectoryRow =
       cover?: string;
       height: number;
     };
-const desktopDirectoryRows = computed<LocalDirectoryRow[]>(() => {
+/**
+ * 虚拟列表的行高，桌面与移动两套视觉尺寸。
+ *
+ * 行高必须与实际 CSS 一致，否则滚动位置会跳；key 前缀分开是为了让两个
+ * 列表各自的复用状态互不干扰。
+ */
+type DirectoryRowMetrics = {
+  prefix: string;
+  gap: number;
+  volume: number;
+  text: number;
+  audio: number;
+  comic: number;
+};
+
+const DESKTOP_ROW_METRICS: DirectoryRowMetrics = {
+  prefix: "desktop",
+  gap: 8,
+  volume: 40,
+  text: 40,
+  audio: 40,
+  comic: 62,
+};
+
+const MOBILE_ROW_METRICS: DirectoryRowMetrics = {
+  prefix: "mobile",
+  gap: 9,
+  volume: 42,
+  text: 48,
+  audio: 48,
+  comic: 66,
+};
+
+/**
+ * 把作品展开成虚拟列表行。
+ *
+ * 桌面侧栏与移动抽屉用的是同一份结构，原先各写一遍，行高与 key 前缀散落
+ * 在两处，容易只改一侧。
+ */
+function buildDirectoryRows(
+  mode: MediaType,
+  metrics: DirectoryRowMetrics,
+): LocalDirectoryRow[] {
   const localBook = book.value;
   if (!localBook) return [];
+
   const rows: LocalDirectoryRow[] = [];
-  if (desktopContentTab.value === "novel") {
+  const { prefix } = metrics;
+
+  if (mode === "novel") {
     localBook.chapterVolumes.forEach((volume, volumeIndex) => {
       if (volumeIndex > 0)
         rows.push({
           kind: "gap",
-          key: `desktop-gap-${volumeIndex}`,
-          height: 8,
+          key: `${prefix}-gap-${volumeIndex}`,
+          height: metrics.gap,
         });
       rows.push({
         kind: "volume",
-        key: `desktop-volume-${volumeIndex}`,
+        key: `${prefix}-volume-${volumeIndex}`,
         title: volume.volume,
-        height: 40,
+        height: metrics.volume,
       });
       for (const chapter of volume.chapters)
         rows.push({
           kind: "text",
-          key: `desktop-text-${volumeIndex}-${chapter.id}`,
+          key: `${prefix}-text-${volumeIndex}-${chapter.id}`,
           id: chapter.id,
           title: chapter.title,
-          height: 40,
+          height: metrics.text,
         });
     });
-  } else if (desktopContentTab.value === "audio") {
+    return rows;
+  }
+
+  if (mode === "audio") {
     localBook.audioTracks.forEach((track, index) =>
       rows.push({
         kind: "audio",
-        key: `desktop-audio-${track.href}`,
+        key: `${prefix}-audio-${track.href}`,
         index,
         title: track.title,
-        height: 40,
+        height: metrics.audio,
       }),
     );
-  } else {
-    localBook.comicChapters.forEach((chapter) =>
-      rows.push({
-        kind: "comic",
-        key: `desktop-comic-${chapter.id}`,
-        id: chapter.id,
-        title: chapter.title,
-        cover: chapter.cover,
-        height: 62,
-      }),
-    );
+    return rows;
   }
+
+  localBook.comicChapters.forEach((chapter) =>
+    rows.push({
+      kind: "comic",
+      key: `${prefix}-comic-${chapter.id}`,
+      id: chapter.id,
+      title: chapter.title,
+      cover: chapter.cover,
+      height: metrics.comic,
+    }),
+  );
   return rows;
-});
-const mobileDirectoryRows = computed<LocalDirectoryRow[]>(() => {
-  const localBook = book.value;
-  if (!localBook) return [];
-  const rows: LocalDirectoryRow[] = [];
-  if (chapterMode.value === "text") {
-    localBook.chapterVolumes.forEach((volume, volumeIndex) => {
-      if (volumeIndex > 0)
-        rows.push({
-          kind: "gap",
-          key: `mobile-gap-${volumeIndex}`,
-          height: 9,
-        });
-      rows.push({
-        kind: "volume",
-        key: `mobile-volume-${volumeIndex}`,
-        title: volume.volume,
-        height: 42,
-      });
-      for (const chapter of volume.chapters)
-        rows.push({
-          kind: "text",
-          key: `mobile-text-${volumeIndex}-${chapter.id}`,
-          id: chapter.id,
-          title: chapter.title,
-          height: 48,
-        });
-    });
-  } else if (chapterMode.value === "audio") {
-    localBook.audioTracks.forEach((track, index) =>
-      rows.push({
-        kind: "audio",
-        key: `mobile-audio-${track.href}`,
-        index,
-        title: track.title,
-        height: 48,
-      }),
-    );
-  } else {
-    localBook.comicChapters.forEach((chapter) =>
-      rows.push({
-        kind: "comic",
-        key: `mobile-comic-${chapter.id}`,
-        id: chapter.id,
-        title: chapter.title,
-        cover: chapter.cover,
-        height: 66,
-      }),
-    );
-  }
-  return rows;
-});
+}
+
+const desktopDirectoryRows = computed(() =>
+  buildDirectoryRows(
+    desktopContentTab.value,
+    DESKTOP_ROW_METRICS,
+  ),
+);
+const mobileDirectoryRows = computed(() =>
+  buildDirectoryRows(chapterMode.value, MOBILE_ROW_METRICS),
+);
 const {
   container: desktopDirectoryList,
   windowed: desktopDirectoryWindow,
@@ -284,69 +286,79 @@ const desktopBookFacts = computed(() => {
   return facts;
 });
 
+/**
+ * 三种本地内容的展示口径。
+ *
+ * 原先 mediaTitle / mediaDescription / canExportCurrentMedia / exportActionLabel
+ * 各写一遍 `media === "xxx"` 的分支，新增一种内容要改四处、漏一处只会静默显示错文案。
+ */
+const MEDIA_KINDS: Record<
+  MediaType,
+  { title: string; exportAction: string; countUnit: string; countEmpty: string }
+> = {
+  novel: {
+    title: "小说",
+    exportAction: "导出小说",
+    countUnit: "个本地章节",
+    countEmpty: "暂无本地章节",
+  },
+  audio: {
+    title: "有声",
+    exportAction: "导出有声",
+    countUnit: "条本地音轨",
+    countEmpty: "暂无本地音轨",
+  },
+  comic: {
+    title: "漫画",
+    exportAction: "导出漫画",
+    countUnit: "个本地章节",
+    countEmpty: "暂无本地漫画章节",
+  },
+};
+
+/**
+ * 打开作品时默认展示哪类内容。
+ *
+ * 与 `firstMediaWithContent` 的区别：这里优先看「有没有该类型的元数据」，
+ * 因为下载只有封面与简介、尚无章节的作品也应该先展示它自己的类型。
+ */
 function preferredMediaType(): MediaType {
   if (book.value?.novel) return "novel";
   if (book.value?.audio) return "audio";
   if (book.value?.comic) return "comic";
-
-  return textChapterCount.value
-    ? "novel"
-    : audioChapterCount.value
-      ? "audio"
-      : "comic";
+  return firstMediaWithContent("comic");
 }
 
+/** 该类型是否已下载到本地，决定内容切换按钮是否可点。 */
 function hasCachedMedia(media: MediaType) {
   return Boolean(book.value?.[media]);
 }
 
 function mediaTitle(media: MediaType) {
-  return media === "novel"
-    ? "小说"
-    : media === "audio"
-      ? "有声"
-      : "漫画";
+  return MEDIA_KINDS[media].title;
 }
 
 function mediaDescription(media: MediaType) {
-  if (media === "novel") {
-    return textChapterCount.value
-      ? `${textChapterCount.value} 个本地章节`
-      : "暂无本地章节";
-  }
-  if (media === "audio") {
-    return audioChapterCount.value
-      ? `${audioChapterCount.value} 条本地音轨`
-      : "暂无本地音轨";
-  }
-  return comicChapterCount.value
-    ? `${comicChapterCount.value} 个本地章节`
-    : "暂无本地漫画章节";
+  const kind = MEDIA_KINDS[media];
+  const count = mediaChapterCounts.value[media];
+  return count ? `${count} ${kind.countUnit}` : kind.countEmpty;
 }
 
-const canExportCurrentMedia = computed(() =>
-  selectedMediaType.value === "comic"
-    ? comicChapterCount.value > 0
-    : selectedMediaType.value === "audio"
-      ? audioChapterCount.value > 0
-      : textChapterCount.value > 0,
+const canExportCurrentMedia = computed(
+  () => mediaChapterCounts.value[selectedMediaType.value] > 0,
 );
 
 function exportCurrentMedia() {
   if (canExportCurrentMedia.value) exportModalOpen.value = true;
 }
 
-function exportFormat(format: "epub" | "markdown" | "txt" | "audio" | "comic") {
+function exportFormat(format: ExportFormat) {
   exportModalOpen.value = false;
-  desk.exportBook(format);
+  library.exportBook(format);
 }
 
-const exportActionLabel = computed(() =>
-  selectedMediaType.value === "comic"
-    ? "导出漫画"
-    : selectedMediaType.value === "audio"
-      ? "导出有声"
-      : "导出小说",
+const exportActionLabel = computed(
+  () => MEDIA_KINDS[selectedMediaType.value].exportAction,
 );
 
 function setMediaType(media: MediaType) {
@@ -356,87 +368,49 @@ function setMediaType(media: MediaType) {
   descriptionModalOpen.value = false;
 }
 
-function formatMetric(value?: number) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
-  const absolute = Math.abs(value);
-  if (absolute >= 100_000_000) {
-    return `${trimMetric(value / 100_000_000)}亿`;
-  }
-  if (absolute >= 10_000) {
-    return `${trimMetric(value / 10_000)}万`;
-  }
-  return Math.round(value).toLocaleString("zh-CN");
-}
-
-function trimMetric(value: number) {
-  return value >= 100 ? value.toFixed(0) : value.toFixed(1).replace(/\.0$/, "");
-}
-
-function scoreToneClass(value?: number) {
-  if (typeof value !== "number") return "score-unknown";
-  if (value >= 9) return "score-excellent";
-  if (value >= 8) return "score-good";
-  if (value >= 6) return "score-average";
-  return "score-low";
-}
-
-function formatSourceDate(value?: string) {
-  if (!value) return "--";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleDateString("zh-CN");
-}
-
 async function loadRouteBook() {
   const name = route.params.name;
   if (typeof name !== "string" || !name) {
     await router.replace("/library");
     return;
   }
-  if (desk.localBook.value?.name !== name) {
-    const loadedBook = await desk.loadLocalBook(name);
+  if (library.localBook.value?.name !== name) {
+    const loadedBook = await library.loadLocalBook(name);
     if (!loadedBook) {
       await router.replace("/library");
       return;
     }
   }
   const media = preferredMediaType();
-  chapterMode.value = media === "novel" ? "text" : media;
+  chapterMode.value = media;
   setMediaType(media);
-  desk.navigate("libraryDetail");
 }
 
 async function goBack() {
-  const target = desk.backFromLibraryDetail();
-  desk.navigate(target);
-  await router.push(`/${target}`);
+  await workspace.navigate("library");
 }
 
 async function readChapter(chapterId: number) {
   directoryOpen.value = false;
-  await desk.openLocalChapter(chapterId);
-  if (desk.localChapter.value) {
-    desk.navigate("reader");
-    await router.push("/reader");
+  await library.openLocalChapter(chapterId);
+  if (library.localChapter.value) {
+    await workspace.navigate("reader");
   }
 }
 
 async function playAudio(trackIndex: number) {
   directoryOpen.value = false;
-  desk.openLocalAudioPlayer(trackIndex);
-  if (desk.localBook.value?.audioTracks.length) {
-    desk.navigate("audioPlayer");
-    await router.push("/audio");
+  library.openLocalAudioPlayer(trackIndex);
+  if (library.localBook.value?.audioTracks.length) {
+    await workspace.navigate("audioPlayer");
   }
 }
 
 async function readComicChapter(chapterId: number) {
   directoryOpen.value = false;
-  await desk.openLocalComicChapter(chapterId);
-  if (desk.localComicChapter.value) {
-    desk.navigate("comicReader");
-    await router.push("/comic-reader");
+  await library.openLocalComicChapter(chapterId);
+  if (library.localComicChapter.value) {
+    await workspace.navigate("comicReader");
   }
 }
 
@@ -458,45 +432,46 @@ function startReading() {
     void readComicChapter(book.value!.comicChapters[0].id);
 }
 
-function openDirectory(mode?: ChapterMode) {
-  const selectedMode: ChapterMode =
-    mode ??
-    (selectedMediaType.value === "novel" ? "text" : selectedMediaType.value);
+/** 某类内容已下载的章节数，用于判断能否切换或打开目录。 */
+function chapterCountOf(media: MediaType) {
+  return mediaChapterCounts.value[media];
+}
+
+/**
+ * 在已有内容的类型里挑一个：优先 `preferred`，否则按文字 → 有声 → 漫画回退。
+ *
+ * # 返回
+ * 有内容的模式；三种内容都为空时返回 `undefined`，由调用方决定如何处理——
+ * 打开目录时退到漫画（空目录），切换侧栏时保持当前模式。
+ */
+function resolveAvailableChapterMode(
+  preferred?: MediaType,
+): MediaType | undefined {
+  if (preferred && chapterCountOf(preferred) > 0) return preferred;
+  for (const mode of ["novel", "audio", "comic"] as const) {
+    if (chapterCountOf(mode) > 0) return mode;
+  }
+  return undefined;
+}
+
+function openDirectory(mode?: MediaType) {
   chapterMode.value =
-    selectedMode === "comic" && comicChapterCount.value
-      ? "comic"
-      : selectedMode === "audio" && audioChapterCount.value
-        ? "audio"
-        : textChapterCount.value
-          ? "text"
-          : audioChapterCount.value
-            ? "audio"
-            : "comic";
+    resolveAvailableChapterMode(
+      mode ?? selectedMediaType.value,
+    ) ?? "comic";
   directoryOpen.value = true;
 }
 
-function focusDesktopDirectory(mode?: ChapterMode) {
-  const selectedMode: ChapterMode =
-    mode ??
-    (selectedMediaType.value === "novel" ? "text" : selectedMediaType.value);
-  if (selectedMode === "audio" && audioChapterCount.value) {
-    setMediaType("audio");
-    chapterMode.value = "audio";
-  } else if (selectedMode === "comic" && comicChapterCount.value) {
-    setMediaType("comic");
-    chapterMode.value = "comic";
-  } else if (selectedMode === "text" && textChapterCount.value) {
+function focusDesktopDirectory(mode?: MediaType) {
+  const resolved = resolveAvailableChapterMode(
+    mode ?? selectedMediaType.value,
+  );
+  if (!resolved) {
     setMediaType("novel");
-    chapterMode.value = "text";
-  } else if (audioChapterCount.value) {
-    setMediaType("audio");
-    chapterMode.value = "audio";
-  } else if (comicChapterCount.value) {
-    setMediaType("comic");
-    chapterMode.value = "comic";
-  } else {
-    setMediaType("novel");
+    return;
   }
+  setMediaType(resolved);
+  chapterMode.value = resolved;
   desktopDirectoryElement.value?.scrollIntoView({
     behavior: "smooth",
     block: "nearest",
@@ -504,23 +479,16 @@ function focusDesktopDirectory(mode?: ChapterMode) {
 }
 
 function selectDesktopContentTab(tab: MediaType) {
-  if (tab === "novel") {
-    if (!textChapterCount.value) return;
-    chapterMode.value = "text";
-  } else if (tab === "audio") {
-    if (!audioChapterCount.value) return;
-    chapterMode.value = "audio";
-  } else {
-    if (!comicChapterCount.value) return;
-    chapterMode.value = "comic";
-  }
+  const mode = tab;
+  if (!chapterCountOf(mode)) return;
+  chapterMode.value = mode;
   setMediaType(tab);
 }
 
 function selectMobileMedia(media: MediaType) {
   if (!hasCachedMedia(media)) return;
   setMediaType(media);
-  chapterMode.value = media === "novel" ? "text" : media;
+  chapterMode.value = media;
   directoryOpen.value = false;
 }
 
@@ -621,13 +589,13 @@ watch(
             <div class="desktop-secondary-actions" aria-label="本地作品操作">
               <button
                 v-if="currentWork.id"
-                @click="desk.continueDownload(selectedMediaType)"
+                @click="workspace.continueDownload(selectedMediaType)"
               >
                 <Download :size="16" />补充下载
               </button>
               <button
                 v-if="currentWork.id && selectedMediaType !== 'audio'"
-                @click="desk.startOnlineFromLibrary(selectedMediaType)"
+                @click="workspace.startOnlineFromLibrary(selectedMediaType)"
               >
                 <ExternalLink :size="16" />在线阅读
               </button>
@@ -931,7 +899,7 @@ watch(
       <button
         v-if="currentWork.id"
         class="directory-action"
-        @click="desk.continueDownload(selectedMediaType)"
+        @click="workspace.continueDownload(selectedMediaType)"
       >
         <Download :size="21" /><span>下载</span>
       </button>
@@ -947,7 +915,7 @@ watch(
         v-if="currentWork.id && selectedMediaType !== 'audio'"
         class="directory-action"
         title="在线阅读"
-        @click="desk.startOnlineFromLibrary(selectedMediaType)"
+        @click="workspace.startOnlineFromLibrary(selectedMediaType)"
       >
         <ExternalLink :size="21" /><span>在线</span>
       </button>
@@ -1110,8 +1078,6 @@ watch(
 .desktop-primary-actions button,
 .desktop-secondary-actions button,
 .drawer-heading button,
-.drawer-tabs button,
-.comic-unavailable button,
 .expand-description,
 .mobile-latest-chapter {
   font: inherit;
@@ -1132,7 +1098,6 @@ watch(
 
 .hero-copy h2,
 .desktop-book-copy h2,
-.comic-copy h3,
 .section-title h3,
 .desktop-directory h3,
 .drawer-heading h3,
@@ -1172,11 +1137,6 @@ watch(
     border-radius: 12px;
     color: #765f54;
     background: #fffdf8;
-  }
-
-  .desktop-nav-label {
-    display: inline;
-    font-size: 12px;
   }
 
   .local-label {
@@ -1219,8 +1179,7 @@ watch(
     background: #f3dfd1;
   }
 
-  .desktop-cover img,
-  .comic-cover-frame img {
+  .desktop-cover img {
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -1734,223 +1693,6 @@ watch(
   .mobile-latest-chapter {
     display: none;
   }
-
-  .comic-page {
-    padding-bottom: 0;
-    background: #332b40;
-  }
-
-  .comic-experience {
-    position: relative;
-    min-height: 100dvh;
-    overflow: hidden;
-    padding-bottom: 52px;
-  }
-
-  .comic-backdrop {
-    position: absolute;
-    z-index: 0;
-    inset: -36px;
-    overflow: hidden;
-    background: linear-gradient(135deg, #41354f, #765b80);
-  }
-
-  .comic-backdrop img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    filter: blur(28px) saturate(0.72) brightness(0.64);
-    opacity: 0.86;
-    transform: scale(1.08);
-  }
-
-  .comic-backdrop::after {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      135deg,
-      rgba(35, 27, 47, 0.7),
-      rgba(76, 54, 90, 0.42)
-    );
-    content: "";
-  }
-
-  .comic-navigation {
-    position: relative;
-    z-index: 1;
-    width: min(1180px, calc(100% - 64px));
-    margin: 0 auto;
-    padding: 18px 0 14px;
-  }
-
-  .comic-navigation .nav-circle,
-  .comic-navigation .local-label {
-    border-color: rgba(255, 255, 255, 0.26);
-    color: #fff;
-    background: rgba(255, 255, 255, 0.15);
-    box-shadow: 0 8px 20px rgba(25, 18, 34, 0.14);
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
-  }
-
-  .comic-detail-sheet {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    width: min(1000px, calc(100% - 64px));
-    min-height: 500px;
-    flex-wrap: wrap;
-    gap: 20px;
-    align-items: stretch;
-    margin: 12px auto 0;
-    padding: 28px;
-    border: 1px solid rgba(255, 255, 255, 0.36);
-    border-radius: 22px;
-    background: rgba(43, 34, 57, 0.42);
-    box-shadow: 0 24px 52px rgba(19, 14, 28, 0.28);
-    backdrop-filter: blur(24px) saturate(1.04);
-    -webkit-backdrop-filter: blur(24px) saturate(1.04);
-  }
-
-  .comic-showcase {
-    display: flex;
-    width: 100%;
-    min-width: 0;
-    align-items: center;
-    gap: 28px;
-    padding-bottom: 6px;
-  }
-
-  .comic-cover-frame {
-    display: flex;
-    width: 190px;
-    min-width: 0;
-    flex: 0 0 auto;
-    aspect-ratio: 3 / 4;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    border: 6px solid rgba(255, 255, 255, 0.74);
-    border-radius: 12px;
-    color: #f4ebff;
-    background: rgba(92, 69, 117, 0.74);
-    box-shadow: 0 14px 28px rgba(19, 14, 28, 0.32);
-  }
-
-  .comic-showcase-copy {
-    min-width: 0;
-    color: #fff;
-  }
-
-  .comic-edition-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 9px;
-    border: 1px solid rgba(255, 255, 255, 0.26);
-    border-radius: 7px;
-    background: rgba(255, 255, 255, 0.14);
-    font-size: 11px;
-  }
-
-  .comic-showcase-copy h3 {
-    margin: 14px 0 0;
-    font-family: KaTongFont, "Microsoft YaHei", sans-serif;
-    font-size: clamp(30px, 4vw, 44px);
-    line-height: 1.15;
-  }
-
-  .comic-showcase-copy p {
-    margin: 9px 0 0;
-    color: rgba(255, 255, 255, 0.76);
-    font-size: 13px;
-  }
-
-  .comic-copy,
-  .comic-unavailable {
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 16px;
-    background: rgba(255, 255, 255, 0.1);
-  }
-
-  .comic-copy {
-    min-width: 0;
-    flex: 1 1 440px;
-    padding: 20px;
-  }
-
-  .comic-copy-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-  }
-
-  .comic-copy-heading span {
-    color: rgba(230, 215, 255, 0.68);
-    font: 10px monospace;
-  }
-
-  .comic-copy-heading strong {
-    color: #fff;
-    font-family: KaTongFont, "Microsoft YaHei", sans-serif;
-    font-size: 20px;
-  }
-
-  .comic-copy > p {
-    margin: 14px 0 0;
-    color: rgba(255, 255, 255, 0.78);
-    font-size: 13px;
-    line-height: 1.8;
-    white-space: pre-line;
-  }
-
-  .comic-unavailable {
-    display: flex;
-    min-height: 146px;
-    flex: 1 1 280px;
-    align-items: center;
-    gap: 12px;
-    padding: 20px;
-    color: #f4effb;
-    text-align: left;
-  }
-
-  .comic-unavailable-icon {
-    display: grid;
-    width: 50px;
-    height: 50px;
-    flex: 0 0 auto;
-    border-radius: 14px;
-    color: #e3d2fa;
-    background: rgba(222, 198, 245, 0.19);
-    place-items: center;
-  }
-
-  .comic-unavailable > div {
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-
-  .comic-unavailable p {
-    margin: 6px 0 0;
-    color: rgba(255, 255, 255, 0.68);
-    font-size: 12px;
-    line-height: 1.65;
-  }
-
-  .comic-unavailable button {
-    display: inline-flex;
-    min-height: 38px;
-    align-items: center;
-    gap: 5px;
-    flex: 0 0 auto;
-    padding: 0 12px;
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    border-radius: 8px;
-    color: #fff;
-    background: rgba(192, 155, 221, 0.36);
-    font-size: 12px;
-  }
 }
 
 /* Mobile layout: tall cover hero, overlapping detail sheet, and action dock. */
@@ -2461,246 +2203,6 @@ watch(
     cursor: not-allowed;
     opacity: 0.5;
   }
-
-  .comic-page {
-    padding-bottom: 0;
-    background: #30263b;
-  }
-
-  .comic-experience {
-    position: relative;
-    min-height: 100dvh;
-    overflow: hidden;
-    padding-bottom: calc(20px + env(safe-area-inset-bottom));
-  }
-
-  .comic-backdrop {
-    position: absolute;
-    z-index: 0;
-    inset: -28px;
-    overflow: hidden;
-    background: linear-gradient(150deg, #49355b, #201d31);
-  }
-
-  .comic-backdrop img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    filter: blur(26px) saturate(0.78) brightness(0.62);
-    opacity: 0.9;
-    transform: scale(1.1);
-  }
-
-  .comic-backdrop::after {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      180deg,
-      rgba(34, 25, 46, 0.54),
-      rgba(53, 39, 72, 0.78)
-    );
-    content: "";
-  }
-
-  .comic-navigation {
-    position: relative;
-    z-index: 1;
-    padding: 12px 16px 4px;
-  }
-
-  .comic-navigation .nav-circle,
-  .comic-navigation .local-label {
-    border-color: rgba(255, 255, 255, 0.25);
-    color: #fff;
-    background: rgba(255, 255, 255, 0.16);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-  }
-
-  .comic-detail-sheet {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    min-height: calc(100dvh - 80px);
-    flex-direction: column;
-    gap: 15px;
-    margin: 14px 12px 0;
-    padding: 20px 16px 28px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 25px;
-    background: rgba(44, 35, 61, 0.52);
-    box-shadow: 0 18px 38px rgba(20, 15, 31, 0.26);
-    backdrop-filter: blur(22px) saturate(1.06);
-    -webkit-backdrop-filter: blur(22px) saturate(1.06);
-  }
-
-  .comic-showcase {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    flex-direction: column;
-    gap: 16px;
-    padding: 4px 4px 10px;
-    color: #fff;
-    text-align: center;
-  }
-
-  .comic-cover-frame {
-    display: flex;
-    width: min(210px, 58vw);
-    min-width: 0;
-    flex: 0 0 auto;
-    aspect-ratio: 3 / 4;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    border: 7px solid rgba(255, 255, 255, 0.82);
-    border-radius: 15px;
-    color: #f7efff;
-    background: rgba(88, 69, 117, 0.76);
-    box-shadow: 0 17px 33px rgba(15, 10, 26, 0.34);
-  }
-
-  .comic-showcase-copy {
-    min-width: 0;
-    width: 100%;
-  }
-
-  .comic-edition-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 6px 9px;
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.15);
-    font-size: 11px;
-  }
-
-  .comic-showcase-copy h3 {
-    display: -webkit-box;
-    overflow: hidden;
-    margin: 12px 0 0;
-    font-family: KaTongFont, "Microsoft YaHei", sans-serif;
-    font-size: clamp(24px, 7vw, 32px);
-    line-height: 1.18;
-    text-overflow: ellipsis;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-
-  .comic-showcase-copy p {
-    margin: 7px 0 0;
-    color: rgba(255, 255, 255, 0.72);
-    font-size: 12px;
-  }
-
-  .comic-copy,
-  .comic-unavailable {
-    border: 1px solid rgba(255, 255, 255, 0.26);
-    border-radius: 17px;
-    background: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 10px 22px rgba(20, 14, 30, 0.14);
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
-  }
-
-  .comic-copy {
-    padding: 18px;
-  }
-
-  .comic-copy-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-  }
-
-  .comic-copy-heading span {
-    color: rgba(225, 207, 249, 0.68);
-    font: 9px monospace;
-    letter-spacing: 0.08em;
-  }
-
-  .comic-copy-heading strong {
-    color: #fff;
-    font-family: KaTongFont, "Microsoft YaHei", sans-serif;
-    font-size: 18px;
-  }
-
-  .comic-copy > p {
-    display: -webkit-box;
-    overflow: hidden;
-    margin: 12px 0 0;
-    color: rgba(255, 255, 255, 0.76);
-    font-size: 12px;
-    line-height: 1.8;
-    white-space: pre-line;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 5;
-  }
-
-  .comic-unavailable {
-    display: flex;
-    min-height: 122px;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 17px;
-    color: #f5effc;
-    text-align: left;
-  }
-
-  .comic-unavailable-icon {
-    display: grid;
-    width: 46px;
-    height: 46px;
-    flex: 0 0 auto;
-    border-radius: 14px;
-    color: #e3d2fa;
-    background: rgba(222, 198, 245, 0.2);
-    place-items: center;
-  }
-
-  .comic-unavailable > div {
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-
-  .comic-unavailable strong,
-  .comic-unavailable p {
-    display: block;
-  }
-
-  .comic-unavailable strong {
-    color: #fff;
-    font-size: 14px;
-  }
-
-  .comic-unavailable p {
-    display: -webkit-box;
-    overflow: hidden;
-    margin: 5px 0 0;
-    color: rgba(255, 255, 255, 0.66);
-    font-size: 11px;
-    line-height: 1.55;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-
-  .comic-unavailable button {
-    display: inline-flex;
-    min-height: 40px;
-    align-items: center;
-    gap: 5px;
-    flex: 0 0 auto;
-    align-self: flex-end;
-    padding: 0 11px;
-    border: 1px solid rgba(255, 255, 255, 0.26);
-    border-radius: 10px;
-    color: #fff;
-    background: rgba(192, 155, 221, 0.36);
-    font-size: 11px;
-  }
 }
 
 /* Modal and chapter drawer shared by both form factors. */
@@ -2808,36 +2310,6 @@ watch(
 .drawer-heading h3 {
   color: #443e36;
   font-size: 20px;
-}
-
-.drawer-tabs {
-  display: flex;
-  gap: 7px;
-  padding: 13px 20px;
-}
-
-.drawer-tabs button {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  gap: 5px;
-  padding: 0 11px;
-  border: 1px solid #e4ddce;
-  border-radius: 6px;
-  color: #857d70;
-  background: #fffdf8;
-  font-size: 12px;
-}
-
-.drawer-tabs button.active {
-  border-color: #e67c55;
-  color: #fff;
-  background: #e67c55;
-}
-
-.drawer-tabs button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
 }
 
 .drawer-list {
@@ -2954,63 +2426,6 @@ watch(
   color: #a99f90;
 }
 
-.comic-local-directory {
-  display: flex;
-  width: min(100%, 900px);
-  margin: 0 auto;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  flex-direction: column;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.comic-local-directory > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 17px;
-  color: #fff;
-}
-
-.comic-local-directory header small {
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 12px;
-}
-
-.comic-local-directory button {
-  display: flex;
-  min-height: 72px;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  border: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.15);
-  color: #fff;
-  background: transparent;
-  text-align: left;
-}
-
-.comic-local-directory button:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.comic-local-directory img {
-  width: 46px;
-  height: 56px;
-  flex: 0 0 auto;
-  border-radius: 4px;
-  object-fit: cover;
-}
-
-.comic-local-directory button > strong {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .drawer-empty {
   display: flex;
   min-height: 160px;
@@ -3055,20 +2470,6 @@ watch(
     width: 38px;
     height: 38px;
     background: #f4eee4;
-  }
-
-  .drawer-tabs {
-    gap: 8px;
-    padding: 12px 20px;
-    border-bottom: 1px solid #eee8dc;
-    background: #fbf8f1;
-  }
-
-  .drawer-tabs button {
-    min-height: 38px;
-    flex: 1 1 0;
-    justify-content: center;
-    border-radius: 10px;
   }
 
   .drawer-list {

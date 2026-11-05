@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   BookOpen,
   ChevronLeft,
@@ -13,24 +13,28 @@ import {
 } from "@lucide/vue";
 import NovelCard from "../components/NovelCard.vue";
 import PageFrame from "../components/PageFrame.vue";
-import { nativeErrorMessage } from "../composables/deskShared";
-import { deskInjectionKey } from "../deskContext";
+import { nativeErrorMessage } from "../utils/native";
 import type { DiscoverFeed, Novel } from "../types";
+import { extractDominantColor } from "../utils/dominantColor";
+import { trimMetric } from "../utils/format";
 
-function requireDesk() {
-  const desk = inject(deskInjectionKey);
-  if (!desk) throw new Error("Desk context is unavailable");
-  return desk;
-}
+import { usePicker, useRemote, useSearch } from "../desk";
+import { formatMonthDay } from "../utils/format";
 
-const desk = requireDesk();
+const picker = usePicker();
+const remote = useRemote();
+const search = useSearch();
+
+/** 取色不可用时的主题色，与全局主色一致。 */
+const HERO_TINT_FALLBACK = "rgb(226 148 100)";
+
 const home = ref<DiscoverFeed>();
 const homeLoading = ref(false);
 const homeError = ref("");
 const activeCategory = ref<number>();
 const activeSlideIndex = ref(0);
 const carouselPaused = ref(false);
-const heroTint = ref("rgb(226 148 100)");
+const heroTint = ref(HERO_TINT_FALLBACK);
 let homeRequest = 0;
 let carouselTimer: number | undefined;
 let tintRequest = 0;
@@ -77,7 +81,7 @@ function selectCategory(typeId?: number) {
 }
 
 function openNovel(novel: Novel) {
-  desk.openRemoteBookDetail(novel);
+  remote.openRemoteBookDetail(novel);
 }
 
 function showSlide(index: number) {
@@ -98,11 +102,10 @@ function conciseDescription(value?: string) {
   return value?.replace(/\s+/g, " ").trim() || "暂无简介";
 }
 
-function updateHeroTint(cover?: string) {
+async function updateHeroTint(cover?: string) {
   const request = ++tintRequest;
-  const fallback = "rgb(226 148 100)";
   if (!cover) {
-    heroTint.value = fallback;
+    heroTint.value = HERO_TINT_FALLBACK;
     return;
   }
   const cached = coverTints.get(cover);
@@ -110,65 +113,15 @@ function updateHeroTint(cover?: string) {
     heroTint.value = cached;
     return;
   }
-  const image = new Image();
-  image.crossOrigin = "anonymous";
-  image.decoding = "async";
-  image.onload = () => {
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = 32;
-      canvas.height = 32;
-      const context = canvas.getContext("2d", { willReadFrequently: true });
-      if (!context) return;
-      context.drawImage(image, 0, 0, 32, 32);
-      const pixels = context.getImageData(0, 0, 32, 32).data;
-      const buckets = new Map<
-        number,
-        { red: number; green: number; blue: number; weight: number }
-      >();
-      for (let index = 0; index < pixels.length; index += 4) {
-        if (pixels[index + 3] < 180) continue;
-        const red = pixels[index];
-        const green = pixels[index + 1];
-        const blue = pixels[index + 2];
-        const high = Math.max(red, green, blue);
-        const low = Math.min(red, green, blue);
-        const lightness = (high + low) / 2;
-        if (lightness < 28 || lightness > 238) continue;
-        const key = ((red >> 4) << 8) | ((green >> 4) << 4) | (blue >> 4);
-        const bucket = buckets.get(key) || {
-          red: 0,
-          green: 0,
-          blue: 0,
-          weight: 0,
-        };
-        const weight = 12 + high - low;
-        bucket.red += red * weight;
-        bucket.green += green * weight;
-        bucket.blue += blue * weight;
-        bucket.weight += weight;
-        buckets.set(key, bucket);
-      }
-      let best:
-        | { red: number; green: number; blue: number; weight: number }
-        | undefined;
-      for (const bucket of buckets.values()) {
-        if (!best || bucket.weight > best.weight) best = bucket;
-      }
-      if (!best || request !== tintRequest) return;
-      const color = `rgb(${Math.round(best.red / best.weight)} ${Math.round(
-        best.green / best.weight,
-      )} ${Math.round(best.blue / best.weight)})`;
-      coverTints.set(cover, color);
-      heroTint.value = color;
-    } catch {
-      if (request === tintRequest) heroTint.value = fallback;
-    }
-  };
-  image.onerror = () => {
-    if (request === tintRequest) heroTint.value = fallback;
-  };
-  image.src = cover;
+
+  const color = await extractDominantColor(cover);
+  if (request !== tintRequest) return;
+  if (!color) {
+    heroTint.value = HERO_TINT_FALLBACK;
+    return;
+  }
+  coverTints.set(cover, color);
+  heroTint.value = color;
 }
 
 function restartCarousel() {
@@ -191,10 +144,6 @@ function formatMetric(value?: number) {
   return Math.round(value).toLocaleString("zh-CN");
 }
 
-function trimMetric(value: number) {
-  return value >= 100 ? value.toFixed(0) : value.toFixed(1).replace(/\.0$/, "");
-}
-
 watch(heroSlides, restartCarousel, { flush: "post" });
 watch(carouselPaused, restartCarousel);
 watch(activeSlideIndex, restartCarousel);
@@ -211,7 +160,7 @@ onBeforeUnmount(() => {
   <PageFrame>
     <main class="discover-page">
       <div class="home-shell">
-        <template v-if="!desk.searched.value">
+        <template v-if="!search.searched.value">
           <section v-if="homeLoading && !home" class="hero home-loading">
             <LoaderCircle class="spin" :size="24" />
             <span>正在载入推荐</span>
@@ -313,27 +262,27 @@ onBeforeUnmount(() => {
             </button>
           </section>
 
-          <form class="search-box glass" @submit.prevent="desk.search">
+          <form class="search-box glass" @submit.prevent="search.search">
             <Search :size="21" />
             <input
-              :value="desk.query.value"
+              :value="search.query.value"
               autocomplete="off"
               placeholder="搜索书名、作者或关键词"
               aria-label="搜索作品"
               @input="
-                desk.query.value = ($event.target as HTMLInputElement).value
+                search.query.value = ($event.target as HTMLInputElement).value
               "
             />
             <button
               class="primary-button"
               type="submit"
-              :disabled="desk.loading.value"
+              :disabled="search.loading.value"
             >
               <LoaderCircle
-                v-if="desk.loading.value"
+                v-if="search.loading.value"
                 class="spin"
                 :size="17"
-              /><span>{{ desk.loading.value ? "搜索中" : "搜索" }}</span>
+              /><span>{{ search.loading.value ? "搜索中" : "搜索" }}</span>
             </button>
           </form>
 
@@ -438,7 +387,7 @@ onBeforeUnmount(() => {
                         >更新至 {{ novel.latestChapterTitle }}</span
                       >
                       <time v-else>{{
-                        desk.formatDate(novel.lastUpdateTime)
+                        formatMonthDay(novel.lastUpdateTime)
                       }}</time>
                     </span>
                   </span>
@@ -451,28 +400,28 @@ onBeforeUnmount(() => {
         <template v-else>
           <form
             class="search-box glass search-box-active"
-            @submit.prevent="desk.search"
+            @submit.prevent="search.search"
           >
             <Search :size="21" />
             <input
-              :value="desk.query.value"
+              :value="search.query.value"
               autocomplete="off"
               placeholder="搜索书名、作者或关键词"
               aria-label="搜索作品"
               @input="
-                desk.query.value = ($event.target as HTMLInputElement).value
+                search.query.value = ($event.target as HTMLInputElement).value
               "
             />
             <button
               class="primary-button"
               type="submit"
-              :disabled="desk.loading.value"
+              :disabled="search.loading.value"
             >
               <LoaderCircle
-                v-if="desk.loading.value"
+                v-if="search.loading.value"
                 class="spin"
                 :size="17"
-              /><span>{{ desk.loading.value ? "搜索中" : "搜索" }}</span>
+              /><span>{{ search.loading.value ? "搜索中" : "搜索" }}</span>
             </button>
           </form>
 
@@ -480,32 +429,32 @@ onBeforeUnmount(() => {
             <header class="results-heading">
               <h2>
                 {{
-                  desk.loading.value
+                  search.loading.value
                     ? "正在搜索"
-                    : `找到 ${desk.results.value.length} 个作品`
+                    : `找到 ${search.results.value.length} 个作品`
                 }}
               </h2>
-              <button class="clear-search" @click="desk.clearSearch">
+              <button class="clear-search" @click="search.clearSearch">
                 返回首页
               </button>
             </header>
 
-            <div v-if="desk.loading.value" class="empty-state">
+            <div v-if="search.loading.value" class="empty-state">
               <LoaderCircle class="spin" :size="26" />
               <p>正在查找作品</p>
             </div>
-            <div v-else-if="!desk.results.value.length" class="empty-state">
+            <div v-else-if="!search.results.value.length" class="empty-state">
               <BookOpen :size="28" />
               <p>没有找到匹配的作品</p>
             </div>
             <div v-else class="novel-grid">
               <NovelCard
-                v-for="novel in desk.results.value"
+                v-for="novel in search.results.value"
                 :key="`${novel.novelId}-${novel.bookshelfType || 'novel'}`"
                 :novel="novel"
-                :format-date="desk.formatDate"
-                @select="desk.openChapterPicker"
-                @detail="desk.openRemoteBookDetail"
+                :format-date="formatMonthDay"
+                @select="picker.openChapterPicker"
+                @detail="remote.openRemoteBookDetail"
               />
             </div>
           </section>

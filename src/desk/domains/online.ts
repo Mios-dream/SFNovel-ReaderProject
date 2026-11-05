@@ -2,16 +2,17 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { computed, ref } from "vue";
 import type {
   Chapter,
-  ChapterMode,
   ChapterVolume,
   Novel,
   OnlineAudioTrack,
   OnlineComicChapter,
   OnlineTextChapter,
-} from "../types";
-import { nativeErrorMessage, type Notify } from "./deskShared";
+  MediaType,
+} from "../../types";
+import { nativeErrorMessage } from "../../utils/native";
+import type { Notify } from "../../composables/useToast";
 
-type UseOnlineReadingOptions = {
+type OnlineDeskOptions = {
   notify: Notify;
 };
 
@@ -35,9 +36,9 @@ const DIRECTORY_CACHE_LIMIT = 6;
  * 释放。文字章节会保留在内存中，并在打开一章后预取前后相邻章节，减少连续阅读
  * 时的等待；漫画按页懒加载，有声通过原生媒体协议流式播放。
  */
-export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
+export function createOnlineDesk({ notify }: OnlineDeskOptions) {
   const onlineBook = ref<Novel>();
-  const onlineMode = ref<ChapterMode>("text");
+  const onlineMode = ref<MediaType>("novel");
   const pendingChapterId = ref<number>();
   const textVolumes = ref<ChapterVolume[]>([]);
   const audioChapters = ref<Chapter[]>([]);
@@ -77,7 +78,7 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     ),
   );
 
-  function directoryKey(book: Novel, mode: ChapterMode) {
+  function directoryKey(book: Novel, mode: MediaType) {
     return `${mode}:${book.novelId}:${book.mediaId || ""}:${book.sourcePath || ""}`;
   }
 
@@ -101,7 +102,7 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
 
   async function loadDirectorySnapshot(
     book: Novel,
-    mode: ChapterMode,
+    mode: MediaType,
     force = false,
     reuseCache = true,
   ): Promise<DirectorySnapshot> {
@@ -115,7 +116,7 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     if (pending) return pending;
     const generation = cacheGeneration;
     const request = (async () => {
-      if (mode === "text") {
+      if (mode === "novel") {
         const volumes = await invoke<ChapterVolume[]>("get_chapter_volumes", {
           novelId: book.novelId,
         });
@@ -166,6 +167,26 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     }
   }
 
+  /**
+   * 章节选择弹窗的目录查询。
+   *
+   * 与阅读页共用同一份目录缓存：弹窗里看到的章节必须与打开阅读后一致，因此这里
+   * 不直接调命令，而是复用 `loadDirectorySnapshot`。
+   * @param reuseCache 是否复用详情页已经取过的目录。
+   */
+  async function pickerCatalog(
+    book: Novel,
+    mode: MediaType,
+    reuseCache: boolean,
+  ): Promise<{ volumes?: ChapterVolume[]; chapters?: Chapter[] }> {
+    const snapshot = await loadDirectorySnapshot(book, mode, false, reuseCache);
+    if (mode === "novel") return { volumes: snapshot.textVolumes };
+    return {
+      chapters:
+        mode === "audio" ? snapshot.audioChapters : snapshot.comicChapters,
+    };
+  }
+
   function rememberChapter<Key, Value>(
     cache: Map<Key, Value>,
     key: Key,
@@ -193,7 +214,7 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
 
   function prepareOnlineReading(
     book: Novel,
-    mode: ChapterMode,
+    mode: MediaType,
     chapterId?: number,
   ) {
     const nextDirectoryKey = directoryKey(book, mode);
@@ -230,7 +251,7 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
    */
   async function primeOnlineDirectory(
     book: Novel,
-    mode: ChapterMode,
+    mode: MediaType,
     force = false,
   ) {
     const nextKey = directoryKey(book, mode);
@@ -310,36 +331,57 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     );
   }
 
-  function fetchOnlineTextChapter(chapterId: number) {
-    const cached = textChapterCache.get(chapterId);
-    if (cached) {
-      rememberChapter(textChapterCache, chapterId, cached);
+  /**
+   * 章节内容的请求去重与最近使用缓存。
+   *
+   * 三种媒态的取数命令不同，但「命中缓存 → 复用进行中的请求 → 成功后写入缓存」
+   * 完全一致；抽成泛型后各媒态只保留自己的参数组装。
+   */
+  function cachedChapter<T>(
+    cache: Map<number, T>,
+    requests: Map<number, Promise<T>>,
+    chapterId: number,
+    load: () => Promise<T>,
+  ): Promise<T> {
+    const cached = cache.get(chapterId);
+    if (cached !== undefined) {
+      rememberChapter(cache, chapterId, cached);
       return Promise.resolve(cached);
     }
-    const pending = textChapterRequests.get(chapterId);
+    const pending = requests.get(chapterId);
     if (pending) return pending;
-    const book = onlineBook.value;
-    if (!book) return Promise.reject(new Error("未选择在线作品"));
     const generation = cacheGeneration;
-    const request = invoke<OnlineTextChapter>("load_online_text_chapter", {
-      novelId: book.novelId,
+    const request = load()
+      .then((value) => {
+        if (generation === cacheGeneration)
+          rememberChapter(cache, chapterId, value);
+        return value;
+      })
+      .finally(() => {
+        if (requests.get(chapterId) === request) requests.delete(chapterId);
+      });
+    requests.set(chapterId, request);
+    return request;
+  }
+
+  function fetchOnlineTextChapter(chapterId: number) {
+    return cachedChapter(
+      textChapterCache,
+      textChapterRequests,
       chapterId,
-    })
-      .then((payload) => {
-        const chapter = {
+      async () => {
+        const book = onlineBook.value;
+        if (!book) throw new Error("未选择在线作品");
+        const payload = await invoke<OnlineTextChapter>(
+          "load_online_text_chapter",
+          { novelId: book.novelId, chapterId },
+        );
+        return {
           ...payload,
           images: payload.images.map((path) => convertFileSrc(path)),
         };
-        if (generation === cacheGeneration)
-          rememberChapter(textChapterCache, chapterId, chapter);
-        return chapter;
-      })
-      .finally(() => {
-        if (textChapterRequests.get(chapterId) === request)
-          textChapterRequests.delete(chapterId);
-      });
-    textChapterRequests.set(chapterId, request);
-    return request;
+      },
+    );
   }
 
   async function prefetchOnlineTextNeighbors(chapterId: number) {
@@ -387,34 +429,22 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
   }
 
   function fetchOnlineComicChapter(chapterId: number) {
-    const cached = comicChapterCache.get(chapterId);
-    if (cached) {
-      rememberChapter(comicChapterCache, chapterId, cached);
-      return Promise.resolve(cached);
-    }
-    const pending = comicChapterRequests.get(chapterId);
-    if (pending) return pending;
-    const book = onlineBook.value;
-    if (!book) return Promise.reject(new Error("未选择在线作品"));
-    const chapter = comicChapters.value.find((item) => item.id === chapterId);
-    const generation = cacheGeneration;
-    const request = invoke<OnlineComicChapter>("load_online_comic_chapter", {
-      comicId: book.novelId,
+    return cachedChapter(
+      comicChapterCache,
+      comicChapterRequests,
       chapterId,
-      chapterTitle: chapter?.title || `章节 ${chapterId}`,
-      sourcePath: book.sourcePath,
-    })
-      .then((payload) => {
-        if (generation === cacheGeneration)
-          rememberChapter(comicChapterCache, chapterId, payload);
-        return payload;
-      })
-      .finally(() => {
-        if (comicChapterRequests.get(chapterId) === request)
-          comicChapterRequests.delete(chapterId);
-      });
-    comicChapterRequests.set(chapterId, request);
-    return request;
+      async () => {
+        const book = onlineBook.value;
+        if (!book) throw new Error("未选择在线作品");
+        const chapter = comicChapters.value.find((item) => item.id === chapterId);
+        return invoke<OnlineComicChapter>("load_online_comic_chapter", {
+          comicId: book.novelId,
+          chapterId,
+          chapterTitle: chapter?.title || `章节 ${chapterId}`,
+          sourcePath: book.sourcePath,
+        });
+      },
+    );
   }
 
   async function openOnlineComicChapter(chapterId: number) {
@@ -441,33 +471,20 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
   }
 
   function fetchOnlineAudioTrack(chapterId: number) {
-    const cached = audioTrackCache.get(chapterId);
-    if (cached) {
-      rememberChapter(audioTrackCache, chapterId, cached);
-      return Promise.resolve(cached);
-    }
-    const pending = audioTrackRequests.get(chapterId);
-    if (pending) return pending;
-    if (!onlineBook.value)
-      return Promise.reject(new Error("未选择在线作品"));
-    const chapter = audioChapters.value.find((item) => item.id === chapterId);
-    const generation = cacheGeneration;
-    const request = invoke<OnlineAudioTrack>("load_online_audio_track", {
+    return cachedChapter(
+      audioTrackCache,
+      audioTrackRequests,
       chapterId,
-      chapterTitle: chapter?.title || `章节 ${chapterId}`,
-      chapterVolume: chapter?.volume || "",
-    })
-      .then((payload) => {
-        if (generation === cacheGeneration)
-          rememberChapter(audioTrackCache, chapterId, payload);
-        return payload;
-      })
-      .finally(() => {
-        if (audioTrackRequests.get(chapterId) === request)
-          audioTrackRequests.delete(chapterId);
-      });
-    audioTrackRequests.set(chapterId, request);
-    return request;
+      async () => {
+        if (!onlineBook.value) throw new Error("未选择在线作品");
+        const chapter = audioChapters.value.find((item) => item.id === chapterId);
+        return invoke<OnlineAudioTrack>("load_online_audio_track", {
+          chapterId,
+          chapterTitle: chapter?.title || `章节 ${chapterId}`,
+          chapterVolume: chapter?.volume || "",
+        });
+      },
+    );
   }
 
   async function loadOnlineAudioTrack(chapterId: number, play = false) {
@@ -518,6 +535,7 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     primeOnlineDirectory,
     loadDirectory,
     loadDirectorySnapshot,
+    pickerCatalog,
     openOnlineTextChapter,
     peekOnlineTextChapter,
     openOnlineComicChapter,
@@ -525,3 +543,6 @@ export function useOnlineReading({ notify }: UseOnlineReadingOptions) {
     resetOnlineReadingSession,
   };
 }
+
+/** 该域对外暴露的完整上下文；页面只应通过 `useOnline` 取用。 */
+export type OnlineDesk = ReturnType<typeof createOnlineDesk>;

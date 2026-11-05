@@ -9,7 +9,6 @@ export type ViewName =
   | "comicReader"
   | "audioPlayer";
 export type ReaderSource = "local" | "online";
-export type ChapterMode = "text" | "audio" | "comic";
 
 export type Novel = {
   novelId: number;
@@ -94,6 +93,7 @@ export type BookCommentReplyPage = {
 export type Job = {
   id: string;
   title: string;
+  /** 后端 `MediaKind` 的序列化名：文字是 `text`，不是 `MediaType` 的 `novel`。 */
   kind: "text" | "audio" | "comic";
   status: "queued" | "downloading" | "paused" | "done" | "error" | "cancelled";
   progress: number;
@@ -292,3 +292,17 @@ export type AppSettings = {
   signin: SigninSettings;
   updates: UpdateSettings;
 };
+
+/**
+ * 导出格式，与后端 `export_book` 命令的 `format` 参数一一对应。
+ *
+ * `epub` / `markdown` / `txt` 只适用于文字作品，`audio` / `comic` 分别对应
+ * 有声与漫画作品的打包导出。
+ */
+export type ExportFormat = "epub" | "markdown" | "txt" | "audio" | "comic";
+
+/** 作品的内容形态：文字小说、有声、漫画。 */
+export type MediaType = "novel" | "audio" | "comic";
+
+/** 阅读器的排版方式：纵向滚动或分页。 */
+export type DisplayMode = "vertical" | "paged";

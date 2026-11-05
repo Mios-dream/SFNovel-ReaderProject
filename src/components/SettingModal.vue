@@ -12,7 +12,7 @@ import {
   X,
 } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
-import type { UpdateStatus } from "../composables/useUpdater";
+import type { UpdateStatus } from "../desk";
 import type { AppSettings } from "../types";
 import SettingSelect from "./SettingSelect.vue";
 

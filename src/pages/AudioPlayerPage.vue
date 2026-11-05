@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
   computed,
-  inject,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -31,13 +30,14 @@ import {
 import AudioPlayerDrawer from "../components/AudioPlayerDrawer.vue";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import { reportError, showToast } from "../composables/useToast";
-import { deskInjectionKey } from "../deskContext";
+import { asRecord, readPreference, writePreference } from "../utils/preferences";
 
-function requireDesk() {
-  const desk = inject(deskInjectionKey);
-  if (!desk) throw new Error("Desk context is unavailable");
-  return desk;
-}
+import { useAuth, useLibrary, useOnline, useWorkspace } from "../desk";
+
+const auth = useAuth();
+const library = useLibrary();
+const reading = useOnline();
+const workspace = useWorkspace();
 
 const AUDIO_PLAYER_PREFERENCES_KEY = "sf-novel-flow.audio-player-preferences";
 const playbackRates = [1, 1.25, 1.5, 2] as const;
@@ -63,52 +63,52 @@ type SleepTimerState = {
   remaining: number;
 };
 
-function readAudioPreferences(): AudioPlayerPreferences {
-  if (typeof window === "undefined") return { ...defaultAudioPreferences };
-  try {
-    const stored = window.localStorage.getItem(AUDIO_PLAYER_PREFERENCES_KEY);
-    if (!stored) return { ...defaultAudioPreferences };
-    const parsed = JSON.parse(stored) as Partial<AudioPlayerPreferences>;
-    const rate = playbackRates.includes(
+/** 校验存量偏好：倍速必须是预设值，音量必须落在 [0,1]。 */
+function sanitizeAudioPreferences(raw: unknown): AudioPlayerPreferences {
+  const parsed = asRecord(raw) as Partial<AudioPlayerPreferences>;
+  return {
+    volume:
+      typeof parsed.volume === "number" && Number.isFinite(parsed.volume)
+        ? Math.min(1, Math.max(0, parsed.volume))
+        : defaultAudioPreferences.volume,
+    playbackRate: playbackRates.includes(
       parsed.playbackRate as (typeof playbackRates)[number],
     )
       ? parsed.playbackRate!
-      : defaultAudioPreferences.playbackRate;
-    return {
-      volume:
-        typeof parsed.volume === "number" && Number.isFinite(parsed.volume)
-          ? Math.min(1, Math.max(0, parsed.volume))
-          : defaultAudioPreferences.volume,
-      playbackRate: rate,
-      autoPlayNext:
-        typeof parsed.autoPlayNext === "boolean"
-          ? parsed.autoPlayNext
-          : defaultAudioPreferences.autoPlayNext,
-    };
-  } catch {
-    return { ...defaultAudioPreferences };
-  }
+      : defaultAudioPreferences.playbackRate,
+    autoPlayNext:
+      typeof parsed.autoPlayNext === "boolean"
+        ? parsed.autoPlayNext
+        : defaultAudioPreferences.autoPlayNext,
+  };
 }
 
-const desk = requireDesk();
+function readAudioPreferences(): AudioPlayerPreferences {
+  return readPreference(
+    AUDIO_PLAYER_PREFERENCES_KEY,
+    sanitizeAudioPreferences,
+    () => ({ ...defaultAudioPreferences }),
+  );
+}
+
 const router = useRouter();
-const online = computed(() => desk.readerSource.value === "online");
+const online = computed(() => workspace.readerSource.value === "online");
 const bookName = computed(() =>
   online.value
-    ? desk.onlineBook.value?.novelName || "在线有声书"
-    : desk.localBook.value?.audio?.title ||
-      desk.localBook.value?.name ||
+    ? reading.onlineBook.value?.novelName || "在线有声书"
+    : library.localBook.value?.audio?.title ||
+      library.localBook.value?.name ||
       "本地有声书",
 );
 const author = computed(() =>
   online.value
-    ? desk.onlineBook.value?.authorName || "未知作者"
-    : desk.localBook.value?.audio?.author || "",
+    ? reading.onlineBook.value?.authorName || "未知作者"
+    : library.localBook.value?.audio?.author || "",
 );
 const cover = computed(() =>
   online.value
-    ? desk.onlineBook.value?.novelCover
-    : desk.localBook.value?.audio?.cover,
+    ? reading.onlineBook.value?.novelCover
+    : library.localBook.value?.audio?.cover,
 );
 type ReaderAudioTrack = {
   key: string;
@@ -121,7 +121,7 @@ type ReaderAudioTrack = {
 };
 const tracks = computed<ReaderAudioTrack[]>(() => {
   if (online.value)
-    return desk.audioChapters.value.map((chapter) => ({
+    return reading.audioChapters.value.map((chapter) => ({
       key: `online-${chapter.id}`,
       id: chapter.id,
       title: chapter.title,
@@ -129,19 +129,19 @@ const tracks = computed<ReaderAudioTrack[]>(() => {
       isVip: chapter.isVip === true,
       isUnlocked: chapter.isUnlocked === true,
     }));
-  return (desk.localBook.value?.audioTracks || []).map((track, index) => ({
+  return (library.localBook.value?.audioTracks || []).map((track, index) => ({
     key: `local-${index}-${track.href}`,
     title: track.title,
     href: track.href,
   }));
 });
-const initialTrackIndex = computed(() => desk.localAudioTrackIndex.value);
+const initialTrackIndex = computed(() => library.localAudioTrackIndex.value);
 const onlineDirectoryReady = ref(false);
 watch(
   () => ({
     ready: onlineDirectoryReady.value,
-    loading: desk.directoryLoading.value,
-    error: desk.directoryError.value,
+    loading: reading.directoryLoading.value,
+    error: reading.directoryError.value,
     count: tracks.value.length,
   }),
   ({ ready, loading, error, count }) => {
@@ -170,19 +170,24 @@ const autoPlayNext = ref(savedAudioPreferences.autoPlayNext);
 const timerMenuOpen = ref(false);
 const desktopSettingsOpen = ref(false);
 const desktopPlaylistOpen = ref(false);
+/** 播放列表行高，必须与 `.track-row` 的 CSS 及虚拟列表保持一致。 */
+const TRACK_ROW_HEIGHT = 54;
+/** 虚拟列表上下各多渲染的行数，用于抵消快速滚动时的空白。 */
+const TRACK_ROW_OVERSCAN = 8;
+
 const trackRows = computed(() =>
   tracks.value.map((track, index) => ({
     key: track.key,
     index,
     track,
-    height: 54,
+    height: TRACK_ROW_HEIGHT,
   })),
 );
 const {
   container: trackList,
   windowed: trackWindow,
   handleScroll: handleTrackListScroll,
-} = useVirtualRows(() => trackRows.value, 8);
+} = useVirtualRows(() => trackRows.value, TRACK_ROW_OVERSCAN);
 const desktopSettingsButton = ref<HTMLButtonElement>();
 const desktopSettingsPanel = ref<HTMLElement>();
 const desktopSettingsStyle = ref<Record<string, string>>({
@@ -210,7 +215,7 @@ const currentTrackHref = computed(() => {
   const track = currentTrack.value;
   if (!track) return undefined;
   if (!online.value) return track.href;
-  const onlineTrack = desk.audioTrack.value;
+  const onlineTrack = reading.audioTrack.value;
   if (!onlineTrack || !track.id || onlineTrack.id !== track.id)
     return undefined;
   return onlineTrack.url;
@@ -218,7 +223,7 @@ const currentTrackHref = computed(() => {
 const onlineLoading = computed(
   () =>
     online.value &&
-    (desk.directoryLoading.value || desk.audioTrackLoading.value),
+    (reading.directoryLoading.value || reading.audioTrackLoading.value),
 );
 const playbackLoading = computed(
   () => onlineLoading.value || startingPlayback.value,
@@ -247,19 +252,11 @@ function applyAudioPreferences() {
 }
 
 function saveAudioPreferences() {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      AUDIO_PLAYER_PREFERENCES_KEY,
-      JSON.stringify({
-        volume: volume.value,
-        playbackRate: playbackRate.value,
-        autoPlayNext: autoPlayNext.value,
-      }),
-    );
-  } catch {
-    // Storage can be unavailable in restricted browser contexts.
-  }
+  writePreference(AUDIO_PLAYER_PREFERENCES_KEY, {
+    volume: volume.value,
+    playbackRate: playbackRate.value,
+    autoPlayNext: autoPlayNext.value,
+  } satisfies AudioPlayerPreferences);
 }
 
 function syncCompactViewport() {
@@ -316,44 +313,16 @@ function handleDesktopSettingsViewportChange() {
   void nextTick(positionDesktopSettings);
 }
 
-onMounted(async () => {
+/** 订阅视口变化：窄屏切换布局，桌面设置面板需要跟随滚动重定位。 */
+function setupViewportListeners() {
   compactViewportQuery = window.matchMedia("(max-width: 800px)");
   syncCompactViewport();
   compactViewportQuery.addEventListener("change", syncCompactViewport);
   window.addEventListener("resize", handleDesktopSettingsViewportChange);
-  window.addEventListener(
-    "scroll",
-    handleDesktopSettingsViewportChange,
-    true,
-  );
-  if (online.value) {
-    applyAudioPreferences();
-    if (!desk.onlineBook.value) {
-      void router.replace("/remote-book");
-      return;
-    }
-    try {
-      await desk.loadDirectory();
-      const targetId =
-        desk.pendingChapterId.value || tracks.value[0]?.id;
-      const index = tracks.value.findIndex((track) => track.id === targetId);
-      if (index >= 0) await selectTrack(index, false);
-    } catch {
-      // 目录错误由页面状态和通知承接。
-    } finally {
-      onlineDirectoryReady.value = true;
-    }
-    return;
-  }
-  if (!desk.localBook.value?.audioTracks.length) {
-    void router.replace("/library");
-    return;
-  }
-  applyAudioPreferences();
-  desk.navigate("audioPlayer");
-});
+  window.addEventListener("scroll", handleDesktopSettingsViewportChange, true);
+}
 
-onBeforeUnmount(() => {
+function teardownViewportListeners() {
   compactViewportQuery?.removeEventListener("change", syncCompactViewport);
   window.removeEventListener("resize", handleDesktopSettingsViewportChange);
   window.removeEventListener(
@@ -361,6 +330,54 @@ onBeforeUnmount(() => {
     handleDesktopSettingsViewportChange,
     true,
   );
+}
+
+/**
+ * 在线模式进入页面：先加载目录，再定位到待播放音轨。
+ *
+ * 这里不自动播放（`selectTrack(index, false)`）：进入页面就出声会让用户意外，
+ * 播放由用户点击触发。
+ */
+async function initializeOnlinePlayback() {
+  applyAudioPreferences();
+  if (!reading.onlineBook.value) {
+    void router.replace("/remote-book");
+    return;
+  }
+  try {
+    await reading.loadDirectory();
+    const targetId = reading.pendingChapterId.value || tracks.value[0]?.id;
+    const index = tracks.value.findIndex((track) => track.id === targetId);
+    if (index >= 0) await selectTrack(index, false);
+  } catch {
+    // 目录错误由页面状态和通知承接。
+  } finally {
+    // 无论成功与否都要结束骨架态，否则加载失败时页面会一直停在加载中。
+    onlineDirectoryReady.value = true;
+  }
+}
+
+/** 本地模式进入页面：没有音轨说明不是有声作品，退回书库。 */
+function initializeLocalPlayback() {
+  if (!library.localBook.value?.audioTracks.length) {
+    void router.replace("/library");
+    return;
+  }
+  applyAudioPreferences();
+  workspace.navigate("audioPlayer");
+}
+
+onMounted(async () => {
+  setupViewportListeners();
+  if (online.value) {
+    await initializeOnlinePlayback();
+    return;
+  }
+  initializeLocalPlayback();
+});
+
+onBeforeUnmount(() => {
+  teardownViewportListeners();
   clearSleepTimer();
 });
 
@@ -413,10 +430,11 @@ async function revealCurrentTrack() {
   await nextTick();
   const list = trackList.value;
   if (!list) return;
-  list.scrollTop = Math.max(
-    0,
-    trackIndex.value * 54 - (list.clientHeight - 54) / 2,
-  );
+  // 让当前行落在可视区中部，而不是贴住边缘。
+  const centered =
+    trackIndex.value * TRACK_ROW_HEIGHT -
+    (list.clientHeight - TRACK_ROW_HEIGHT) / 2;
+  list.scrollTop = Math.max(0, centered);
   handleTrackListScroll();
 }
 
@@ -496,11 +514,11 @@ function toggleSleepTimer() {
   }
 }
 
-const formatTime = (seconds: number) => {
+function formatTime(seconds: number) {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
-};
+}
 
 async function play() {
   if (!audio.value || playbackLoading.value || !currentTrackHref.value) return;
@@ -537,7 +555,7 @@ function togglePlayback() {
 async function selectTrack(index: number, shouldPlay = playing.value) {
   if (!tracks.value.length) return;
   // 音轨尚未载入完成时避免重复发起请求。
-  if (online.value && (desk.audioTrackLoading.value || startingPlayback.value))
+  if (online.value && (reading.audioTrackLoading.value || startingPlayback.value))
     return;
   const target = Math.min(Math.max(0, index), tracks.value.length - 1);
   const track = tracks.value[target];
@@ -545,7 +563,7 @@ async function selectTrack(index: number, shouldPlay = playing.value) {
     if (!track?.id) return;
     if (playing.value) pause();
     if (shouldPlay) {
-      const payload = await desk.loadOnlineAudioTrack(track.id, true);
+      const payload = await reading.loadOnlineAudioTrack(track.id, true);
       if (!payload) return;
     }
   }
@@ -655,23 +673,23 @@ watch(
 
 function goBack() {
   if (online.value) {
-    desk.backFromOnlineReading();
+    workspace.backFromOnlineReading();
     return;
   }
-  void router.push(`/library/${encodeURIComponent(bookName.value)}`);
+  void workspace.navigate("libraryDetail", bookName.value);
 }
 
 async function retryOnlineAudio(shouldPlay = true) {
   if (!online.value || playbackLoading.value) return;
   try {
-    if (!tracks.value.length || desk.directoryError.value) {
-      await desk.loadDirectory(true);
+    if (!tracks.value.length || reading.directoryError.value) {
+      await reading.loadDirectory(true);
     }
     if (!tracks.value.length) return;
-    if (!desk.requireAudioPlaybackAccess()) return;
+    if (!auth.requireAudioPlaybackAccess()) return;
     const targetId =
       currentTrack.value?.id ||
-      desk.pendingChapterId.value ||
+      reading.pendingChapterId.value ||
       tracks.value[0]?.id;
     const index = tracks.value.findIndex((track) => track.id === targetId);
     await selectTrack(index >= 0 ? index : 0, shouldPlay);
@@ -1375,16 +1393,6 @@ async function retryOnlineAudio(shouldPlay = true) {
   cursor: not-allowed;
   opacity: 0.45;
 }
-.volume-control {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: #a17367;
-}
-.volume-control input {
-  width: 78px;
-  accent-color: var(--theme-color);
-}
 .rate-options {
   display: flex;
   gap: 3px;
@@ -2038,7 +2046,6 @@ async function retryOnlineAudio(shouldPlay = true) {
   .control-cluster-end {
     margin-left: auto;
   }
-  .volume-control,
   .rate-options {
     display: none;
   }

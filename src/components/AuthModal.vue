@@ -296,8 +296,7 @@ function submit() {
   flex: 0 0 auto;
   color: var(--theme-color-dark);
 }
-.disconnect-button,
-.logout-all-button {
+.disconnect-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -313,15 +312,10 @@ function submit() {
 .disconnect-button {
   width: 100%;
 }
-.disconnect-button:hover,
-.logout-all-button:hover {
+.disconnect-button:hover {
   border-color: #d79882;
   color: #fff;
   background: #c96f48;
-}
-.logout-all-button {
-  width: 100%;
-  margin-top: 16px;
 }
 .primary-button {
   display: inline-flex;

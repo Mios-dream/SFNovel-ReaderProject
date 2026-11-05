@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import {
   ChevronLeft,
   ChevronRight,
@@ -16,28 +16,27 @@ import {
 } from "@lucide/vue";
 import { useRouter } from "vue-router";
 import { useVirtualRows } from "../composables/useVirtualRows";
-import { deskInjectionKey } from "../deskContext";
+import type { DisplayMode } from "../types";
 
-function requireDesk() {
-  const desk = inject(deskInjectionKey);
-  if (!desk) throw new Error("Desk context is unavailable");
-  return desk;
-}
+import { useAuth, useLibrary, useOnline, useWorkspace } from "../desk";
 
-type DisplayMode = "vertical" | "paged";
+const auth = useAuth();
+const library = useLibrary();
+const reading = useOnline();
+const workspace = useWorkspace();
 
-const desk = requireDesk();
+
 const router = useRouter();
 const readerElement = ref<HTMLElement>();
 const pageViewport = ref<HTMLElement>();
-const book = computed(() => desk.localBook.value);
-const online = computed(() => desk.readerSource.value === "online");
+const book = computed(() => library.localBook.value);
+const online = computed(() => workspace.readerSource.value === "online");
 const comicChapter = computed(() =>
-  online.value ? desk.comicChapter.value : desk.localComicChapter.value,
+  online.value ? reading.comicChapter.value : library.localComicChapter.value,
 );
 const bookName = computed(() =>
   online.value
-    ? desk.onlineBook.value?.novelName || "在线漫画"
+    ? reading.onlineBook.value?.novelName || "在线漫画"
     : book.value?.name || "本地漫画",
 );
 type ComicChapterEntry = {
@@ -48,7 +47,7 @@ type ComicChapterEntry = {
 };
 const chapters = computed<ComicChapterEntry[]>(() => {
   if (online.value)
-    return desk.comicChapters.value.map((chapter) => ({
+    return reading.comicChapters.value.map((chapter) => ({
       id: chapter.id,
       title: chapter.title,
       isVip: chapter.isVip,
@@ -87,14 +86,14 @@ const chapterLoading = ref(false);
 const pageCount = computed(() => comicChapter.value?.pages.length || 0);
 const requestedChapterId = ref<number>();
 const onlineError = computed(() =>
-  online.value ? desk.chapterError.value || desk.directoryError.value : "",
+  online.value ? reading.chapterError.value || reading.directoryError.value : "",
 );
 const onlineLoading = computed(
   () =>
-    online.value && (desk.chapterLoading.value || desk.directoryLoading.value),
+    online.value && (reading.chapterLoading.value || reading.directoryLoading.value),
 );
 const onlineNeedsAuth = computed(
-  () => online.value && !desk.auth.value.webAuthenticated,
+  () => online.value && !auth.auth.value.webAuthenticated,
 );
 const firstPageReady = ref(false);
 const firstPageError = ref("");
@@ -214,8 +213,8 @@ async function openChapter(chapterId?: number, showLastPage = false) {
   chapterLoading.value = true;
   requestedChapterId.value = chapterId;
   try {
-    if (online.value) await desk.openOnlineComicChapter(chapterId);
-    else await desk.openLocalComicChapter(chapterId);
+    if (online.value) await reading.openOnlineComicChapter(chapterId);
+    else await library.openLocalComicChapter(chapterId);
     if (comicChapter.value?.id !== chapterId) return;
     pageIndex.value = showLastPage
       ? Math.max(0, (comicChapter.value.pages.length || 1) - 1)
@@ -232,19 +231,18 @@ async function openChapter(chapterId?: number, showLastPage = false) {
 
 function goBack() {
   if (online.value) {
-    desk.backFromOnlineReading();
+    workspace.backFromOnlineReading();
     return;
   }
-  desk.navigate("libraryDetail");
-  void router.push(`/library/${encodeURIComponent(bookName.value)}`);
+  void workspace.navigate("libraryDetail", bookName.value);
 }
 
 async function retryOnlineLoad() {
   try {
-    await desk.loadDirectory(true);
+    await reading.loadDirectory(true);
     const targetId =
       requestedChapterId.value ||
-      desk.pendingChapterId.value ||
+      reading.pendingChapterId.value ||
       chapters.value[0]?.id;
     if (targetId) {
       await openChapter(targetId);
@@ -391,7 +389,7 @@ function showDirectory() {
 }
 
 async function revealCurrentChapter() {
-  if (!directoryOpen.value || desk.directoryLoading.value) return;
+  if (!directoryOpen.value || reading.directoryLoading.value) return;
   await nextTick();
   const list = directoryList.value;
   if (!list) return;
@@ -407,17 +405,17 @@ async function revealCurrentChapter() {
 
 onMounted(async () => {
   if (online.value) {
-    if (!desk.onlineBook.value) {
+    if (!reading.onlineBook.value) {
       void router.replace("/remote-book");
       return;
     }
     try {
-      await desk.loadDirectory();
+      await reading.loadDirectory();
       const targetId =
-        desk.comicChapter.value?.id ||
-        desk.pendingChapterId.value ||
+        reading.comicChapter.value?.id ||
+        reading.pendingChapterId.value ||
         chapters.value[0]?.id;
-      if (targetId && desk.comicChapter.value?.id !== targetId)
+      if (targetId && reading.comicChapter.value?.id !== targetId)
         await openChapter(targetId);
     } catch {
       // 错误已保存在共享状态中并由页面展示。
@@ -428,16 +426,16 @@ onMounted(async () => {
     void router.replace("/library");
     return;
   }
-  desk.navigate("comicReader");
+  workspace.navigate("comicReader");
 });
 
 watch(
-  () => desk.pendingChapterId.value,
+  () => reading.pendingChapterId.value,
   (chapterId) => {
     if (
       online.value &&
       chapterId &&
-      desk.comicChapter.value?.id !== chapterId
+      reading.comicChapter.value?.id !== chapterId
     ) {
       void openChapter(chapterId);
     }
@@ -445,7 +443,7 @@ watch(
 );
 
 watch(
-  [directoryOpen, () => desk.directoryLoading.value, () => comicChapter.value?.id],
+  [directoryOpen, () => reading.directoryLoading.value, () => comicChapter.value?.id],
   () => void revealCurrentChapter(),
 );
 
@@ -510,7 +508,7 @@ watch(
       <button
         v-if="onlineNeedsAuth"
         type="button"
-        @click="desk.openCredentials('official')"
+        @click="auth.openCredentials('official')"
       >
         连接网站登录
       </button>
@@ -693,7 +691,7 @@ watch(
       <button
         v-if="onlineNeedsAuth"
         type="button"
-        @click="desk.openCredentials('official')"
+        @click="auth.openCredentials('official')"
       >
         连接网站登录
       </button>
@@ -741,14 +739,14 @@ watch(
             </button>
           </div>
         </header>
-        <div v-if="desk.directoryLoading.value" class="directory-state">
+        <div v-if="reading.directoryLoading.value" class="directory-state">
           <LoaderCircle class="spin" :size="24" />正在读取目录
         </div>
         <div
-          v-else-if="desk.directoryError.value"
+          v-else-if="reading.directoryError.value"
           class="directory-state error"
         >
-          {{ desk.directoryError.value }}
+          {{ reading.directoryError.value }}
           <button type="button" @click="retryOnlineLoad">重试</button>
         </div>
         <div

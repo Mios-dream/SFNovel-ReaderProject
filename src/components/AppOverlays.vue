@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { inject } from "vue";
 import AccountProfileModal from "./AccountProfileModal.vue";
 import AuthModal from "./AuthModal.vue";
 import ChapterPickerModal from "./ChapterPickerModal.vue";
@@ -8,94 +7,101 @@ import DownloadQueueModal from "./DownloadQueueModal.vue";
 import SettingModal from "./SettingModal.vue";
 import SigninModal from "./SigninModal.vue";
 import UpdateModal from "./UpdateModal.vue";
-import { deskInjectionKey } from "../deskContext";
 
-const desk = inject(deskInjectionKey);
-if (!desk) throw new Error("Desk context is unavailable");
+import { useAuth, useJobs, useLibrary, usePicker, useSettings, useUpdater } from "../desk";
+import { formatMonthDay } from "../utils/format";
+
+const auth = useAuth();
+const queue = useJobs();
+const library = useLibrary();
+const picker = usePicker();
+const settings = useSettings();
+const updater = useUpdater();
+
 </script>
 
 <template>
   <ChapterPickerModal
-    :open="desk.chapterModalOpen.value"
-    :novel="desk.chapterNovel.value"
-    :mode="desk.chapterMode.value"
-    :loading="desk.chapterLoading.value"
-    :volumes="desk.chapterVolumes.value"
-    :audio-chapters="desk.audioChapters.value"
-    :comic-chapters="desk.comicChapters.value"
-    :selected-ids="desk.selectedChapterIds.value"
-    :format-date="desk.formatDate"
-    @close="desk.chapterModalOpen.value = false"
-    @update:selected-ids="desk.selectedChapterIds.value = $event"
-    @toggle-all="desk.toggleAllChapters"
-    @confirm="desk.confirmChapterDownload"
-    @switch-mode="desk.switchChapterMode"
+    :open="picker.chapterModalOpen.value"
+    :novel="picker.chapterNovel.value"
+    :mode="picker.chapterMode.value"
+    :loading="picker.chapterLoading.value"
+    :volumes="picker.chapterVolumes.value"
+    :audio-chapters="picker.audioChapters.value"
+    :comic-chapters="picker.comicChapters.value"
+    :selected-ids="picker.selectedChapterIds.value"
+    :format-date="formatMonthDay"
+    @close="picker.chapterModalOpen.value = false"
+    @update:selected-ids="picker.selectedChapterIds.value = $event"
+    @toggle-all="picker.toggleAllChapters"
+    @confirm="picker.confirmChapterDownload"
+    @switch-mode="picker.switchChapterMode"
   />
   <DownloadQueueModal
-    :open="desk.queueOpen.value"
-    :jobs="desk.jobs.value"
-    @close="desk.queueOpen.value = false"
-    @pause="desk.pauseJob"
-    @resume="desk.resumeJob"
-    @remove="desk.deleteJob"
+    :open="queue.queueOpen.value"
+    :jobs="queue.jobs.value"
+    @close="queue.queueOpen.value = false"
+    @pause="queue.pauseJob"
+    @resume="queue.resumeJob"
+    @remove="queue.deleteJob"
   />
   <AuthModal
-    :open="desk.credentialsOpen.value"
-    :auth="desk.auth.value"
-    :initial-tab="desk.credentialsTab.value"
-    :busy="desk.loginBusy.value"
-    @close="desk.credentialsOpen.value = false"
-    @login="desk.login"
-    @browser-login="desk.browserLogin"
-    @logout="desk.logout"
-    @logout-app="desk.logoutApp"
-    @logout-web="desk.logoutWeb"
+    :open="auth.credentialsOpen.value"
+    :auth="auth.auth.value"
+    :initial-tab="auth.credentialsTab.value"
+    :busy="auth.loginBusy.value"
+    @close="auth.credentialsOpen.value = false"
+    @login="auth.login"
+    @browser-login="auth.browserLogin"
+    @logout="auth.logout"
+    @logout-app="auth.logoutApp"
+    @logout-web="auth.logoutWeb"
   />
   <AccountProfileModal
-    :open="desk.accountOpen.value"
-    :auth="desk.auth.value"
-    :profile="desk.accountProfile.value"
-    :loading="desk.accountProfileLoading.value"
-    :error="desk.accountProfileError.value"
-    @close="desk.accountOpen.value = false"
-    @logout="desk.logout"
-    @signin="desk.openSignin"
-    @manage-connections="desk.manageConnections"
+    :open="auth.accountOpen.value"
+    :auth="auth.auth.value"
+    :profile="auth.accountProfile.value"
+    :loading="auth.accountProfileLoading.value"
+    :error="auth.accountProfileError.value"
+    @close="auth.accountOpen.value = false"
+    @logout="auth.logout"
+    @signin="auth.openSignin"
+    @manage-connections="auth.manageConnections"
   />
   <SigninModal
-    :open="desk.signinOpen.value"
-    @close="desk.signinOpen.value = false"
+    :open="auth.signinOpen.value"
+    @close="auth.signinOpen.value = false"
   />
   <SettingModal
-    :open="desk.settingsOpen.value"
-    :settings="desk.settings.value"
-    :saving="desk.settingsSaving.value"
-    :dictionary-size="desk.contentDictionarySize.value"
-    :dictionary-updating="desk.contentDictionaryUpdating.value"
-    :dictionary-chapter-id="desk.contentDictionaryChapterId.value"
-    :current-version="desk.currentVersion.value"
-    :update-status="desk.status.value"
-    :update-version="desk.info.value?.version"
-    @close="desk.settingsOpen.value = false"
-    @save="desk.saveSettings"
-    @update-dictionary="desk.updateContentDictionary"
-    @check-update="desk.checkForUpdatesFromSettings"
-    @show-update="desk.showUpdate"
-    @open-releases="desk.openReleases"
+    :open="settings.settingsOpen.value"
+    :settings="settings.settings.value"
+    :saving="settings.settingsSaving.value"
+    :dictionary-size="settings.contentDictionarySize.value"
+    :dictionary-updating="settings.contentDictionaryUpdating.value"
+    :dictionary-chapter-id="settings.contentDictionaryChapterId.value"
+    :current-version="updater.currentVersion.value"
+    :update-status="updater.status.value"
+    :update-version="updater.info.value?.version"
+    @close="settings.settingsOpen.value = false"
+    @save="settings.saveSettings"
+    @update-dictionary="settings.updateContentDictionary"
+    @check-update="updater.checkFromSettings"
+    @show-update="updater.showUpdate"
+    @open-releases="updater.openReleases"
   />
   <UpdateModal
-    :open="desk.modalOpen.value"
-    :status="desk.status.value"
-    :info="desk.info.value"
-    :current-version="desk.currentVersion.value"
-    :error="desk.error.value"
-    @close="desk.closeModal"
-    @retry="desk.checkForUpdate(true)"
-    @open-releases="desk.openReleases"
+    :open="updater.modalOpen.value"
+    :status="updater.status.value"
+    :info="updater.info.value"
+    :current-version="updater.currentVersion.value"
+    :error="updater.error.value"
+    @close="updater.closeModal"
+    @retry="updater.checkForUpdate(true)"
+    @open-releases="updater.openReleases"
   />
   <ConfirmDeleteModal
-    :book="desk.confirmBook.value"
-    @close="desk.confirmBook.value = undefined"
-    @confirm="desk.confirmDeleteBook"
+    :book="library.confirmBook.value"
+    @close="library.confirmBook.value = undefined"
+    @confirm="library.confirmDeleteBook"
   />
 </template>

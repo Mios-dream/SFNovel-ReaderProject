@@ -1,26 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { onMounted, ref, type Ref } from "vue";
+import { onMounted, ref } from "vue";
 import type {
   Book,
+  ExportFormat,
   LocalBookDetail,
   LocalChapterContent,
   LocalComicChapter,
-  ViewName,
-} from "../types";
-import { localAssetSource, type Notify } from "./deskShared";
+} from "../../types";
+import { localAssetSource, nativeErrorMessage } from "../../utils/native";
+import type { Notify } from "../../composables/useToast";
 
-type ExportFormat = "epub" | "markdown" | "txt" | "audio" | "comic";
-type UseDeskLibraryOptions = {
-  libraryDetailReturnView: Ref<ViewName>;
+type LibraryDeskOptions = {
   notify: Notify;
 };
 
-export function useDeskLibrary({
-  libraryDetailReturnView,
-  notify,
-}: UseDeskLibraryOptions) {
-  const library = ref<Book[]>([]);
+export function createLibraryDesk({ notify }: LibraryDeskOptions) {
+  const books = ref<Book[]>([]);
   const libraryManaging = ref(false);
   const confirmBook = ref<Book>();
   const localBook = ref<LocalBookDetail>();
@@ -33,14 +29,15 @@ export function useDeskLibrary({
 
   async function refreshLibrary() {
     try {
-      const books = await invoke<Book[]>("list_local_library");
+      const listed = await invoke<Book[]>("list_local_library");
       libraryAssetVersion += 1;
-      library.value = books.map((book) => ({
+      books.value = listed.map((book) => ({
         ...book,
         cover: localAssetSource(book.cover, libraryAssetVersion),
       }));
-    } catch {
-      /* No local library exists yet. */
+    } catch (error) {
+      // 空书库是成功返回空数组，走到这里说明目录不可读，必须让用户知道。
+      notify(nativeErrorMessage(error, "读取本地书库失败"), "error");
     }
   }
 
@@ -106,10 +103,7 @@ export function useDeskLibrary({
       await invoke<void>("open_download_directory");
       notify("已打开下载目录");
     } catch (error) {
-      notify(
-        error instanceof Error ? error.message : "无法打开下载目录",
-        "error",
-      );
+      notify(nativeErrorMessage(error, "无法打开下载目录"), "error");
     } finally {
       openingDownloadDirectory.value = false;
     }
@@ -124,10 +118,10 @@ export function useDeskLibrary({
     if (!book) return;
     try {
       await invoke<void>("delete_local_book", { name: book.name });
-      library.value = library.value.filter((item) => item.name !== book.name);
+      books.value = books.value.filter((item) => item.name !== book.name);
       notify(`已删除《${book.name}》本地内容`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "删除本地内容失败", "error");
+      notify(nativeErrorMessage(error, "删除本地内容失败"), "error");
     }
     confirmBook.value = undefined;
   }
@@ -158,7 +152,7 @@ export function useDeskLibrary({
       localBook.value = bookDetail;
       return bookDetail;
     } catch (error) {
-      notify(error instanceof Error ? error.message : "无法读取本地书籍详情", "error");
+      notify(nativeErrorMessage(error, "无法读取本地书籍详情"), "error");
       return undefined;
     }
   }
@@ -179,7 +173,7 @@ export function useDeskLibrary({
       localComicChapter.value = chapter;
       return chapter;
     } catch (error) {
-      notify(error instanceof Error ? error.message : "无法读取本地漫画章节", "error");
+      notify(nativeErrorMessage(error, "无法读取本地漫画章节"), "error");
     }
   }
 
@@ -195,7 +189,7 @@ export function useDeskLibrary({
       localChapter.value = chapter;
       return chapter;
     } catch (error) {
-      notify(error instanceof Error ? error.message : "无法读取本地章节", "error");
+      notify(nativeErrorMessage(error, "无法读取本地章节"), "error");
     }
   }
 
@@ -259,15 +253,10 @@ export function useDeskLibrary({
       );
       notify(`已导出到 ${result.href}`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "导出失败", "error");
+      notify(nativeErrorMessage(error, "导出失败"), "error");
     } finally {
       exportingFormat.value = undefined;
     }
-  }
-
-  function backFromLibraryDetail() {
-    const target = libraryDetailReturnView.value;
-    return target === "libraryDetail" ? "library" : target;
   }
 
   onMounted(() => {
@@ -275,7 +264,7 @@ export function useDeskLibrary({
   });
 
   return {
-    library,
+    books,
     libraryManaging,
     confirmBook,
     localBook,
@@ -296,6 +285,8 @@ export function useDeskLibrary({
     openLocalComicChapter,
     openLocalAudioPlayer,
     exportBook,
-    backFromLibraryDetail,
   };
 }
+
+/** 该域对外暴露的完整上下文；页面只应通过 `useLibrary` 取用。 */
+export type LibraryDesk = ReturnType<typeof createLibraryDesk>;
