@@ -4,8 +4,8 @@ use crate::adapters::sfacg::source::SfSource;
 use crate::adapters::storage::NativeStorage;
 use crate::application::catalog::CatalogService;
 use crate::domain::catalog::{
-    AudioCatalog, BookCommentPage, BookshelfCollection, ChapterVolume, ComicCatalog, DiscoverFeed,
-    NovelDetail, SearchNovel,
+    AudioCatalog, BookCommentPage, BookCommentReplyPage, BookshelfCollection, ChapterVolume,
+    ComicCatalog, DiscoverFeed, NovelDetail, SearchNovel,
 };
 use crate::domain::error::AppError;
 
@@ -87,6 +87,34 @@ pub(crate) async fn get_book_comments(
     let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
     CatalogService::new(&remote, &storage)
         .book_comments(&kind, novel_id, media_id, page, size, reviews)
+        .await
+        .map_err(AppError::into_message)
+}
+
+#[tauri::command]
+/// 读取一条评论的回复。
+///
+/// # 参数
+/// - `app`：Tauri 应用句柄。
+/// - `kind`：`novel`、`audio` 或 `comic`。
+/// - `comment_id`：评论编号。
+/// - `reviews`：true 时读取小说书评回复，否则读取普通评论回复。
+/// - `page`：从 0 开始的页码。
+/// - `size`：单页回复数量。
+///
+/// # 错误
+/// 类型或编号非法、初始化失败或上游请求失败时返回错误消息。
+pub(crate) async fn get_comment_replies(
+    app: tauri::AppHandle,
+    kind: String,
+    comment_id: i64,
+    reviews: bool,
+    page: i64,
+    size: i64,
+) -> Result<BookCommentReplyPage, String> {
+    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+    CatalogService::new(&remote, &storage)
+        .comment_replies(&kind, comment_id, reviews, page, size)
         .await
         .map_err(AppError::into_message)
 }

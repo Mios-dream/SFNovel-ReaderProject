@@ -2,8 +2,8 @@
 
 use crate::application::ports::{LibraryStore, RemoteGateway};
 use crate::domain::catalog::{
-    AudioCatalog, AudioChapterSummary, BookCommentPage, BookshelfCollection, ChapterVolume,
-    ComicCatalog, ComicChapterSummary, DiscoverFeed, NovelDetail, SearchNovel,
+    AudioCatalog, AudioChapterSummary, BookCommentPage, BookCommentReplyPage, BookshelfCollection,
+    ChapterVolume, ComicCatalog, ComicChapterSummary, DiscoverFeed, NovelDetail, SearchNovel,
 };
 use crate::domain::error::{AppError, AppResult};
 use crate::domain::ids::validate_novel_id;
@@ -81,6 +81,30 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
         }
         self.remote
             .book_comments(kind, novel_id, media_id, page, size, reviews)
+            .await
+    }
+
+    /// 读取评论回复。
+    pub(crate) async fn comment_replies(
+        &self,
+        kind: &str,
+        comment_id: i64,
+        reviews: bool,
+        page: i64,
+        size: i64,
+    ) -> AppResult<BookCommentReplyPage> {
+        validate_novel_id(comment_id).map_err(AppError::invalid_input)?;
+        if !(0..=100).contains(&page) {
+            return Err(AppError::invalid_input("回复页码无效"));
+        }
+        if !(1..=50).contains(&size) {
+            return Err(AppError::invalid_input("回复数量无效"));
+        }
+        if !matches!(kind, "novel" | "comic" | "audio") {
+            return Err(AppError::invalid_input("不支持的评论类型"));
+        }
+        self.remote
+            .comment_replies(kind, comment_id, reviews, page, size)
             .await
     }
 

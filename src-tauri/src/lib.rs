@@ -235,6 +235,7 @@ pub fn run() {
             commands::catalog::search_novels,
             commands::catalog::get_discover_feed,
             commands::catalog::get_book_comments,
+            commands::catalog::get_comment_replies,
             commands::catalog::get_novel_details,
             commands::catalog::get_audio_details,
             commands::catalog::get_chapter_volumes,

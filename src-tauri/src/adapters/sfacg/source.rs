@@ -12,8 +12,8 @@ use crate::application::ports::RemoteGateway;
 use crate::application::state::AuthSessionState;
 use crate::domain::auth::UserProfile;
 use crate::domain::catalog::{
-    AudioChapter, BookCommentPage, ChapterVolume, ComicChapter, DiscoverFeed, NovelDetail,
-    PublicShelf, SearchNovel,
+    AudioChapter, BookCommentPage, BookCommentReplyPage, ChapterVolume, ComicChapter, DiscoverFeed,
+    NovelDetail, PublicShelf, SearchNovel,
 };
 use crate::domain::content::{ApiChapterContent, ImageAsset, TextChapter, TextOrigin};
 use crate::domain::error::{AppError, AppResult};
@@ -124,6 +124,20 @@ impl SfSource {
     ) -> Result<BookCommentPage, String> {
         self.app_client
             .get_book_comments(kind, novel_id, media_id, page, size, reviews)
+            .await
+    }
+
+    /// 读取评论回复。
+    pub(crate) async fn comment_replies(
+        &self,
+        kind: &str,
+        comment_id: i64,
+        reviews: bool,
+        page: i64,
+        size: i64,
+    ) -> Result<BookCommentReplyPage, String> {
+        self.app_client
+            .get_comment_replies(kind, comment_id, reviews, page, size)
             .await
     }
 
@@ -509,6 +523,19 @@ impl RemoteGateway for SfSource {
         reviews: bool,
     ) -> AppResult<BookCommentPage> {
         SfSource::book_comments(self, kind, novel_id, media_id, page, size, reviews)
+            .await
+            .map_err(remote_error)
+    }
+
+    async fn comment_replies(
+        &self,
+        kind: &str,
+        comment_id: i64,
+        reviews: bool,
+        page: i64,
+        size: i64,
+    ) -> AppResult<BookCommentReplyPage> {
+        SfSource::comment_replies(self, kind, comment_id, reviews, page, size)
             .await
             .map_err(remote_error)
     }

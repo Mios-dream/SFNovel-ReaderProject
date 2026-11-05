@@ -123,6 +123,39 @@ pub(crate) struct BookCommentPage {
     pub(crate) has_more: bool,
 }
 
+/// 一条评论回复。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BookCommentReply {
+    /// 回复编号。
+    pub(crate) reply_id: i64,
+    /// 回复者显示名称。
+    pub(crate) user_name: String,
+    /// 回复者头像。
+    pub(crate) avatar: String,
+    /// 回复正文。
+    pub(crate) content: String,
+    /// 发表时间。
+    pub(crate) created_at: String,
+    /// 点赞数量。
+    pub(crate) like_count: i64,
+    /// 被回复者名称；直接回复评论时为空。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub(crate) replied_user_name: String,
+}
+
+/// 一页评论回复。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BookCommentReplyPage {
+    /// 当前页回复。
+    pub(crate) replies: Vec<BookCommentReply>,
+    /// 当前页码，从 0 开始。
+    pub(crate) page: i64,
+    /// 是否还有下一页。
+    pub(crate) has_more: bool,
+}
+
 /// 章节选择视图使用的公开作品详细元数据。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

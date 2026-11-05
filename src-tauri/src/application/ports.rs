@@ -3,8 +3,8 @@
 use crate::domain::auth::AuthSession;
 use crate::domain::auth::UserProfile;
 use crate::domain::catalog::{
-    AudioChapter, BookCommentPage, ChapterVolume, ComicChapter, DiscoverFeed, NovelDetail,
-    PublicShelf, SearchNovel,
+    AudioChapter, BookCommentPage, BookCommentReplyPage, ChapterVolume, ComicChapter, DiscoverFeed,
+    NovelDetail, PublicShelf, SearchNovel,
 };
 use crate::domain::content::{
     ApiChapterContent, OnlineAudioTrack, OnlineComicChapter, OnlineTextChapter,
@@ -36,6 +36,15 @@ pub(crate) trait RemoteGateway: Send + Sync {
         size: i64,
         reviews: bool,
     ) -> AppResult<BookCommentPage>;
+    /// 读取评论回复。
+    async fn comment_replies(
+        &self,
+        kind: &str,
+        comment_id: i64,
+        reviews: bool,
+        page: i64,
+        size: i64,
+    ) -> AppResult<BookCommentReplyPage>;
     /// 读取小说详情。
     async fn novel_detail(&self, novel_id: i64) -> AppResult<NovelDetail>;
     /// 读取有声专辑对应的作品详情。

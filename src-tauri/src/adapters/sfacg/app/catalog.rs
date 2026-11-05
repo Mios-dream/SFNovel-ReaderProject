@@ -2,8 +2,8 @@ use super::parse_detail::{detail_from_audio_payload, detail_from_novel_payload};
 use super::parsing::{json_bool_field, json_i64_field, json_text_field};
 use super::AppClient;
 use crate::domain::catalog::{
-    BookComment, BookCommentPage, DiscoverCategory, DiscoverFeed, NovelDetail, PublicShelf,
-    PublicShelfItem, SearchNovel,
+    BookComment, BookCommentPage, BookCommentReply, BookCommentReplyPage, DiscoverCategory,
+    DiscoverFeed, NovelDetail, PublicShelf, PublicShelfItem, SearchNovel,
 };
 use crate::domain::ids::validate_novel_id;
 use serde_json::Value;
@@ -308,6 +308,50 @@ impl AppClient {
         })
     }
 
+    /// 读取一条评论的回复。
+    pub(crate) async fn get_comment_replies(
+        &self,
+        kind: &str,
+        comment_id: i64,
+        reviews: bool,
+        page: i64,
+        size: i64,
+    ) -> Result<BookCommentReplyPage, String> {
+        if reviews && kind != "novel" {
+            return Ok(BookCommentReplyPage {
+                replies: Vec::new(),
+                page,
+                has_more: false,
+            });
+        }
+        let path = match kind {
+            "novel" if reviews => format!("/lcmts/{comment_id}/replys"),
+            "novel" => format!("/cmts/{comment_id}/replys"),
+            "audio" => format!("/albumcmts/{comment_id}/replys"),
+            "comic" => format!("/comiccmts/{comment_id}/replys"),
+            _ => return Err("不支持的评论类型".to_string()),
+        };
+        let response = self
+            .get_public_data(
+                &path,
+                &[("page", page.to_string()), ("size", size.to_string())],
+            )
+            .await?;
+        let items = response
+            .as_array()
+            .or_else(|| response.get("list").and_then(Value::as_array))
+            .or_else(|| response.get("replys").and_then(Value::as_array))
+            .or_else(|| response.get("replies").and_then(Value::as_array))
+            .cloned()
+            .unwrap_or_default();
+        let has_more = items.len() == size as usize;
+        Ok(BookCommentReplyPage {
+            replies: items.iter().filter_map(book_comment_reply).collect(),
+            page,
+            has_more,
+        })
+    }
+
     /// 读取小说首页使用的分类列表。
     async fn get_novel_categories(&self) -> Result<Vec<DiscoverCategory>, String> {
         let response = self.get_public_data("/noveltypes", &[]).await?;
@@ -427,6 +471,31 @@ fn book_comment(item: &Value) -> Option<BookComment> {
         is_stick: json_bool_field(item, &["isStick"]).unwrap_or(false),
         ext_type: json_i64_field(item, &["extType"]).unwrap_or(0),
         ticket_num: json_i64_field(item, &["ticketNum"]).unwrap_or(0),
+    })
+}
+
+/// 将评论回复对象转换为渲染层记录。
+fn book_comment_reply(item: &Value) -> Option<BookCommentReply> {
+    Some(BookCommentReply {
+        reply_id: json_i64_field(item, &["replyId", "cmtReplyId", "commentReplyId", "id"])
+            .filter(|id| *id > 0)?,
+        user_name: json_text_field(item, &["displayName", "nickName", "userName", "posterName"])
+            .unwrap_or_else(|| "SF 读者".to_string()),
+        avatar: json_text_field(item, &["avatar", "userAvatar"]).unwrap_or_default(),
+        content: json_text_field(item, &["content", "replyContent", "intro"])?,
+        created_at: json_text_field(item, &["createTime", "postTime", "replyTime"])
+            .unwrap_or_default(),
+        like_count: json_i64_field(item, &["favCount", "likeCount"]).unwrap_or(0),
+        replied_user_name: json_text_field(
+            item,
+            &[
+                "repliedUserName",
+                "repliedName",
+                "replyToUserName",
+                "toUserName",
+            ],
+        )
+        .unwrap_or_default(),
     })
 }
 

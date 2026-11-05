@@ -36,7 +36,7 @@ import { useBookDiscussions } from "../composables/useBookDiscussions";
 import { deskInjectionKey } from "../deskContext";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import { reportError } from "../composables/useToast";
-import type { Chapter, ChapterMode } from "../types";
+import type { BookComment, Chapter, ChapterMode } from "../types";
 
 function requireDesk() {
   const value = inject(deskInjectionKey);
@@ -279,6 +279,12 @@ function openComments() {
   void router.push({
     path: "/remote-book/comments",
     query: { tab: discussionTab.value },
+  });
+}
+function openComment(comment: BookComment) {
+  void router.push({
+    path: "/remote-book/comments",
+    query: { tab: discussionTab.value, comment: String(comment.commentId) },
   });
 }
 function openDownload() {
@@ -736,7 +742,9 @@ function groupChaptersByVolume(chapters: Chapter[]) {
             v-for="comment in discussionPreview"
             :key="comment.commentId"
             :comment="comment"
+            interactive
             compact
+            @select="openComment"
           />
         </div>
       </section>
@@ -1062,11 +1070,10 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   color: #b55437;
 }
 .discussion-preview {
+  display: grid;
   min-height: 228px;
-  border-top: 1px solid #eee5d9;
-}
-.discussion-preview :deep(.book-comment + .book-comment) {
-  border-top: 1px solid #f1eae3;
+  gap: 10px;
+  padding-top: 4px;
 }
 .discussion-state {
   display: flex;
@@ -1968,8 +1975,14 @@ function groupChaptersByVolume(chapters: Chapter[]) {
     min-height: 218px;
     border-top-color: #f0f0f0;
   }
-  .discussion-preview :deep(.book-comment + .book-comment) {
-    border-top-color: #f4f4f4;
+  .discussion-preview {
+    gap: 0;
+  }
+  .discussion-preview :deep(.book-comment) {
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .discussion-preview :deep(.book-comment:last-child) {
+    border-bottom: 0;
   }
   .summary-row {
     display: flex;

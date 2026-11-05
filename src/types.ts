@@ -75,6 +75,22 @@ export type BookCommentPage = {
   hasMore: boolean;
 };
 
+export type BookCommentReply = {
+  replyId: number;
+  userName: string;
+  avatar: string;
+  content: string;
+  createdAt: string;
+  likeCount: number;
+  repliedUserName?: string;
+};
+
+export type BookCommentReplyPage = {
+  replies: BookCommentReply[];
+  page: number;
+  hasMore: boolean;
+};
+
 export type Job = {
   id: string;
   title: string;
