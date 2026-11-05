@@ -17,11 +17,11 @@ import {
   ExternalLink,
   FileDown,
   Headphones,
+  Image as ImageIcon,
   Images,
   LibraryBig,
   ListTree,
   Play,
-  Disc3,
   Heart,
   Star,
   Ticket,
@@ -302,10 +302,10 @@ function hasCachedMedia(media: MediaType) {
 
 function mediaTitle(media: MediaType) {
   return media === "novel"
-    ? "小说原著"
+    ? "小说"
     : media === "audio"
-      ? "有声小说"
-      : "漫画改编";
+      ? "有声"
+      : "漫画";
 }
 
 function mediaDescription(media: MediaType) {
@@ -590,9 +590,7 @@ watch(
                 :class="{ finished: currentWork.isFinished }"
                 >{{ localStatusLabel }}</span
               >
-              <span v-if="currentWork.typeName"
-                >分类 · {{ currentWork.typeName }}</span
-              >
+              <span v-if="currentWork.typeName">{{ currentWork.typeName }}</span>
               <span v-for="tag in currentWork.tags" :key="tag">{{ tag }}</span>
             </div>
             <button
@@ -852,6 +850,28 @@ watch(
         </div>
       </section>
 
+      <section class="format-switches" aria-label="内容类型">
+        <button
+          v-for="media in mobileSwitchMediaTypes"
+          :key="media"
+          class="format-switch glass"
+          :class="`${media}-switch`"
+          :disabled="!hasCachedMedia(media)"
+          @click="selectMobileMedia(media)"
+        >
+          <span class="format-icon">
+            <BookOpen v-if="media === 'novel'" :size="23" />
+            <Headphones v-else-if="media === 'audio'" :size="23" />
+            <ImageIcon v-else :size="23" />
+          </span>
+          <span class="format-copy"
+            ><strong>{{ mediaTitle(media) }}</strong
+            ><small>{{ mediaDescription(media) }}</small></span
+          >
+          <ChevronRight :size="19" />
+        </button>
+      </section>
+
       <section
         v-if="
           localStatusLabel || currentWork.typeName || currentWork.tags.length
@@ -865,32 +885,10 @@ watch(
           :class="{ finished: currentWork.isFinished }"
           >{{ localStatusLabel }}</span
         >
-        <span v-if="currentWork.typeName" class="category-tag"
-          >分类 · {{ currentWork.typeName }}</span
-        >
+        <span v-if="currentWork.typeName" class="category-tag">{{
+          currentWork.typeName
+        }}</span>
         <span v-for="tag in currentWork.tags" :key="tag">{{ tag }}</span>
-      </section>
-
-      <section class="format-switches" aria-label="内容类型">
-        <button
-          v-for="media in mobileSwitchMediaTypes"
-          :key="media"
-          class="format-switch glass"
-          :class="`${media}-switch`"
-          :disabled="!hasCachedMedia(media)"
-          @click="selectMobileMedia(media)"
-        >
-          <span class="format-icon">
-            <BookOpen v-if="media === 'novel'" :size="23" />
-            <Disc3 v-else-if="media === 'audio'" :size="23" />
-            <Images v-else :size="23" />
-          </span>
-          <span class="format-copy"
-            ><strong>{{ mediaTitle(media) }}</strong
-            ><small>{{ mediaDescription(media) }}</small></span
-          >
-          <ChevronRight :size="19" />
-        </button>
       </section>
 
       <section class="book-intro" aria-labelledby="book-intro-title">
@@ -924,39 +922,9 @@ watch(
         </span>
         <ChevronRight :size="17" />
       </button>
-
-      <section class="support-actions" aria-label="本地作品操作">
-        <button @click="openDirectory()">
-          <ListTree :size="17" />已下载目录
-        </button>
-        <button
-          v-if="currentWork.id && selectedMediaType !== 'audio'"
-          @click="desk.startOnlineFromLibrary(selectedMediaType)"
-        >
-          <ExternalLink :size="17" />在线阅读
-        </button>
-        <button
-          v-if="currentWork.id"
-          @click="desk.continueDownload(selectedMediaType)"
-        >
-          <Download :size="17" />补充下载
-        </button>
-        <button
-          :disabled="Boolean(exporting) || !canExportCurrentMedia"
-          @click="exportCurrentMedia"
-        >
-          <FileDown :size="17" />{{
-            exporting ? "正在导出" : exportActionLabel
-          }}
-        </button>
-      </section>
     </section>
 
-    <nav
-      class="mobile-reading-bar"
-      :class="{ 'without-download': !currentWork.id }"
-      aria-label="阅读操作"
-    >
+    <nav class="mobile-reading-bar" aria-label="阅读操作">
       <button class="directory-action" @click="openDirectory()">
         <ListTree :size="21" /><span>目录</span>
       </button>
@@ -973,7 +941,7 @@ watch(
         :title="exportActionLabel"
         @click="exportCurrentMedia"
       >
-        <FileDown :size="21" /><span>{{ exportActionLabel }}</span>
+        <FileDown :size="21" /><span>导出</span>
       </button>
       <button
         v-if="currentWork.id && selectedMediaType !== 'audio'"
@@ -1008,8 +976,9 @@ watch(
         <div class="drawer-handle" aria-hidden="true" />
         <header class="drawer-heading">
           <div>
-            <small>已下载内容</small>
-            <h3 id="directory-title">本地目录</h3>
+            <h3 id="directory-title">
+              {{ mediaTitle(selectedMediaType) }}目录
+            </h3>
           </div>
           <button title="关闭目录" @click="directoryOpen = false">
             <X :size="20" />
@@ -1140,7 +1109,6 @@ watch(
 .format-switch,
 .desktop-primary-actions button,
 .desktop-secondary-actions button,
-.support-actions button,
 .drawer-heading button,
 .drawer-tabs button,
 .comic-unavailable button,
@@ -1989,7 +1957,8 @@ watch(
 @media (max-width: 900px) {
   .detail-page {
     min-height: 100dvh;
-    background: var(--background-color);
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+    background: #fff;
   }
 
   .book-hero {
@@ -2114,13 +2083,16 @@ watch(
     display: block;
     width: 100%;
     margin-top: -31px;
-    padding: 25px 20px 30px;
+    padding: 25px 20px 18px;
+    border: 0;
     border-radius: 28px 28px 0 0;
-    box-shadow: 0 -8px 30px rgba(55, 49, 41, 0.1);
-    padding-bottom: 50px;
-    background: rgba(255, 255, 255, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.8);
-    box-shadow: 0 15px 38px rgba(137, 76, 55, 0.12);
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.58) 0,
+      rgba(255, 255, 255, 0.82) 22px,
+      #fff 31px
+    );
+    box-shadow: none;
     backdrop-filter: blur(19px);
     -webkit-backdrop-filter: blur(19px);
   }
@@ -2174,42 +2146,39 @@ watch(
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    padding-top: 17px;
+    gap: 6px;
   }
 
   .mobile-book-tags span {
     display: inline-flex;
-    min-height: 27px;
+    min-height: 24px;
     align-items: center;
     max-width: 100%;
-    padding: 0 10px;
+    padding: 0 8px;
     overflow: hidden;
-    border: 1px solid #e6dfcf;
+    border: 0;
     border-radius: 999px;
-    color: #746b60;
-    background: #f8f5eb;
-    font-size: 11px;
+    color: #483f39;
+    background: #f4f4f4;
+    font-size: 12px;
     line-height: 1;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .mobile-book-tags .status-tag {
-    border-color: #e86e4c;
     color: #fff;
     background: #e86e4c;
   }
 
   .mobile-book-tags .status-tag.finished {
-    border-color: #6f9f88;
-    background: #6f9f88;
+    color: #483f39;
+    background: #f0f0f0;
   }
 
   .mobile-book-tags .category-tag {
-    border-color: #d9c5e8;
-    color: #806192;
-    background: #f5eef9;
+    color: #483f39;
+    background: #f4f4f4;
   }
 
   .format-switches {
@@ -2232,14 +2201,6 @@ watch(
     color: #4f4940;
     box-shadow: 0 10px 22px rgba(85, 73, 53, 0.1);
     text-align: left;
-    transition:
-      transform 0.2s ease,
-      box-shadow 0.2s ease;
-  }
-
-  .format-switch:hover:not(:disabled) {
-    box-shadow: 0 13px 25px rgba(85, 73, 53, 0.16);
-    transform: translateY(-1px);
   }
 
   .format-switch:disabled {
@@ -2274,7 +2235,6 @@ watch(
 
   .format-copy strong {
     font-size: 14px;
-    letter-spacing: 0;
   }
 
   .format-copy small {
@@ -2289,7 +2249,6 @@ watch(
   .audio-switch .format-icon {
     color: #79470a;
     background: rgba(255, 244, 205, 0.65);
-    box-shadow: inset 0 1px rgba(255, 255, 255, 0.7);
   }
 
   .audio-switch .format-copy small,
@@ -2305,7 +2264,6 @@ watch(
   .novel-switch .format-icon {
     color: #236c91;
     background: rgba(239, 250, 255, 0.72);
-    box-shadow: inset 0 1px rgba(255, 255, 255, 0.78);
   }
 
   .novel-switch .format-copy small,
@@ -2321,7 +2279,6 @@ watch(
   .comic-switch .format-icon {
     color: #604a91;
     background: rgba(246, 240, 255, 0.64);
-    box-shadow: inset 0 1px rgba(255, 255, 255, 0.74);
   }
 
   .comic-switch .format-copy small,
@@ -2340,6 +2297,10 @@ watch(
     padding: 20px 0 19px;
     border-top: 1px solid #e8e2d3;
     border-bottom: 1px solid #e8e2d3;
+  }
+
+  .mobile-book-tags + .book-intro {
+    margin-top: 19px;
   }
 
   .section-title {
@@ -2388,27 +2349,29 @@ watch(
   .mobile-latest-chapter {
     display: flex;
     width: 100%;
-    min-height: 54px;
+    min-height: 44px;
     align-items: center;
-    gap: 9px;
-    margin-top: 15px;
-    padding: 0 14px;
-    border-radius: 16px;
-    color: #756c61;
-    /* background: #f1eee3; */
-    background: rgba(250, 250, 250, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    backdrop-filter: blur(13px);
-    box-shadow: 0 4px 12px rgba(85, 73, 53, 0.08);
+    gap: 8px;
+    margin-top: 12px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 12px;
+    color: #444;
+    background: #f4f4f4;
+    box-shadow: none;
     text-align: left;
   }
 
   .latest-badge {
-    padding: 6px 8px;
-    border-radius: 14px;
+    display: inline-flex;
+    height: 20px;
+    align-items: center;
+    padding: 0 8px;
+    border-radius: 999px;
     color: #fff;
     background: #e86e4c;
-    font-size: 10px;
+    font-size: 12px;
+    font-weight: 500;
     white-space: nowrap;
   }
 
@@ -2423,7 +2386,8 @@ watch(
   .latest-copy strong {
     min-width: 0;
     overflow: hidden;
-    font-size: 12px;
+    color: #808080;
+    font-size: 13px;
     font-weight: 500;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2431,17 +2395,13 @@ watch(
 
   .latest-copy small {
     flex: 0 0 auto;
-    color: #a29889;
-    font-size: 10px;
+    color: #777;
+    font-size: 12px;
   }
 
   .mobile-latest-chapter > svg {
     flex: 0 0 auto;
-    color: #a39a8a;
-  }
-
-  .support-actions {
-    display: none;
+    color: #8a8a8a;
   }
 
   .mobile-reading-bar {
@@ -2455,19 +2415,15 @@ watch(
     gap: 6px;
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
     border-top: 1px solid #e9dfd0;
-    background: rgba(255, 253, 248, 0.97);
+    background: #fff;
     box-shadow: 0 -7px 22px rgba(58, 48, 38, 0.1);
-    backdrop-filter: blur(13px);
-  }
-
-  .mobile-reading-bar.without-download {
-    gap: 6px;
+    backdrop-filter: none;
   }
 
   .directory-action {
     display: flex;
     min-height: 48px;
-    flex: 0 0 52px;
+    flex: 0 0 48px;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -2476,7 +2432,8 @@ watch(
     border: 0;
     color: #625a4e;
     background: transparent;
-    font-size: 10px;
+    font: inherit;
+    font-size: 12px;
   }
 
   .directory-action:disabled {
@@ -2492,7 +2449,7 @@ watch(
     justify-content: center;
     gap: 6px;
     border: 0;
-    border-radius: 14px;
+    border-radius: 999px;
     color: #fff;
     background: #eb6545;
     box-shadow: 0 5px 13px rgba(207, 91, 62, 0.25);

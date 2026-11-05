@@ -12,7 +12,8 @@ use crate::application::ports::RemoteGateway;
 use crate::application::state::AuthSessionState;
 use crate::domain::auth::UserProfile;
 use crate::domain::catalog::{
-    AudioChapter, ChapterVolume, ComicChapter, NovelDetail, PublicShelf, SearchNovel,
+    AudioChapter, BookCommentPage, ChapterVolume, ComicChapter, DiscoverFeed, NovelDetail,
+    PublicShelf, SearchNovel,
 };
 use crate::domain::content::{ApiChapterContent, ImageAsset, TextChapter, TextOrigin};
 use crate::domain::error::{AppError, AppResult};
@@ -104,6 +105,26 @@ impl SfSource {
     /// 搜索小说、有声与漫画。
     pub(crate) async fn search(&self, query: &str) -> Result<Vec<SearchNovel>, String> {
         self.app_client.search_novels(query).await
+    }
+
+    /// 读取首页发现数据。
+    pub(crate) async fn discover(&self, type_id: Option<i64>) -> Result<DiscoverFeed, String> {
+        self.app_client.get_discover_feed(type_id).await
+    }
+
+    /// 读取作品公开评论。
+    pub(crate) async fn book_comments(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+        page: i64,
+        size: i64,
+        reviews: bool,
+    ) -> Result<BookCommentPage, String> {
+        self.app_client
+            .get_book_comments(kind, novel_id, media_id, page, size, reviews)
+            .await
     }
 
     /// 读取小说详情。
@@ -470,6 +491,26 @@ fn remote_error(message: String) -> AppError {
 impl RemoteGateway for SfSource {
     async fn search(&self, query: &str) -> AppResult<Vec<SearchNovel>> {
         SfSource::search(self, query).await.map_err(remote_error)
+    }
+
+    async fn discover(&self, type_id: Option<i64>) -> AppResult<DiscoverFeed> {
+        SfSource::discover(self, type_id)
+            .await
+            .map_err(remote_error)
+    }
+
+    async fn book_comments(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+        page: i64,
+        size: i64,
+        reviews: bool,
+    ) -> AppResult<BookCommentPage> {
+        SfSource::book_comments(self, kind, novel_id, media_id, page, size, reviews)
+            .await
+            .map_err(remote_error)
     }
 
     async fn novel_detail(&self, novel_id: i64) -> AppResult<NovelDetail> {

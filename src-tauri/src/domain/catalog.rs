@@ -3,7 +3,7 @@
 use serde::{Serialize, Serializer};
 
 /// 搜索命令返回给渲染进程的一条公开作品记录。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SearchNovel {
     /// 小说编号。
@@ -28,6 +28,99 @@ pub(crate) struct SearchNovel {
     /// 漫画来源目录标识。
     #[serde(rename = "sourcePath", skip_serializing_if = "Option::is_none")]
     pub(crate) source_path: Option<String>,
+    /// 作品简介。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) description: Option<String>,
+    /// 作品分类编号。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) type_id: Option<i64>,
+    /// 作品是否已完结。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) is_finish: Option<bool>,
+    /// 作品评分。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) score: Option<f64>,
+    /// 浏览次数。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) view_count: Option<i64>,
+    /// 收藏或点赞次数。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) mark_count: Option<i64>,
+    /// 正文字数。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) character_count: Option<i64>,
+    /// 最新章节标题。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) latest_chapter_title: Option<String>,
+}
+
+/// 首页分类筛选项。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DiscoverCategory {
+    /// 分类编号。
+    pub(crate) type_id: i64,
+    /// 分类名称。
+    pub(crate) type_name: String,
+}
+
+/// 首页一次返回的推荐、排行、更新和分类数据。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DiscoverFeed {
+    /// 首页主推作品。
+    pub(crate) featured: Option<SearchNovel>,
+    /// 本周热门排行。
+    pub(crate) ranking: Vec<SearchNovel>,
+    /// 最近更新作品。
+    pub(crate) recent: Vec<SearchNovel>,
+    /// 可选分类。
+    pub(crate) categories: Vec<DiscoverCategory>,
+}
+
+/// 小说、漫画或有声作品的一条公开评论。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BookComment {
+    /// 评论编号。
+    pub(crate) comment_id: i64,
+    /// 书评标题；普通评论为空。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub(crate) title: String,
+    /// 评论者显示名称。
+    pub(crate) user_name: String,
+    /// 评论者头像。
+    pub(crate) avatar: String,
+    /// 评论正文。
+    pub(crate) content: String,
+    /// 发表时间。
+    pub(crate) created_at: String,
+    /// 回复数量。
+    pub(crate) reply_count: i64,
+    /// 点赞数量。
+    pub(crate) like_count: i64,
+    /// 评论者头衔。
+    pub(crate) role_name: String,
+    /// 是否为置顶评论。
+    pub(crate) is_stick: bool,
+    /// 上游互动消息类型；普通评论为 0。
+    pub(crate) ext_type: i64,
+    /// 月票数量或打赏火券数量。
+    pub(crate) ticket_num: i64,
+}
+
+/// 一页公开评论。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BookCommentPage {
+    /// 当前页评论。
+    pub(crate) comments: Vec<BookComment>,
+    /// 打赏、月票等互动消息。
+    pub(crate) highlights: Vec<BookComment>,
+    /// 当前页码，从 0 开始。
+    pub(crate) page: i64,
+    /// 是否还有下一页。
+    pub(crate) has_more: bool,
 }
 
 /// 章节选择视图使用的公开作品详细元数据。

@@ -2,8 +2,8 @@
 
 use crate::application::ports::{LibraryStore, RemoteGateway};
 use crate::domain::catalog::{
-    AudioCatalog, AudioChapterSummary, BookshelfCollection, ChapterVolume, ComicCatalog,
-    ComicChapterSummary, NovelDetail, SearchNovel,
+    AudioCatalog, AudioChapterSummary, BookCommentPage, BookshelfCollection, ChapterVolume,
+    ComicCatalog, ComicChapterSummary, DiscoverFeed, NovelDetail, SearchNovel,
 };
 use crate::domain::error::{AppError, AppResult};
 use crate::domain::ids::validate_novel_id;
@@ -42,6 +42,46 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
             return Err(AppError::invalid_input("搜索关键词不能超过 100 个字符"));
         }
         self.remote.search(query).await
+    }
+
+    /// 读取首页发现数据。
+    pub(crate) async fn discover(&self, type_id: Option<i64>) -> AppResult<DiscoverFeed> {
+        if let Some(type_id) = type_id {
+            validate_novel_id(type_id).map_err(AppError::invalid_input)?;
+        }
+        self.remote.discover(type_id).await
+    }
+
+    /// 读取指定作品类型的公开评论。
+    pub(crate) async fn book_comments(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+        page: i64,
+        size: i64,
+        reviews: bool,
+    ) -> AppResult<BookCommentPage> {
+        validate_novel_id(novel_id).map_err(AppError::invalid_input)?;
+        if !(0..=100).contains(&page) {
+            return Err(AppError::invalid_input("评论页码无效"));
+        }
+        if !(1..=50).contains(&size) {
+            return Err(AppError::invalid_input("评论数量无效"));
+        }
+        match kind {
+            "novel" | "comic" => {}
+            "audio" => {
+                validate_novel_id(
+                    media_id.ok_or_else(|| AppError::invalid_input("有声作品缺少专辑编号"))?,
+                )
+                .map_err(AppError::invalid_input)?;
+            }
+            _ => return Err(AppError::invalid_input("不支持的评论类型")),
+        }
+        self.remote
+            .book_comments(kind, novel_id, media_id, page, size, reviews)
+            .await
     }
 
     /// 读取小说详情。
@@ -228,6 +268,7 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
                 bookshelf_name: Some(category),
                 bookshelf_type: Some(record.kind.to_string()),
                 source_path: record.source_path,
+                ..SearchNovel::default()
             });
         }
         items.sort_by_key(|item| match item.bookshelf_type.as_deref() {

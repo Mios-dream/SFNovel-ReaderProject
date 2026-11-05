@@ -1,7 +1,10 @@
 use super::parse_detail::{detail_from_audio_payload, detail_from_novel_payload};
-use super::parsing::{json_i64_field, json_text_field};
+use super::parsing::{json_bool_field, json_i64_field, json_text_field};
 use super::AppClient;
-use crate::domain::catalog::{NovelDetail, PublicShelf, PublicShelfItem, SearchNovel};
+use crate::domain::catalog::{
+    BookComment, BookCommentPage, DiscoverCategory, DiscoverFeed, NovelDetail, PublicShelf,
+    PublicShelfItem, SearchNovel,
+};
 use crate::domain::ids::validate_novel_id;
 use serde_json::Value;
 
@@ -176,67 +179,149 @@ impl AppClient {
             let Some(items) = response.get(key).and_then(Value::as_array) else {
                 continue;
             };
-            for item in items {
-                let Some(novel_id) = item
-                    .get("novelId")
-                    .or_else(|| item.get("comicId"))
-                    .and_then(Value::as_i64)
-                else {
-                    continue;
-                };
-                results.push(SearchNovel {
-                    novel_id,
-                    media_id: match kind {
-                        "audio" => item.get("albumId").and_then(Value::as_i64),
-                        "comic" => item.get("comicId").and_then(Value::as_i64),
-                        _ => None,
-                    },
-                    novel_name: item
-                        .get("novelName")
-                        .or_else(|| item.get("comicName"))
-                        .or_else(|| item.get("name"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("未命名作品")
-                        .to_string(),
-                    author_name: item
-                        .get("authorName")
-                        .and_then(Value::as_str)
-                        .unwrap_or("未知作者")
-                        .to_string(),
-                    novel_cover: item
-                        .get("novelCover")
-                        .or_else(|| item.get("coverBig"))
-                        .or_else(|| item.get("comicCover"))
-                        .or_else(|| item.get("coverMedium"))
-                        .or_else(|| item.get("coverSmall"))
-                        .or_else(|| item.get("cover"))
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    last_update_time: item
-                        .get("lastUpdateTime")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    bookshelf_name: None,
-                    bookshelf_type: Some(kind.to_string()),
-                    source_path: (kind == "comic")
-                        .then(|| {
-                            item.get("folderName")
-                                .or_else(|| item.get("sourcePath"))
-                                .and_then(Value::as_str)
-                                .filter(|value| {
-                                    !value.is_empty()
-                                        && value.len() <= 100
-                                        && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
-                                })
-                                .map(str::to_string)
-                        })
-                        .flatten(),
-                });
-            }
+            results.extend(items.iter().filter_map(|item| search_novel(item, kind)));
         }
         Ok(results)
+    }
+
+    /// 读取首页主推、分类、本周排行和最近更新。
+    pub(crate) async fn get_discover_feed(
+        &self,
+        type_id: Option<i64>,
+    ) -> Result<DiscoverFeed, String> {
+        let categories = self.get_novel_categories().await?;
+        let mut ranking_query = vec![
+            ("page", "0".to_string()),
+            ("size", "7".to_string()),
+            ("expand", "intro".to_string()),
+        ];
+        if let Some(type_id) = type_id {
+            ranking_query.push(("typeId", type_id.to_string()));
+        }
+        let ranking_payload = self
+            .get_public_data("/ranks/week/novels", &ranking_query)
+            .await?;
+        let ranking = ranking_payload
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| search_novel(item, "novel"))
+            .collect::<Vec<_>>();
+
+        let mut recent_query = vec![
+            ("page", "0".to_string()),
+            ("size", "9".to_string()),
+            ("expand", "intro".to_string()),
+        ];
+        if let Some(type_id) = type_id {
+            recent_query.push(("tid", type_id.to_string()));
+        }
+        let recent_payload = self.get_public_data("/novels", &recent_query).await?;
+        let recent = recent_payload
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| search_novel(item, "novel"))
+            .collect::<Vec<_>>();
+
+        let featured = ranking.first().cloned().or_else(|| recent.first().cloned());
+        let ranking = ranking.into_iter().skip(1).take(5).collect();
+        Ok(DiscoverFeed {
+            featured,
+            ranking,
+            recent,
+            categories,
+        })
+    }
+
+    /// 读取小说、漫画或有声作品的公开评论。
+    pub(crate) async fn get_book_comments(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+        page: i64,
+        size: i64,
+        reviews: bool,
+    ) -> Result<BookCommentPage, String> {
+        if reviews && kind != "novel" {
+            return Ok(BookCommentPage {
+                comments: Vec::new(),
+                highlights: Vec::new(),
+                page,
+                has_more: false,
+            });
+        }
+        let path = match kind {
+            "novel" if reviews => format!("/novels/{novel_id}/lcmts"),
+            "novel" => format!("/novels/{novel_id}/Cmts"),
+            "audio" => format!(
+                "/albums/{}/albumcmts",
+                media_id.ok_or_else(|| "有声作品缺少专辑编号".to_string())?
+            ),
+            "comic" => format!("/comics/{novel_id}/comiccmts"),
+            _ => return Err("不支持的评论类型".to_string()),
+        };
+        let mut comments = Vec::new();
+        let mut highlights: Vec<BookComment> = Vec::new();
+        let mut source_page = page;
+        let mut has_more = false;
+        for _ in 0..10 {
+            let response = self
+                .get_public_data(
+                    &path,
+                    &[
+                        ("page", source_page.to_string()),
+                        ("size", size.to_string()),
+                    ],
+                )
+                .await?;
+            let items = response.as_array().cloned().unwrap_or_default();
+            let received = items.len();
+            for item in &items {
+                let Some(comment) = book_comment(item) else {
+                    continue;
+                };
+                if !reviews && comment.ext_type != 0 {
+                    if highlights.len() < 12
+                        && highlights
+                            .iter()
+                            .all(|item| item.comment_id != comment.comment_id)
+                    {
+                        highlights.push(comment);
+                    }
+                } else {
+                    comments.push(comment);
+                }
+            }
+            has_more = received == size as usize;
+            source_page += 1;
+            if reviews || comments.len() >= size as usize || !has_more {
+                break;
+            }
+        }
+        Ok(BookCommentPage {
+            has_more,
+            comments,
+            highlights,
+            page: source_page - 1,
+        })
+    }
+
+    /// 读取小说首页使用的分类列表。
+    async fn get_novel_categories(&self) -> Result<Vec<DiscoverCategory>, String> {
+        let response = self.get_public_data("/noveltypes", &[]).await?;
+        Ok(response
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| {
+                Some(DiscoverCategory {
+                    type_id: json_i64_field(item, &["typeId"]).filter(|id| *id > 0)?,
+                    type_name: json_text_field(item, &["typeName"])?,
+                })
+            })
+            .collect())
     }
 
     /// 读取并解析公开小说详情。
@@ -271,6 +356,78 @@ impl AppClient {
             .await?;
         Ok(detail_from_audio_payload(&detail, novel_id))
     }
+}
+
+/// 将搜索或首页接口中的作品对象转换为统一记录。
+fn search_novel(item: &Value, kind: &str) -> Option<SearchNovel> {
+    let novel_id = if kind == "comic" {
+        json_i64_field(item, &["comicId"])
+    } else {
+        json_i64_field(item, &["novelId"])
+    }
+    .filter(|id| *id > 0)?;
+    Some(SearchNovel {
+        novel_id,
+        media_id: match kind {
+            "audio" => json_i64_field(item, &["albumId"]),
+            "comic" => Some(novel_id),
+            _ => None,
+        },
+        novel_name: json_text_field(item, &["novelName", "comicName", "name"])
+            .unwrap_or_else(|| "未命名作品".to_string()),
+        author_name: json_text_field(item, &["authorName", "author"])
+            .unwrap_or_else(|| "未知作者".to_string()),
+        novel_cover: json_text_field(
+            item,
+            &[
+                "novelCover",
+                "coverBig",
+                "comicCover",
+                "coverMedium",
+                "coverSmall",
+                "cover",
+            ],
+        )
+        .unwrap_or_default(),
+        last_update_time: json_text_field(item, &["lastUpdateTime"]).unwrap_or_default(),
+        bookshelf_name: None,
+        bookshelf_type: Some(kind.to_string()),
+        source_path: (kind == "comic")
+            .then(|| json_text_field(item, &["folderName", "sourcePath"]))
+            .flatten()
+            .filter(|value| {
+                !value.is_empty()
+                    && value.len() <= 100
+                    && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            }),
+        description: json_text_field(item, &["intro", "description"]),
+        type_id: json_i64_field(item, &["typeId"]),
+        is_finish: json_bool_field(item, &["isFinish", "isFinished"]),
+        score: item.get("point").and_then(Value::as_f64),
+        view_count: json_i64_field(item, &["viewTimes", "visitTimes"]),
+        mark_count: json_i64_field(item, &["markCount"]),
+        character_count: json_i64_field(item, &["charCount"]),
+        latest_chapter_title: json_text_field(item, &["latestChapterTitle"]),
+    })
+}
+
+/// 将公开评论对象转换为渲染层记录。
+fn book_comment(item: &Value) -> Option<BookComment> {
+    Some(BookComment {
+        comment_id: json_i64_field(item, &["commentId", "lcmtId", "id"]).filter(|id| *id > 0)?,
+        title: json_text_field(item, &["title", "subject"]).unwrap_or_default(),
+        user_name: json_text_field(item, &["displayName", "nickName", "userName", "posterName"])
+            .unwrap_or_else(|| "SF 读者".to_string()),
+        avatar: json_text_field(item, &["avatar", "userAvatar"]).unwrap_or_default(),
+        content: json_text_field(item, &["content", "intro"])?,
+        created_at: json_text_field(item, &["createTime", "postTime"]).unwrap_or_default(),
+        reply_count: json_i64_field(item, &["replyNum", "replyCount"]).unwrap_or(0),
+        like_count: json_i64_field(item, &["favCount", "likeCount"]).unwrap_or(0),
+        role_name: json_text_field(item, &["roleName"]).unwrap_or_default(),
+        is_stick: json_bool_field(item, &["isStick"]).unwrap_or(false),
+        ext_type: json_i64_field(item, &["extType"]).unwrap_or(0),
+        ticket_num: json_i64_field(item, &["ticketNum"]).unwrap_or(0),
+    })
 }
 
 /// 将 `/user/Pockets` 响应转换为书架分类与条目。

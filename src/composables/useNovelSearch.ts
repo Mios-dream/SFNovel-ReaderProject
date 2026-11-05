@@ -30,5 +30,12 @@ export function useNovelSearch({ refreshAuthStatus, notify }: UseNovelSearchOpti
     }
   }
 
-  return { query, results, loading, searched, search };
+  function clearSearch() {
+    query.value = "";
+    results.value = [];
+    loading.value = false;
+    searched.value = false;
+  }
+
+  return { query, results, loading, searched, search, clearSearch };
 }

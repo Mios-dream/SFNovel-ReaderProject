@@ -3,7 +3,8 @@
 use crate::domain::auth::AuthSession;
 use crate::domain::auth::UserProfile;
 use crate::domain::catalog::{
-    AudioChapter, ChapterVolume, ComicChapter, NovelDetail, PublicShelf, SearchNovel,
+    AudioChapter, BookCommentPage, ChapterVolume, ComicChapter, DiscoverFeed, NovelDetail,
+    PublicShelf, SearchNovel,
 };
 use crate::domain::content::{
     ApiChapterContent, OnlineAudioTrack, OnlineComicChapter, OnlineTextChapter,
@@ -23,6 +24,18 @@ use std::collections::{HashMap, HashSet};
 pub(crate) trait RemoteGateway: Send + Sync {
     /// 搜索公开作品。
     async fn search(&self, query: &str) -> AppResult<Vec<SearchNovel>>;
+    /// 读取首页推荐、排行、最近更新与分类。
+    async fn discover(&self, type_id: Option<i64>) -> AppResult<DiscoverFeed>;
+    /// 读取小说、漫画或有声作品的公开评论。
+    async fn book_comments(
+        &self,
+        kind: &str,
+        novel_id: i64,
+        media_id: Option<i64>,
+        page: i64,
+        size: i64,
+        reviews: bool,
+    ) -> AppResult<BookCommentPage>;
     /// 读取小说详情。
     async fn novel_detail(&self, novel_id: i64) -> AppResult<NovelDetail>;
     /// 读取有声专辑对应的作品详情。

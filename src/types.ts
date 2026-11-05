@@ -41,6 +41,40 @@ export type Novel = {
   latestChapterTime?: string;
 };
 
+export type DiscoverCategory = {
+  typeId: number;
+  typeName: string;
+};
+
+export type DiscoverFeed = {
+  featured?: Novel;
+  ranking: Novel[];
+  recent: Novel[];
+  categories: DiscoverCategory[];
+};
+
+export type BookComment = {
+  commentId: number;
+  title?: string;
+  userName: string;
+  avatar: string;
+  content: string;
+  createdAt: string;
+  replyCount: number;
+  likeCount: number;
+  roleName: string;
+  isStick: boolean;
+  extType?: number;
+  ticketNum?: number;
+};
+
+export type BookCommentPage = {
+  comments: BookComment[];
+  highlights?: BookComment[];
+  page: number;
+  hasMore: boolean;
+};
+
 export type Job = {
   id: string;
   title: string;

@@ -22,11 +22,17 @@ import {
   LoaderCircle,
   ListTree,
   LockKeyholeOpen,
+  MessageCircle,
   Play,
   Star,
   Ticket,
   X,
 } from "@lucide/vue";
+import { useRouter } from "vue-router";
+import BookCommentCard from "../components/BookCommentCard.vue";
+import DiscussionDanmaku from "../components/DiscussionDanmaku.vue";
+import DiscussionTabs from "../components/DiscussionTabs.vue";
+import { useBookDiscussions } from "../composables/useBookDiscussions";
 import { deskInjectionKey } from "../deskContext";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import { reportError } from "../composables/useToast";
@@ -39,11 +45,20 @@ function requireDesk() {
 }
 
 const desk = requireDesk();
+const router = useRouter();
 const novel = computed(() => desk.remoteBook.value);
 type RemoteMediaType = "novel" | "audio" | "comic";
 const mediaTypes: RemoteMediaType[] = ["novel", "audio", "comic"];
 const descriptionExpanded = ref(false);
 const descriptionModalOpen = ref(false);
+const {
+  activeTab: discussionTab,
+  current: discussion,
+  preview: discussionPreview,
+  highlights: discussionHighlights,
+  selectTab: selectDiscussionTab,
+  reload: reloadDiscussion,
+} = useBookDiscussions(novel, 6);
 const mode = computed<ChapterMode>(() =>
   novel.value?.bookshelfType === "audio"
     ? "audio"
@@ -259,6 +274,12 @@ const bookFacts = computed(() => {
 
 function goBack() {
   desk.closeRemoteBookDetail();
+}
+function openComments() {
+  void router.push({
+    path: "/remote-book/comments",
+    query: { tab: discussionTab.value },
+  });
 }
 function openDownload() {
   if (novel.value) void desk.openChapterPicker(novel.value, mode.value);
@@ -683,6 +704,42 @@ function groupChaptersByVolume(chapters: Chapter[]) {
       </button>
     </section>
     <section ref="directoryElement" class="remote-lower-content">
+      <section class="book-discussion" aria-label="读者反馈">
+        <DiscussionDanmaku :items="discussionHighlights" />
+        <header class="discussion-heading">
+          <DiscussionTabs
+            :model-value="discussionTab"
+            @update:model-value="selectDiscussionTab"
+          />
+          <button class="all-comments" @click="openComments">
+            全部评论<ChevronRight :size="15" />
+          </button>
+        </header>
+
+        <div v-if="discussion.loading" class="discussion-state">
+          <LoaderCircle class="spin" :size="22" />
+          {{ discussionTab === "reviews" ? "正在读取书评" : "正在读取评论" }}
+        </div>
+        <div
+          v-else-if="discussion.error && !discussion.items.length"
+          class="discussion-state error"
+        >
+          <span>{{ discussion.error }}</span>
+          <button @click="reloadDiscussion">重试</button>
+        </div>
+        <div v-else-if="!discussion.items.length" class="discussion-state">
+          <MessageCircle :size="22" />
+          {{ discussionTab === "reviews" ? "暂无书评" : "暂无评论" }}
+        </div>
+        <div v-else class="discussion-preview">
+          <BookCommentCard
+            v-for="comment in discussionPreview"
+            :key="comment.commentId"
+            :comment="comment"
+            compact
+          />
+        </div>
+      </section>
       <section
         class="remote-directory-panel glass"
         aria-labelledby="remote-directory-title"
@@ -978,6 +1035,64 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   gap: 16px;
   margin: 0 auto 42px;
 }
+.book-discussion {
+  min-width: 0;
+  padding: 2px 0 6px;
+}
+.discussion-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+}
+.all-comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0 4px 8px;
+  border: 0;
+  color: #9c7464;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  transition: color 160ms ease;
+}
+.all-comments:hover {
+  color: #b55437;
+}
+.discussion-preview {
+  min-height: 228px;
+  border-top: 1px solid #eee5d9;
+}
+.discussion-preview :deep(.book-comment + .book-comment) {
+  border-top: 1px solid #f1eae3;
+}
+.discussion-state {
+  display: flex;
+  min-height: 228px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-top: 1px solid #eee5d9;
+  color: #a17d70;
+  font-size: 13px;
+}
+.discussion-state.error {
+  flex-direction: column;
+  color: #ad6654;
+  text-align: center;
+}
+.discussion-state button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #e7c6b5;
+  border-radius: 8px;
+  color: #a75b40;
+  background: rgba(255, 250, 246, 0.78);
+  font: inherit;
+  font-size: 12px;
+}
 .remote-latest-panel,
 .remote-directory-panel {
   min-width: 0;
@@ -1060,7 +1175,7 @@ function groupChaptersByVolume(chapters: Chapter[]) {
 .remote-volume-heading {
   display: block;
   height: 40px;
-  margin: 0;
+  margin-bottom: 8px;
   padding: 0;
   overflow: hidden;
   color: #9b7b6c;
@@ -1215,6 +1330,15 @@ function groupChaptersByVolume(chapters: Chapter[]) {
 @media (min-width: 901px) {
   .detail-page {
     min-height: 100dvh;
+  }
+  .book-discussion {
+    padding: 20px 22px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    border-radius: 17px;
+    background: rgba(255, 255, 255, 0.55);
+    box-shadow: 0 15px 38px rgba(137, 76, 55, 0.12);
+    backdrop-filter: blur(19px);
+    -webkit-backdrop-filter: blur(19px);
   }
   .book-hero {
     min-height: 76px;
@@ -1626,12 +1750,11 @@ function groupChaptersByVolume(chapters: Chapter[]) {
 }
 @media (max-width: 900px) {
   .detail-page {
-    width: calc(100% + 24px);
-    margin: calc(-1 * (8px + env(safe-area-inset-top))) -12px
-      calc(-78px - env(safe-area-inset-bottom));
+    width: 100%;
+    margin: 0;
     min-height: 100dvh;
     padding-bottom: calc(34px + env(safe-area-inset-bottom));
-    background: var(--background-color);
+    background: #fff;
   }
   .book-hero {
     height: clamp(286px, 78vw, 360px);
@@ -1813,6 +1936,12 @@ function groupChaptersByVolume(chapters: Chapter[]) {
     background: rgba(246, 240, 255, 0.64);
   }
   .remote-lower-content {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0 20px calc(40px + env(safe-area-inset-bottom));
+  }
+  .remote-directory-panel {
     display: none;
   }
   .book-detail-sheet {
@@ -1821,12 +1950,26 @@ function groupChaptersByVolume(chapters: Chapter[]) {
     display: block;
     width: 100%;
     margin-top: -31px;
-    padding: 25px 20px 116px;
-    border: 1px solid rgba(255, 255, 255, 0.8);
+    padding: 25px 20px 18px;
+    border: 0;
     border-radius: 28px 28px 0 0;
-    background: rgba(255, 255, 255, 0.55);
-    box-shadow: 0 15px 38px rgba(137, 76, 55, 0.12);
-    backdrop-filter: blur(19px);
+    background: #fff;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  .book-discussion {
+    padding-bottom: 0;
+  }
+  .discussion-heading {
+    padding: 2px 0 8px;
+  }
+  .discussion-preview,
+  .discussion-state {
+    min-height: 218px;
+    border-top-color: #f0f0f0;
+  }
+  .discussion-preview :deep(.book-comment + .book-comment) {
+    border-top-color: #f4f4f4;
   }
   .summary-row {
     display: flex;
@@ -1866,38 +2009,34 @@ function groupChaptersByVolume(chapters: Chapter[]) {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    padding-top: 17px;
+    gap: 6px;
   }
   .mobile-book-tags span {
     display: inline-flex;
-    min-height: 27px;
+    min-height: 24px;
     align-items: center;
     max-width: 100%;
-    padding: 0 10px;
+    padding: 0 8px;
     overflow: hidden;
-    border: 1px solid #e6dfcf;
+    border: 0;
     border-radius: 999px;
-    color: #746b60;
-    background: #f8f5eb;
-    font-size: 11px;
+    color: #483f39;
+    background: #f4f4f4;
+    font-size: 12px;
     line-height: 1;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .mobile-book-tags .status-tag {
-    border-color: #e86e4c;
     color: #fff;
     background: #e86e4c;
   }
   .mobile-book-tags .status-tag.finished {
-    border-color: #6f9f88;
-    background: #6f9f88;
+    background: #f0f0f0;
   }
   .mobile-book-tags .category-tag {
-    border-color: #d9c5e8;
-    color: #806192;
-    background: #f5eef9;
+    color: #483f39;
+    background: #f4f4f4;
   }
   .book-intro {
     padding: 20px 0 19px;
@@ -1948,24 +2087,28 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   .mobile-latest-chapter {
     display: flex;
     width: 100%;
-    min-height: 54px;
+    min-height: 44px;
     align-items: center;
-    gap: 9px;
-    margin-top: 15px;
-    padding: 0 14px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 16px;
-    color: #756c61;
-    background: rgba(250, 250, 250, 0.5);
-    box-shadow: 0 4px 12px rgba(85, 73, 53, 0.08);
+    gap: 8px;
+    margin-top: 12px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 12px;
+    color: #444;
+    background: #f4f4f4;
+    box-shadow: none;
     text-align: left;
   }
   .latest-badge {
-    padding: 6px 8px;
-    border-radius: 14px;
+    display: inline-flex;
+    height: 20px;
+    align-items: center;
+    padding: 0 8px;
+    border-radius: 999px;
     color: #fff;
     background: #e86e4c;
-    font-size: 10px;
+    font-size: 12px;
+    font-weight: 500;
     white-space: nowrap;
   }
   .latest-copy {
@@ -1978,19 +2121,20 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   .latest-copy strong {
     min-width: 0;
     overflow: hidden;
-    font-size: 12px;
+    color: #808080;
+    font-size: 13px;
     font-weight: 500;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .latest-copy small {
     flex: 0 0 auto;
-    color: #a29889;
-    font-size: 10px;
+    color: #777;
+    font-size: 12px;
   }
   .mobile-latest-chapter > svg {
     flex: 0 0 auto;
-    color: #a39a8a;
+    color: #8a8a8a;
   }
   .mobile-reading-bar {
     position: fixed;
@@ -2003,9 +2147,9 @@ function groupChaptersByVolume(chapters: Chapter[]) {
     gap: 6px;
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
     border-top: 1px solid #e9dfd0;
-    background: rgba(255, 253, 248, 0.97);
+    background: #fff;
     box-shadow: 0 -7px 22px rgba(58, 48, 38, 0.1);
-    backdrop-filter: blur(13px);
+    backdrop-filter: none;
   }
   .directory-action {
     display: flex;

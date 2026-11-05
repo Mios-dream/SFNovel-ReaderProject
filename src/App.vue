@@ -32,12 +32,16 @@ watch(
     ) {
       void router.push(`/library/${encodeURIComponent(desk.localBook.name)}`);
     }
-    if (view === "remoteDetail" && route.path !== "/remote-book")
+    if (
+      view === "remoteDetail" &&
+      route.path !== "/remote-book" &&
+      route.path !== "/remote-book/comments"
+    )
       void router.push("/remote-book");
     if (
       (view === "discover" || view === "bookshelf" || view === "library") &&
       (route.path.startsWith("/library/") ||
-        route.path === "/remote-book" ||
+        route.path.startsWith("/remote-book") ||
         route.path === "/reader" ||
         route.path === "/comic-reader" ||
         route.path === "/audio")

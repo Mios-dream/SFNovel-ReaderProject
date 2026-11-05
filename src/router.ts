@@ -7,6 +7,7 @@ import LibraryPage from "./pages/LibraryPage.vue";
 import LocalBookDetailPage from "./pages/LocalBookDetailPage.vue";
 import ReaderPage from "./pages/ReaderPage.vue";
 import RemoteBookDetailPage from "./pages/RemoteBookDetailPage.vue";
+import RemoteBookCommentsPage from "./pages/RemoteBookCommentsPage.vue";
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -15,6 +16,7 @@ export const router = createRouter({
     { path: "/discover", component: DiscoverPage },
     { path: "/bookshelf", component: BookshelfPage },
     { path: "/remote-book", component: RemoteBookDetailPage },
+    { path: "/remote-book/comments", component: RemoteBookCommentsPage },
     { path: "/library", component: LibraryPage },
     { path: "/library/:name", component: LocalBookDetailPage },
     { path: "/reader", component: ReaderPage },

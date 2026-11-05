@@ -4,7 +4,8 @@ use crate::adapters::sfacg::source::SfSource;
 use crate::adapters::storage::NativeStorage;
 use crate::application::catalog::CatalogService;
 use crate::domain::catalog::{
-    AudioCatalog, BookshelfCollection, ChapterVolume, ComicCatalog, NovelDetail, SearchNovel,
+    AudioCatalog, BookCommentPage, BookshelfCollection, ChapterVolume, ComicCatalog, DiscoverFeed,
+    NovelDetail, SearchNovel,
 };
 use crate::domain::error::AppError;
 
@@ -36,6 +37,56 @@ pub(crate) async fn search_novels(
     let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
     CatalogService::new(&remote, &storage)
         .search(&query)
+        .await
+        .map_err(AppError::into_message)
+}
+
+#[tauri::command]
+/// 读取首页推荐、分类、排行和最近更新。
+///
+/// # 参数
+/// - `app`：Tauri 应用句柄。
+/// - `type_id`：可选的分类编号。
+///
+/// # 错误
+/// 分类编号非法、初始化失败或上游请求失败时返回错误消息。
+pub(crate) async fn get_discover_feed(
+    app: tauri::AppHandle,
+    type_id: Option<i64>,
+) -> Result<DiscoverFeed, String> {
+    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+    CatalogService::new(&remote, &storage)
+        .discover(type_id)
+        .await
+        .map_err(AppError::into_message)
+}
+
+#[tauri::command]
+/// 读取小说、漫画或有声作品的公开评论。
+///
+/// # 参数
+/// - `app`：Tauri 应用句柄。
+/// - `kind`：`novel`、`audio` 或 `comic`。
+/// - `novel_id`：小说编号；漫画使用漫画编号。
+/// - `media_id`：有声专辑编号。
+/// - `page`：从 0 开始的页码。
+/// - `size`：单页评论数量。
+/// - `reviews`：true 时读取小说书评，否则读取普通评论。
+///
+/// # 错误
+/// 类型或编号非法、初始化失败或上游请求失败时返回错误消息。
+pub(crate) async fn get_book_comments(
+    app: tauri::AppHandle,
+    kind: String,
+    novel_id: i64,
+    media_id: Option<i64>,
+    page: i64,
+    size: i64,
+    reviews: bool,
+) -> Result<BookCommentPage, String> {
+    let (remote, storage) = service_parts(&app).await.map_err(AppError::into_message)?;
+    CatalogService::new(&remote, &storage)
+        .book_comments(&kind, novel_id, media_id, page, size, reviews)
         .await
         .map_err(AppError::into_message)
 }

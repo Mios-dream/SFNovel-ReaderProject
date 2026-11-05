@@ -233,6 +233,8 @@ pub fn run() {
             commands::library::get_content_dictionary,
             commands::library::update_content_dictionary,
             commands::catalog::search_novels,
+            commands::catalog::get_discover_feed,
+            commands::catalog::get_book_comments,
             commands::catalog::get_novel_details,
             commands::catalog::get_audio_details,
             commands::catalog::get_chapter_volumes,
