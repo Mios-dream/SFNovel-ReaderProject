@@ -17,6 +17,8 @@ jobs:
   desktop:
     name: Build Windows
     runs-on: windows-latest
+    outputs:
+      release-id: ${{ steps.bundles.outputs.releaseId }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -75,6 +77,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and upload Windows bundles
+        id: bundles
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -82,7 +85,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Novel Flow ${{ github.ref_name }}
           releaseBody: ${{ steps.template.outputs.body }}
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
 
   android:
@@ -158,15 +161,27 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          releaseId: ${{ needs.desktop.outputs.release-id }}
           mobile: android
           args: --apk --target aarch64
           tagName: ${{ github.ref_name }}
           releaseName: Novel Flow ${{ github.ref_name }}
           releaseBody: ${{ steps.template.outputs.body }}
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
 
       - name: Remove signing files
         if: always()
         shell: bash
         run: rm -f src-tauri/gen/android/keystore.properties src-tauri/gen/android/sf-novel-flow-release.jks
+
+  publish:
+    name: Publish Release
+    needs: [desktop, android]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.desktop.outputs.release-id }}
+        run: gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false
