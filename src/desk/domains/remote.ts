@@ -57,6 +57,18 @@ function remoteFavoriteKey(novel: Novel) {
 }
 
 /**
+ * 详情页作品与书架条目的 bookshelfType 可能不一致（详情来自搜索或推荐时通常缺失）。
+ * 只按类型键匹配会把已在书架的书判成未收藏，因此额外保存一个只依赖编号的兜底键。
+ */
+function remoteFavoriteIdKey(novel: Novel) {
+  return `${novel.novelId}:${novel.mediaId || ""}`;
+}
+
+function remoteFavoriteAliases(novel: Novel) {
+  return [remoteFavoriteKey(novel), remoteFavoriteIdKey(novel)];
+}
+
+/**
  * 远端详情会话。
  *
  * 负责单次进入详情页期间的作品、媒体变体、收藏状态与请求去重。会话有明确生命
@@ -78,6 +90,7 @@ export function createRemoteDesk({
   const detailCache = new Map<string, Novel>();
   const detailRequests = new Map<string, Promise<Novel>>();
   let favoritesRequest: Promise<void> | undefined;
+  let favoritesGeneration = 0;
 
   /** 会话是否处于活动状态；与路由无关，进入/离开时显式维护。 */
   let sessionActive = false;
@@ -88,40 +101,60 @@ export function createRemoteDesk({
     return sessionActive;
   }
 
+  function hasRemoteFavorite(novel: Novel) {
+    return remoteFavoriteAliases(novel).some((key) =>
+      remoteFavoriteKeys.value.has(key),
+    );
+  }
+
   function isRemoteFavorite(novel?: Novel) {
-    return novel
-      ? remoteFavoriteKeys.value.has(remoteFavoriteKey(novel))
-      : false;
+    return novel ? hasRemoteFavorite(novel) : false;
   }
 
   function isRemoteFavoriteLoading(novel?: Novel) {
     return !!novel && remoteFavoriteLoading.value === remoteFavoriteKey(novel);
   }
 
-  function loadRemoteFavorites() {
-    if (!auth.value.appAuthenticated)
-      return favoritesRequest ?? Promise.resolve();
-    if (favoritesRequest) return favoritesRequest;
-    favoritesRequest = (async () => {
+  /**
+   * 从服务端书架重建收藏态。
+   *
+   * 书架是唯一真相：每次都整体替换，避免旧的收藏键残留。官方移出书架接口
+   * 实时生效，写操作完成后强制回读一次即可得到最终状态，界面无需再维护
+   * 任何本地状态。
+   *
+   * 不用前端 auth 快照短路：它与后端实际会话可能不同步，若快照滞后会让按钮
+   * 永远显示「未收藏」，而后端写接口却认为作品已在书架。
+   */
+  function loadRemoteFavorites(forceRefresh = false) {
+    if (!forceRefresh && favoritesRequest) return favoritesRequest;
+    const currentGeneration = ++favoritesGeneration;
+    const request = (async () => {
       try {
         const response = await invoke<{ items: Novel[] }>("get_bookshelf", {
-          forceRefresh: false,
+          forceRefresh,
         });
+        // 并发回读时只认最后一次结果，避免旧请求的书架快照覆盖新状态。
+        if (currentGeneration !== favoritesGeneration) return;
+        const keys = new Set<string>();
         for (const item of response.items)
-          remoteFavoriteKeys.value.add(remoteFavoriteKey(item));
-      } catch {
-        // 未登录或书架读取失败时保持未收藏状态。
-      } finally {
-        favoritesRequest = undefined;
+          for (const alias of remoteFavoriteAliases(item)) keys.add(alias);
+        remoteFavoriteKeys.value = keys;
+      } catch (error) {
+        // 读取失败时保留上一次结果：清空会把已收藏误显示为未收藏。
+        console.error("[SF Novel Flow] 读取书架失败", error);
       }
     })();
-    return favoritesRequest;
+    const pending = request.finally(() => {
+      if (favoritesRequest === pending) favoritesRequest = undefined;
+    });
+    favoritesRequest = pending;
+    return pending;
   }
 
   async function toggleRemoteFavorite(novel: Novel) {
     const key = remoteFavoriteKey(novel);
     if (remoteFavoriteLoading.value) return;
-    const favorited = remoteFavoriteKeys.value.has(key);
+    const favorited = hasRemoteFavorite(novel);
     remoteFavoriteLoading.value = key;
     try {
       await invoke(
@@ -132,15 +165,13 @@ export function createRemoteDesk({
           mediaId: novel.mediaId,
         },
       );
-      if (favorited) {
-        remoteFavoriteKeys.value.delete(key);
-        notify("已取消收藏");
-      } else {
-        remoteFavoriteKeys.value.add(key);
-        notify("已收藏");
-      }
+      // 写操作实时生效；强制回读后按钮与书架页同时切到最终状态。
+      await loadRemoteFavorites(true);
       void refreshBookshelf();
+      notify(favorited ? "已取消收藏" : "已收藏");
     } catch (error) {
+      // 失败时同样回读，避免把过期状态一直留在界面上。
+      void loadRemoteFavorites(true);
       notify(
         nativeErrorMessage(error, favorited ? "取消收藏失败" : "收藏失败"),
         "error",

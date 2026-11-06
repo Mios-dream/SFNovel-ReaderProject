@@ -458,7 +458,7 @@ GET /search/hotwords?searchtype=...&page=0&size=20
 |  37 | `orderComicChaps`                         | 购买漫画章节                   | `POST /comics/{id}/orderedchaps`       | id:路径:long; Body:Map<String,Object>                                                                                          | {"chapIds":[123],"orderAll":false,"autoOrder":false,"useCoupon":false} |
 |  38 | `postComicCmtsReplys`                     | 回复漫画评论                   | `POST /comiccmts/{id}/replys`          | id:路径:long; Body:Map<String,Object>                                                                                          | {"content":"回复内容","repliedReplyID":0}                              |
 |  39 | `postComicsCmts`                          | 发表漫画评论                   | `POST /comics/{id}/comiccmts`          | id:路径:long; Body:Map<String,Object>                                                                                          | {"content":"评论内容"}                                                 |
-|  40 | `postComicsFavs`                          | 收藏漫画                       | `POST /comics/{id}/favs`               | id:路径:long                                                                                                                   | -                                                                      |
+|  40 | `postComicsFavs`                          | 点赞漫画                       | `POST /comics/{id}/favs`               | id:路径:long                                                                                                                   | -                                                                      |
 |  41 | `postComicsPoints`                        | 提交漫画点数                   | `POST /comics/{id}/points`             | id:路径:long; Body:Map<String,Object>                                                                                          | JSON 对象；具体字段按 App 调用点填写                                   |
 |  42 | `updateComicAutoOrder`                    | 更新漫画自动订购               | `PUT /user/orderedcomics/{id}`         | id:路径:long; Body:Map<String,Object>                                                                                          | JSON 对象；具体字段按 App 调用点填写                                   |
 |  43 | `updateComicVisits`                       | 更新漫画浏览                   | `PUT /user/comicvisits/{id}`           | id:路径:long; Body:Map<String,Object>                                                                                          | JSON 对象；具体字段按 App 调用点填写                                   |
@@ -786,24 +786,24 @@ GET /search/hotwords?searchtype=...&page=0&size=20
 
 口袋分组及其中小说、漫画、有声内容的增删改查。
 
-|   # | 方法                        | 作用               | 请求                                 | 参数                                         | 请求体                               |
-| --: | --------------------------- | ------------------ | ------------------------------------ | -------------------------------------------- | ------------------------------------ |
-|   1 | `addAlbum2Pocket`           | 将有声专辑加入口袋 | `POST /pockets/{pocketId}/albums`    | pocketId:路径:long; Body:Map<String,Object>  | JSON 对象；具体字段按 App 调用点填写 |
-|   2 | `addComic2Pocket`           | 将漫画加入口袋     | `POST /pockets/{pocketId}/comics`    | pocketId:路径:long; Body:Map<String,Object>  | JSON 对象；具体字段按 App 调用点填写 |
-|   3 | `addNovel2Pocket`           | 将小说加入口袋     | `POST /pockets/{pocketId}/novels`    | pocketId:路径:long; Body:Map<String,Object>  | JSON 对象；具体字段按 App 调用点填写 |
-|   4 | `createPocket`              | 创建口袋分组       | `POST /user/Pockets`                 | Body:Map<String,Object>                      | JSON 对象；具体字段按 App 调用点填写 |
-|   5 | `deleteAlbumsInPocket`      | 删除有声专辑口袋   | `DELETE /pockets/{pid}/albums/{id}`  | pid:路径:long; id:路径:long                  | -                                    |
-|   6 | `deleteComicsInUserPockets` | 删除漫画用户口袋   | `DELETE /user/pockets/comic/{id}`    | id:路径:long                                 | -                                    |
-|   7 | `deleteNovelInPocket`       | 删除小说口袋       | `DELETE /pockets/{pid}/novels/{nid}` | pid:路径:long; nid:路径:long                 | -                                    |
-|   8 | `deleteNovelsInUserPockets` | 删除小说用户口袋   | `DELETE /user/pockets/novels/{nid}`  | nid:路径:long                                | -                                    |
-|   9 | `deletePocket`              | 删除口袋分组       | `DELETE /user/Pockets/{pid}`         | pid:路径:long                                | -                                    |
-|  10 | `deletePocketsEntities`     | 删除口袋实体       | `DELETE /user/pockets/entities`      | Body:Map<String,Object>                      | JSON 对象；具体字段按 App 调用点填写 |
-|  11 | `deletecComicInPocket`      | 删除漫画口袋       | `DELETE /pockets/{pid}/comics/{id}`  | pid:路径:long; id:路径:long                  | -                                    |
-|  12 | `getUserPockets`            | 获取用户口袋分组   | `GET /user/Pockets`                  | expand:查询:String                           | -                                    |
-|  13 | `getUserPockets`            | 获取用户口袋分组   | `GET /user/Pockets`                  | expand:查询:String; isMoeBattle:查询:boolean | -                                    |
-|  14 | `movePocketsEntities`       | 移动口袋实体       | `PUT /user/pockets/entities/{pid}`   | pid:路径:long; Body:Map<String,Object>       | JSON 对象；具体字段按 App 调用点填写 |
-|  15 | `updatePocket`              | 修改口袋分组       | `PUT /user/Pockets/{pocketId}`       | pocketId:路径:long; Body:Map<String,Object>  | JSON 对象；具体字段按 App 调用点填写 |
-|  16 | `updateProductSticky`       | 更新商品置顶       | `PUT /user/pockets/entities`         | Body:Map<String,Object>                      | JSON 对象；具体字段按 App 调用点填写 |
+|   # | 方法                        | 作用               | 请求                                 | 参数                                         | 请求体                                  |
+| --: | --------------------------- | ------------------ | ------------------------------------ | -------------------------------------------- | --------------------------------------- |
+|   1 | `addAlbum2Pocket`           | 将有声专辑加入口袋 | `POST /pockets/{pocketId}/albums`    | pocketId:路径:long; Body:Map<String,Object>  | JSON 对象；具体字段按 App 调用点填写    |
+|   2 | `addComic2Pocket`           | 将漫画加入口袋     | `POST /pockets/{pocketId}/comics`    | pocketId:路径:long; Body:Map<String,Object>  | JSON 对象；具体字段按 App 调用点填写    |
+|   3 | `addNovel2Pocket`           | 将小说加入口袋     | `POST /pockets/{pocketId}/novels`    | pocketId:路径:long; Body:Map<String,Object>  | JSON 对象；具体字段按 App 调用点填写    |
+|   4 | `createPocket`              | 创建口袋分组       | `POST /user/Pockets`                 | Body:Map<String,Object>                      | JSON 对象；具体字段按 App 调用点填写    |
+|   5 | `deleteAlbumsInPocket`      | 删除有声专辑口袋   | `DELETE /pockets/{pid}/albums/{id}`  | pid:路径:long; id:路径:long                  | -                                       |
+|   6 | `deleteComicsInUserPockets` | 删除漫画用户口袋   | `DELETE /user/pockets/comic/{id}`    | id:路径:long                                 | -                                       |
+|   7 | `deleteNovelInPocket`       | 删除小说口袋       | `DELETE /pockets/{pid}/novels/{nid}` | pid:路径:long; nid:路径:long                 | -                                       |
+|   8 | `deleteNovelsInUserPockets` | 删除小说用户口袋   | `DELETE /user/pockets/novels/{nid}`  | nid:路径:long                                | -                                       |
+|   9 | `deletePocket`              | 删除口袋分组       | `DELETE /user/Pockets/{pid}`         | pid:路径:long                                | -                                       |
+|  10 | `deletePocketsEntities`     | 移出书架（官方）   | `DELETE /user/pockets/entities`      | Body: `eids`:String, `tid`:int               | `{"eids":"779775","tid":2}`；见下方实测 |
+|  11 | `deletecComicInPocket`      | 删除漫画口袋       | `DELETE /pockets/{pid}/comics/{id}`  | pid:路径:long; id:路径:long                  | -                                       |
+|  12 | `getUserPockets`            | 获取用户口袋分组   | `GET /user/Pockets`                  | expand:查询:String                           | -                                       |
+|  13 | `getUserPockets`            | 获取用户口袋分组   | `GET /user/Pockets`                  | expand:查询:String; isMoeBattle:查询:boolean | -                                       |
+|  14 | `movePocketsEntities`       | 移动口袋实体       | `PUT /user/pockets/entities/{pid}`   | pid:路径:long; Body:Map<String,Object>       | JSON 对象；具体字段按 App 调用点填写    |
+|  15 | `updatePocket`              | 修改口袋分组       | `PUT /user/Pockets/{pocketId}`       | pocketId:路径:long; Body:Map<String,Object>  | JSON 对象；具体字段按 App 调用点填写    |
+|  16 | `updateProductSticky`       | 更新商品置顶       | `PUT /user/pockets/entities`         | Body:Map<String,Object>                      | JSON 对象；具体字段按 App 调用点填写    |
 
 ### SignApi（签到与抽奖，8 个）
 

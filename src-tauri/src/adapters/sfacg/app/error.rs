@@ -77,6 +77,18 @@ impl AppApiError {
         code == Some(401) && self.api_error_code != Some(507)
     }
 
+    /// 判断失败是否表示作品已经在书架（口袋）中。
+    ///
+    /// 上游对重复加入返回 422/505「当前分类已经有该作品，不能添加」。对收藏而言
+    /// 这与成功等价：目标状态已经达成，不该把「已收藏」显示为失败。
+    pub(crate) fn is_already_in_pocket(&self) -> bool {
+        self.api_error_code == Some(505)
+            || self
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("已经有该作品"))
+    }
+
     /// 判断失败是否表示接口只对官方客户端开放。
     ///
     /// 实测该拦截只取决于请求头里的 App 版本串，接口地址和参数都与官方客户端一致，
@@ -177,5 +189,44 @@ impl From<AppApiError> for AppError {
             ErrorKind::Upstream
         };
         AppError::new(kind, error.describe(""))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppApiError;
+    use serde_json::json;
+
+    #[test]
+    fn recognizes_duplicate_pocket_entry_as_idempotent_success() {
+        let error = AppApiError::from_response(
+            422,
+            &json!({
+                "status": {
+                    "httpCode": 422,
+                    "errorCode": 505,
+                    "msg": "当前分类已经有该作品,不能添加"
+                }
+            }),
+        );
+        assert!(error.is_already_in_pocket());
+    }
+
+    #[test]
+    fn recognizes_duplicate_without_error_code() {
+        let error = AppApiError::from_response(
+            422,
+            &json!({ "status": { "httpCode": 422, "msg": "当前分类已经有该作品" } }),
+        );
+        assert!(error.is_already_in_pocket());
+    }
+
+    #[test]
+    fn does_not_swallow_other_upstream_failures() {
+        let error = AppApiError::from_response(
+            404,
+            &json!({ "status": { "httpCode": 404, "errorCode": 404, "msg": "资源不存在" } }),
+        );
+        assert!(!error.is_already_in_pocket());
     }
 }

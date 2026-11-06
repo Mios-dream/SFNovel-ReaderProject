@@ -1,5 +1,4 @@
 use super::super::device::{device_profile, update_device_profile, DeviceProfile};
-use crate::domain::error::AppResult;
 use super::cache;
 use super::constants::{
     APP_ACCEPT, COMIC_ANONYMOUS_DEVICE_ID, SF_API_HOST, SF_API_PASSWORD, SF_API_USER,
@@ -8,6 +7,7 @@ use super::error::AppApiError;
 use super::signing::security_header;
 use crate::adapters::sfacg::cookie::{filter_cookie_header, has_cookie_name};
 use crate::adapters::sfacg::http;
+use crate::domain::error::AppResult;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
@@ -95,7 +95,11 @@ impl AppClient {
         device: &DeviceProfile,
     ) -> Result<reqwest::RequestBuilder, AppApiError> {
         let nonce = Uuid::new_v4().to_string().to_uppercase();
-        let has_json_body = method == reqwest::Method::POST || method == reqwest::Method::PUT;
+        // 官方移出书架接口 `DELETE /user/pockets/entities` 带 JSON 请求体，
+        // 所以 DELETE 同样需要 application/json 头。
+        let has_json_body = method == reqwest::Method::POST
+            || method == reqwest::Method::PUT
+            || method == reqwest::Method::DELETE;
         let mut request = self
             .client
             .request(method, format!("{SF_API_HOST}{path}"))
@@ -205,6 +209,13 @@ impl AppClient {
         Ok(data)
     }
 
+    /// 只让指定 GET 请求的进程内缓存失效，不重新请求也不写回缓存。
+    ///
+    /// 收藏写操作之后调用：下一次读取会重新请求上游，不会继续用五分钟前的快照。
+    pub(crate) fn invalidate_get(&self, path: &str, query: &[(&str, String)]) {
+        cache::remove(&self.cache_key(path, query, true));
+    }
+
     /// 请求 App API 资源，并保留可分类的上游失败信息。
     pub(crate) async fn get_data_typed(
         &self,
@@ -283,6 +294,23 @@ impl AppClient {
             .and_then(|value| value.parse::<i64>().ok()))
     }
 
+    /// 判断上游响应是否真的成功。
+    ///
+    /// 除 HTTP 状态外还要检查 `status.httpCode` 与 `status.errorCode`：上游可能用
+    /// HTTP 200 包装业务失败，只看 HTTP 状态会把「删除未生效」当成成功。
+    fn is_successful_response(http_status: u16, body: &Value) -> bool {
+        let status = body.get("status");
+        let api_http_code = status
+            .and_then(|value| value.get("httpCode"))
+            .and_then(Value::as_i64);
+        let api_error_code = status
+            .and_then(|value| value.get("errorCode"))
+            .and_then(Value::as_i64);
+        (200..300).contains(&http_status)
+            && api_http_code.is_none_or(|code| (200..300).contains(&code))
+            && api_error_code.is_none_or(|code| code < 400)
+    }
+
     /// 解析 App API 响应：成功时拆出 `data`，失败时保留可分类的上游状态。
     async fn parse_response(response: reqwest::Response, path: &str) -> Result<Value, AppApiError> {
         let http_status = response.status().as_u16();
@@ -302,13 +330,7 @@ impl AppClient {
                 message: Some(format!("SF App 响应格式无效：{error}")),
             })?
         };
-        let api_http_code = body
-            .get("status")
-            .and_then(|value| value.get("httpCode"))
-            .and_then(Value::as_i64);
-        let successful = (200..300).contains(&http_status)
-            && api_http_code.is_none_or(|code| (200..300).contains(&code));
-        if !successful {
+        if !Self::is_successful_response(http_status, &body) {
             let error = AppApiError::from_response(http_status, &body);
             log_debug!(
                 "[sfacg] App request rejected: path={path}, http={http_status}, api_code={:?}, error_code={:?}",
@@ -361,15 +383,18 @@ impl AppClient {
         Self::parse_response(response, path).await
     }
 
-    /// 发送已签名 DELETE 请求，并接受空响应体。
-    pub(crate) async fn delete_data(&self, path: &str) -> Result<(), AppApiError> {
+    /// 发送已签名的 DELETE 请求；官方移出书架接口需要 JSON 请求体。
+    ///
+    /// 上游对不存在的实体或错误的 `tid` 也可能返回 200 成功信封，因此这里只按
+    /// 统一规则校验 HTTP 状态与业务状态码，删除是否生效仍由调用方回读书架确认。
+    pub(crate) async fn delete_data(&self, path: &str, body: &Value) -> Result<(), AppApiError> {
         let response = self
             .signed_request(reqwest::Method::DELETE, path, true)?
+            .json(body)
             .send()
             .await
             .map_err(AppApiError::transport)?;
-        Self::parse_response(response, path).await?;
-        Ok(())
+        Self::parse_response(response, path).await.map(|_| ())
     }
 
     /// 发送不带 App 会话的 JSON POST 请求，用于冷启动设备登记。
@@ -391,5 +416,42 @@ impl AppClient {
             .await
             .map_err(AppApiError::transport)?;
         Self::parse_response(response, path).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppClient;
+    use serde_json::json;
+
+    #[test]
+    fn accepts_successful_app_envelope() {
+        assert!(AppClient::is_successful_response(
+            200,
+            &json!({
+                "status": { "httpCode": 200, "errorCode": 200, "msg": "cost0=1.0" },
+                "data": []
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_business_failure_wrapped_in_http_200() {
+        assert!(!AppClient::is_successful_response(
+            200,
+            &json!({
+                "status": { "httpCode": 200, "errorCode": 505, "msg": "删除失败" }
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_http_failure_and_accepts_empty_response() {
+        assert!(!AppClient::is_successful_response(404, &json!({})));
+        assert!(!AppClient::is_successful_response(
+            200,
+            &json!({ "status": { "httpCode": 422, "errorCode": 505 } })
+        ));
+        assert!(AppClient::is_successful_response(204, &json!(null)));
     }
 }

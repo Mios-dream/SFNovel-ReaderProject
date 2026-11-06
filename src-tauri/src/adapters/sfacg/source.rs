@@ -364,19 +364,9 @@ impl RemoteGateway for SfSource {
         novel_id: i64,
         media_id: Option<i64>,
     ) -> AppResult<()> {
-        let path = match kind {
-            "novel" => format!("/novels/{novel_id}/favs"),
-            "audio" => format!(
-                "/albums/{}/favs",
-                media_id.ok_or_else(|| AppError::upstream("有声作品缺少专辑编号"))?
-            ),
-            "comic" => format!("/comics/{novel_id}/favs"),
-            _ => return Err(AppError::invalid_input("不支持的收藏类型")),
-        };
         self.require_app("收藏")?
-            .post_data(&path, &serde_json::json!({}))
+            .add_favorite(kind, novel_id, media_id)
             .await
-            .map(|_| ())
             .map_err(AppError::from)
     }
 
