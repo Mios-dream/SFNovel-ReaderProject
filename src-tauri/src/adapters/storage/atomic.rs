@@ -91,7 +91,7 @@ fn commit(temporary: &Path, target: &Path, label: &str) -> AppResult<()> {
 fn commit(temporary: &Path, target: &Path, label: &str) -> AppResult<()> {
     fs::rename(temporary, target).map_err(|error| {
         let _ = fs::remove_file(temporary);
-        format!("无法完成{label}写入：{error}")
+        AppError::storage(format!("无法完成{label}写入：{error}"))
     })
 }
 

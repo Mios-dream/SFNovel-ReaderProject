@@ -1,5 +1,6 @@
 //! 外部系统适配层。
 
+#[cfg(not(target_os = "android"))]
 pub(crate) mod auto_signin;
 pub(crate) mod downloads;
 pub(crate) mod media;
