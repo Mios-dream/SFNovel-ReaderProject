@@ -28,6 +28,7 @@ pub(crate) mod catalog;
 pub(crate) mod diagnostics;
 pub(crate) mod downloads;
 pub(crate) mod library;
+pub(crate) mod platform;
 pub(crate) mod reading;
 pub(crate) mod signin;
 pub(crate) mod settings;

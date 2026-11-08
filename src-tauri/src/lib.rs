@@ -106,6 +106,15 @@ pub fn run() {
             adapters::downloads::configure_concurrency(settings.download.max_concurrent_downloads);
             #[cfg(target_os = "windows")]
             let _ = adapters::platform::set_autostart(settings.desktop.autostart);
+            #[cfg(target_os = "android")]
+            {
+                // 启动时把真实开关推给 Java 侧，修复升级、清数据或强制停止后丢失的定时任务。
+                let handle = handle.clone();
+                let enabled = settings.signin.auto_signin_enabled;
+                tauri::async_runtime::spawn(async move {
+                    let _ = adapters::platform::android::configure_auto_signin(&handle, enabled).await;
+                });
+            }
 
             let _ = NativeDownloadGateway::new(handle.clone()).restore();
 
@@ -209,6 +218,8 @@ pub fn run() {
             commands::signin::get_signin_overview,
             commands::signin::submit_signin,
             commands::signin::claim_signin_reward,
+            commands::signin::signin_notice,
+            commands::platform::open_app_settings,
             commands::updates::check_update
         ])
         .run(tauri::generate_context!())

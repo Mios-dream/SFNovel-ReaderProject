@@ -3,6 +3,7 @@ package com.sansan.sf_novel_flow
 import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -108,12 +109,29 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun setAutoSignin(invoke: Invoke) {
         val enabled = invoke.parseArgs(SetAutoSigninArgs::class.java).enabled
-        if (enabled) {
-            AutoSigninScheduler.schedule(activity.applicationContext)
-        } else {
-            AutoSigninScheduler.cancel(activity.applicationContext)
-        }
+        AutoSigninScheduler.sync(activity.applicationContext, enabled)
         invoke.resolve()
+    }
+
+    /**
+     * 打开本应用的系统详情页。
+     *
+     * 厂商的自启动页是私有 Activity、名字随系统版本变化，按品牌枚举并不可靠；
+     * 系统详情页在所有 Android 上都存在，由用户在其中找到「自启动 / 后台」开关。
+     *
+     * 是否已授权无法查询（没有 API、没有 ContentProvider），因此这里不做任何校验。
+     */
+    @Command
+    fun openAppSettings(invoke: Invoke) {
+        try {
+            activity.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.parse("package:${activity.packageName}")),
+            )
+            invoke.resolve()
+        } catch (error: Exception) {
+            invoke.reject("无法打开应用设置：${error.message}")
+        }
     }
 
     @Command

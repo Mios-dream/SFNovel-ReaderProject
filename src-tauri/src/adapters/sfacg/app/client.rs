@@ -40,6 +40,11 @@ impl AppClient {
             .is_some_and(|cookie| has_cookie_name(cookie, "session_APP"))
     }
 
+    /// 返回规范化后的 App 会话 Cookie，用于按会话区分本地签到记录。
+    pub(crate) fn session_cookie(&self) -> Option<&str> {
+        self.app_cookie.as_deref()
+    }
+
     /// 读取当前设备身份快照。
     pub(super) fn device_snapshot(&self) -> AppResult<DeviceProfile> {
         device_profile()

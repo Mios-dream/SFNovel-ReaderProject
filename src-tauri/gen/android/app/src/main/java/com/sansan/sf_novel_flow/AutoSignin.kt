@@ -4,20 +4,23 @@ import android.content.Context
 import android.os.Build
 import android.util.Base64
 import android.util.Log
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
+import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
 import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import org.json.JSONObject
 import java.security.KeyStore
-import java.util.Calendar
 import java.util.Locale
-import java.util.TimeZone
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -28,7 +31,6 @@ internal const val DEVICE_ID_KEY = "device-id"
 internal const val APP_SESSION_KEY = "app-session"
 private const val DEVICE_PROFILE_KEY = "device-profile"
 private const val KEY_ALIAS = "sfacg-auth-key"
-private const val BEIJING_TIME_ZONE = "Asia/Shanghai"
 
 internal data class AndroidDeviceProfile(
     val deviceId: String,
@@ -128,38 +130,71 @@ internal fun readEncryptedPreference(context: Context, key: String): String? {
     }
 }
 
+/** 一次性检查任务的输入标记：失败时直接结束，由周期任务兜底重试。 */
+private const val ONE_SHOT_KEY = "one-shot"
+
+/**
+ * 串行化签到提交。
+ *
+ * 周期任务与启动检查可能同时被唤醒。并发提交时后一次会拿到"已签到"的上游错误，
+ * 并把它写进本地记录覆盖前一次的成功结果，用户随后会看到一条假失败提示。
+ * 拿不到锁即说明另一条正在处理，本次直接结束。
+ */
+private val SIGNIN_GATE = ReentrantLock()
+
 internal object AutoSigninBridge {
     init {
         System.loadLibrary("sf_novel_flow_lib")
     }
 
-    external fun run(dataDir: String, cookie: String, deviceJson: String, date: String): String
+    external fun run(dataDir: String, cookie: String, deviceJson: String): String
 }
 
 class AutoSigninWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     override fun doWork(): Result {
-        val context = applicationContext
+        if (!SIGNIN_GATE.tryLock()) {
+            Log.i(LOG_TAG, "已有检查在执行，跳过本次")
+            return Result.success()
+        }
         return try {
-            val cookie = readEncryptedPreference(context, APP_SESSION_KEY)
-            if (cookie.isNullOrBlank()) {
-                Log.i(LOG_TAG, "未登录，跳过自动签到")
-                return Result.success()
-            }
-            val profile = readCachedDeviceProfile(context)
-                ?: readOrCreateDeviceProfile(context, System.getProperty("http.agent") ?: "")
-            val message = AutoSigninBridge.run(
-                context.dataDir.absolutePath,
-                cookie,
-                profile.toJson(),
-                beijingDate(),
-            )
-            Log.i(LOG_TAG, message)
-            Result.success()
-        } catch (error: Throwable) {
-            Log.w(LOG_TAG, "自动签到失败", error)
-            Result.success()
+            check()
+        } finally {
+            SIGNIN_GATE.unlock()
         }
     }
+
+    private fun check(): Result {
+        val context = applicationContext
+        val cookie = readEncryptedPreference(context, APP_SESSION_KEY)
+        if (cookie.isNullOrBlank()) {
+            Log.i(LOG_TAG, "未登录，跳过自动签到")
+            return Result.success()
+        }
+        val profile = readCachedDeviceProfile(context)
+            ?: readOrCreateDeviceProfile(context, System.getProperty("http.agent") ?: "")
+        return try {
+            val outcome = JSONObject(
+                AutoSigninBridge.run(
+                    context.dataDir.absolutePath,
+                    cookie,
+                    profile.toJson(),
+                ),
+            )
+            Log.i(LOG_TAG, outcome.optString("message"))
+            if (outcome.optBoolean("retry") && !isOneShot()) Result.retry() else Result.success()
+        } catch (error: Throwable) {
+            Log.w(LOG_TAG, "自动签到失败", error)
+            if (isOneShot()) Result.success() else Result.retry()
+        }
+    }
+
+    /**
+     * 本次是否为启动时的一次性检查。
+     *
+     * 一次性任务的唯一名会被下一次启动复用，若它带着退避一直重试，
+     * 后续启动的 `checkNow` 就被 KEEP 策略挡在外面，反而更晚才检查。
+     */
+    private fun isOneShot(): Boolean = inputData.getBoolean(ONE_SHOT_KEY, false)
 
     private companion object {
         const val LOG_TAG = "AutoSignin"
@@ -168,47 +203,75 @@ class AutoSigninWorker(context: Context, params: WorkerParameters) : Worker(cont
 
 internal object AutoSigninScheduler {
     private const val WORK_NAME = "auto-signin-daily"
+    private const val CHECK_WORK_NAME = "auto-signin-check"
+    private const val CHECK_INTERVAL_HOURS = 2L
+    private const val RETRY_BACKOFF_MINUTES = 30L
+    private const val ENABLED_KEY = "auto-signin-enabled"
 
-    fun schedule(context: Context) {
-        val request = PeriodicWorkRequest.Builder(AutoSigninWorker::class.java, 24, TimeUnit.HOURS)
-            .setInitialDelay(delayUntilNextNoon(), TimeUnit.MILLISECONDS)
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build(),
+    /**
+     * 保存开关状态并按需重排任务。
+     *
+     * 周期任务本身会重试，因此这里用 UPDATE 只更新参数，不清除已有运行历史；
+     * 启动时也调用一次，修复升级、清数据或强制停止后丢失的调度。
+     *
+     * 首次延迟为 0：关闭开关时已经取消任务，重新打开会新建一条周期任务，
+     * 这条任务在联网条件满足后立即执行一次，用户不必等满一个周期。
+     */
+    fun sync(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(ENABLED_KEY, enabled).apply()
+        val manager = WorkManager.getInstance(context)
+        if (!enabled) {
+            manager.cancelUniqueWork(WORK_NAME)
+            return
+        }
+        val request = PeriodicWorkRequest.Builder(
+            AutoSigninWorker::class.java,
+            CHECK_INTERVAL_HOURS,
+            TimeUnit.HOURS,
+        )
+            .setInitialDelay(0, TimeUnit.SECONDS)
+            .setConstraints(networkConstraint())
+            .setBackoffCriteria(
+                BackoffPolicy.EXPONENTIAL,
+                RETRY_BACKOFF_MINUTES,
+                TimeUnit.MINUTES,
             )
             .build()
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            WORK_NAME,
-            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
-            request,
-        )
+        manager.enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 
-    fun cancel(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+    /**
+     * 立刻检查一次，不等周期。
+     *
+     * 应用被系统强制停止后，JobScheduler 里的周期任务会被一并清空。在用户重新打开
+     * 应用之前，JobScheduler、AlarmManager 与开机广播都不会送达这个包，任何后台
+     * 调度都不存在——这是平台行为，换调度方案绕不过去。
+     *
+     * 因此把"打开应用"做成可靠的恢复点：已签过就由 Rust 侧读本地记录直接返回，
+     * 不发起请求；未签则当场提交，不必再等近一个周期。
+     */
+    fun checkNow(context: Context) {
+        val enabled = context.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE)
+            .getBoolean(ENABLED_KEY, false)
+        if (!enabled) return
+        val request = OneTimeWorkRequest.Builder(AutoSigninWorker::class.java)
+            .setInputData(Data.Builder().putBoolean(ONE_SHOT_KEY, true).build())
+            .setConstraints(networkConstraint())
+            .build()
+        WorkManager.getInstance(context)
+            .enqueueUniqueWork(CHECK_WORK_NAME, ExistingWorkPolicy.KEEP, request)
     }
 
-    private fun delayUntilNextNoon(): Long {
-        val zone = TimeZone.getTimeZone(BEIJING_TIME_ZONE)
-        val now = Calendar.getInstance(zone)
-        val next = now.clone() as Calendar
-        next.set(Calendar.HOUR_OF_DAY, 12)
-        next.set(Calendar.MINUTE, 0)
-        next.set(Calendar.SECOND, 0)
-        next.set(Calendar.MILLISECOND, 0)
-        if (!next.after(now)) next.add(Calendar.DAY_OF_YEAR, 1)
-        return next.timeInMillis - now.timeInMillis
+    /** 按上次保存的开关状态恢复调度。 */
+    fun restore(context: Context) {
+        val enabled = context.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE)
+            .getBoolean(ENABLED_KEY, false)
+        sync(context, enabled)
     }
-}
 
-private fun beijingDate(): String {
-    val now = Calendar.getInstance(TimeZone.getTimeZone(BEIJING_TIME_ZONE))
-    return String.format(
-        Locale.ROOT,
-        "%04d-%02d-%02d",
-        now.get(Calendar.YEAR),
-        now.get(Calendar.MONTH) + 1,
-        now.get(Calendar.DAY_OF_MONTH),
-    )
+    /** 周期任务与一次性检查共用的联网约束。 */
+    private fun networkConstraint(): Constraints = Constraints.Builder()
+        .setRequiredNetworkType(NetworkType.CONNECTED)
+        .build()
 }

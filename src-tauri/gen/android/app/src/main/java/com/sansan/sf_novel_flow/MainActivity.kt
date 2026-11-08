@@ -22,6 +22,8 @@ class MainActivity : TauriActivity() {
       window.isStatusBarContrastEnforced = false
       window.isNavigationBarContrastEnforced = false
     }
+    AutoSigninScheduler.restore(this)
+    AutoSigninScheduler.checkNow(this)
   }
 
   /**

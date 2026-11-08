@@ -15,7 +15,7 @@ const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
 const isAndroid = /Android/i.test(navigator.userAgent);
-const autoSigninTime = isAndroid ? "每天 12:00" : "应用运行时检查";
+const autoSigninTime = isAndroid ? "每 2 小时检查" : "应用运行时检查";
 
 const {
   overview,
@@ -24,18 +24,29 @@ const {
   claimingConfigId,
   autoSigninSaving,
   autoSigninEnabled,
+  noticeText,
   isToday,
   canClaim,
   open: openSignin,
   submit,
   claim,
   toggleAutoSignin,
+  openAppSettings,
   dismiss,
 } = useSignin();
 
 const week = computed(() => overview.value?.week.slice(0, 7) || []);
 const todaySigned = computed(() =>
   week.value.some((item) => isToday(item.date) && item.isSignIn),
+);
+/**
+ * 仅在 Android 上、自动签到已开启时显示提示。
+ *
+ * 厂商的自启动开关无法查询，所以这里不判断是否已授权，只固定给出一条说明，
+ * 让用户在签到没按时执行时知道去哪里处理。
+ */
+const showBackgroundHint = computed(
+  () => isAndroid && autoSigninEnabled.value,
 );
 const weekSignedCount = computed(
   () => week.value.filter((item) => item.isSignIn).length,
@@ -162,7 +173,9 @@ watch(
             <div class="auto-signin">
               <div class="auto-signin-copy">
                 <span class="auto-signin-label">自动签到</span>
-                <span class="auto-signin-time">{{ autoSigninTime }}</span>
+                <span class="auto-signin-time">{{
+                  noticeText || autoSigninTime
+                }}</span>
               </div>
               <button
                 type="button"
@@ -174,6 +187,19 @@ watch(
                 @click="toggleAutoSignin"
               >
                 <span class="auto-signin-thumb" />
+              </button>
+            </div>
+
+            <div v-if="showBackgroundHint" class="background-hint">
+              <span class="background-hint-text">
+                自动签到可能被系统清理，请允许自启动
+              </span>
+              <button
+                type="button"
+                class="background-hint-primary"
+                @click="openAppSettings"
+              >
+                打开设置
               </button>
             </div>
 
@@ -397,15 +423,48 @@ watch(
   display: flex;
   align-items: baseline;
   gap: 8px;
+  min-width: 0;
 }
 .auto-signin-label {
+  flex: 0 0 auto;
   color: #674941;
   font-size: 14px;
   font-weight: 600;
 }
 .auto-signin-time {
+  min-width: 0;
   color: #a88377;
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.background-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 18px;
+  border-bottom: 1px solid #f4e6de;
+  background: #fff8e8;
+}
+.background-hint-text {
+  flex: 1;
+  min-width: 0;
+  color: #8a6a3a;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.background-hint-primary {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #e0902a;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 .auto-signin-switch {
   position: relative;

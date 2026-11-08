@@ -6,6 +6,7 @@ mod export;
 mod jobs;
 pub(crate) mod paths;
 mod settings;
+mod signin_log;
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -21,6 +22,7 @@ pub(crate) use book::{
 };
 pub(crate) use jobs::{read_job_snapshot, write_job_snapshot};
 pub(crate) use paths::safe_library_name;
+pub(crate) use signin_log::SigninLog;
 
 /// 面向应用自有目录的原生存储入口。
 pub(crate) struct NativeStorage {

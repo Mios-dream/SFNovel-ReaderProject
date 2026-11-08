@@ -6,6 +6,7 @@ import type { LibraryDesk } from "./domains/library";
 import type { PickerDesk } from "./domains/picker";
 import type { RemoteDesk } from "./domains/remote";
 import type { SettingsDesk } from "./domains/settings";
+import type { SigninDesk } from "./domains/signin";
 import type { UpdaterDesk } from "./domains/updater";
 import type { WorkspaceDesk } from "./domains/workspace";
 import { isReaderView } from "./navigation";
@@ -17,6 +18,7 @@ type DeskLifecycleOptions = {
   picker: PickerDesk;
   remote: RemoteDesk;
   settings: SettingsDesk;
+  signin: SigninDesk;
   updater: UpdaterDesk;
   workspace: WorkspaceDesk;
 };
@@ -37,6 +39,7 @@ export function registerDeskLifecycle({
   picker,
   remote,
   settings,
+  signin,
   updater,
   workspace,
 }: DeskLifecycleOptions) {
@@ -118,6 +121,7 @@ export function registerDeskLifecycle({
         // Android 应用插件在浏览器与桌面端不可用。
       });
     void auth.refreshAuthStatus().then(() => auth.loadAccountProfile());
+    void signin.announceAutoSignin();
     void updater.loadCurrentVersion();
     void settings
       .loadSettings()

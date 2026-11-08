@@ -265,6 +265,13 @@ export type SigninOverview = {
   week: SigninWeekItem[];
   rewards: SigninReward[];
 };
+/** 自动签到最近一次结果；`pending` 表示尚未向用户提示。 */
+export type SigninNotice = {
+  day: string;
+  success: boolean;
+  message: string;
+  pending: boolean;
+};
 /** 下载请求与过程文件设置。 */
 export type DownloadSettings = {
   requestIntervalMs: number;

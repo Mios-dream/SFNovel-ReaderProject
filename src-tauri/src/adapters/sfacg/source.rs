@@ -63,6 +63,11 @@ impl SfSource {
         self.app_client.has_session()
     }
 
+    /// 当前快照的 App 会话 Cookie，用于按会话区分本地签到记录。
+    pub(crate) fn app_cookie(&self) -> Option<&str> {
+        self.app_client.session_cookie()
+    }
+
     /// 当前快照是否包含网页会话。
     fn has_web_session(&self) -> bool {
         self.web_client.has_session()

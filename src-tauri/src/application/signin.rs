@@ -2,7 +2,9 @@
 
 use crate::application::ports::RemoteGateway;
 use crate::domain::error::{AppError, AppResult};
-use crate::domain::signin::{SigninDay, SigninOverview};
+use crate::domain::signin::{is_valid_date, SigninDay, SigninOverview};
+#[cfg(not(target_os = "android"))]
+use crate::domain::signin::is_signed_on;
 
 /// 组合签到接口的应用服务。
 pub(crate) struct SigninService<'a, R: RemoteGateway> {
@@ -47,20 +49,20 @@ impl<'a, R: RemoteGateway> SigninService<'a, R> {
         self.remote.submit_signin(date).await
     }
 
-    /// 当天尚未签到时提交签到，并返回本次是否实际提交。
+    /// 当天尚未签到时提交签到，返回本次是否实际提交。
+    ///
+    /// 只处理当前业务日：历史日期需要补签卡，缺少时会直接失败，因此不自动补签。
+    /// Android 侧由 JNI 入口直接驱动客户端，不经过本服务。
     #[cfg(not(target_os = "android"))]
-    pub(crate) async fn auto_sign_in(&self, date: &str) -> AppResult<bool> {
-        if !is_valid_date(date) {
+    pub(crate) async fn auto_sign_in(&self, day: &str) -> AppResult<bool> {
+        if !is_valid_date(day) {
             return Err(AppError::invalid_input("签到日期格式无效"));
         }
         let week = self.remote.signin_week().await?;
-        if week
-            .iter()
-            .any(|item| item.date.get(..10) == Some(date) && item.is_sign_in)
-        {
+        if is_signed_on(&week, day) {
             return Ok(false);
         }
-        self.remote.submit_signin(date).await?;
+        self.remote.submit_signin(day).await?;
         Ok(true)
     }
 
@@ -71,36 +73,4 @@ impl<'a, R: RemoteGateway> SigninService<'a, R> {
         }
         self.remote.claim_signin_reward(config_id).await
     }
-}
-
-/// 校验并确认一个 `YYYY-MM-DD` 自然日。
-fn is_valid_date(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
-        return false;
-    }
-    if !bytes
-        .iter()
-        .enumerate()
-        .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
-    {
-        return false;
-    }
-    let year = value[0..4].parse::<i64>().ok();
-    let month = value[5..7].parse::<i64>().ok();
-    let day = value[8..10].parse::<i64>().ok();
-    let (Some(year), Some(month), Some(day)) = (year, month, day) else {
-        return false;
-    };
-    if !(2000..=2100).contains(&year) || !(1..=12).contains(&month) {
-        return false;
-    }
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days = match month {
-        2 if leap => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    };
-    (1..=days).contains(&day)
 }

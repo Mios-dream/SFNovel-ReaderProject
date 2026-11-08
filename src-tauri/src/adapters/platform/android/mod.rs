@@ -1,12 +1,13 @@
 //! Android 认证与 OCR 原生插件。
 //!
 //! 按职责拆分：`session` 负责会话读写与自动签到开关，`device` 负责设备身份采集，
-//! `login` 负责官方登录窗口，`storage` 负责外部存储与导出落盘，`ocr` 负责正文识别，
-//! `signin` 承载 Java 侧自动签到的 JNI 入口。
+//! `login` 负责官方登录窗口，`storage` 负责外部存储与导出落盘，`power` 负责打开
+//! 应用设置入口，`ocr` 负责正文识别，`signin` 承载 Java 侧自动签到的 JNI 入口。
 
 mod device;
 mod login;
 mod ocr;
+mod power;
 mod session;
 mod signin;
 mod storage;
@@ -20,6 +21,7 @@ use tauri::Manager;
 pub(super) use device::initialize_device_identity;
 pub(crate) use login::start_official_login;
 pub(crate) use ocr::recognize_image;
+pub(crate) use power::open_app_settings;
 pub(crate) use session::{
     clear_app_session, clear_session, clear_web_session, configure_auto_signin,
     persist_app_session, synchronize_session,

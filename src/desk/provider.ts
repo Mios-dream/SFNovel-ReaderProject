@@ -96,6 +96,7 @@ export function useDeskProvider() {
     picker,
     remote,
     settings,
+    signin,
     updater,
     workspace,
   });

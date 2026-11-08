@@ -32,7 +32,6 @@ pub(crate) async fn save_settings(
     settings: AppSettings,
 ) -> AppResult<AppSettings> {
     let storage = NativeStorage::new(app.clone());
-    #[cfg(target_os = "android")]
     let previous_auto_signin = storage
         .settings()
         .ok()
@@ -48,6 +47,14 @@ pub(crate) async fn save_settings(
             saved.signin.auto_signin_enabled,
         )
         .await?;
+    }
+    // 打开开关时立刻试签一次，失败也由后台循环按周期重试，不阻塞设置保存。
+    #[cfg(not(target_os = "android"))]
+    if previous_auto_signin != Some(true) && saved.signin.auto_signin_enabled {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::adapters::auto_signin::check_now(&app).await;
+        });
     }
     Ok(saved)
 }
