@@ -100,6 +100,7 @@ impl AppClient {
                 .and_then(|value| value.get("needFireMoney"))
                 .and_then(Value::as_i64)
                 .unwrap_or(0);
+            let cover = comic_chapter_cover(item);
             let is_vip =
                 item.get("isVip").and_then(Value::as_bool).unwrap_or(false) || need_fire_money > 0;
             chapters.push(ComicChapter {
@@ -118,6 +119,7 @@ impl AppClient {
                 } else {
                     ComicUnlockState::Unlocked
                 },
+                cover,
             });
         }
         if chapters.is_empty() {
@@ -126,7 +128,6 @@ impl AppClient {
         chapters.reverse();
         Ok(chapters)
     }
-
     /// 通过 App 接口读取漫画章节图片地址。
     pub(crate) async fn get_comic_chapter_images(
         &self,
@@ -159,4 +160,22 @@ impl AppClient {
         }
         Ok(images)
     }
+}
+
+/// 从目录章节条目提取预览图地址。
+///
+/// 新发布的章节回 `expand.cover`（与官方 App 一致），旧章节只有
+/// `expand.chapCover`，按此顺序取第一个非空值；顶层 `chapCover` 仅作最后
+/// 兜底。三个字段都没有时由前端渲染占位图。
+fn comic_chapter_cover(item: &Value) -> Option<String> {
+    let expand = item.get("expand");
+    [
+        expand.and_then(|value| value.get("cover")),
+        expand.and_then(|value| value.get("chapCover")),
+        item.get("chapCover"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|value| value.as_str().filter(|value| !value.is_empty()))
+    .map(ToString::to_string)
 }

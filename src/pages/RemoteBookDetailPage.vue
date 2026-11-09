@@ -80,7 +80,6 @@ const textVolumes = computed(() => online.textVolumes.value);
 const audioChapters = computed(() => online.audioChapters.value);
 const comicChapters = computed(() => online.comicChapters.value);
 const audioVolumes = computed(() => groupChaptersByVolume(audioChapters.value));
-const comicVolumes = computed(() => groupChaptersByVolume(comicChapters.value));
 const selectedMedia = computed<MediaType>(
   () => novel.value?.bookshelfType || "novel",
 );
@@ -106,6 +105,8 @@ type RemoteDirectoryChapter = {
   title: string;
   isVip?: boolean;
   isUnlocked?: boolean | "unknown";
+  /** 漫画章节预览图（上游 `expand.chapCover`），其他内容类型没有。 */
+  cover?: string;
 };
 type RemoteDesktopRow =
   | { kind: "gap"; key: string; height: number }
@@ -127,6 +128,7 @@ type RemoteDrawerRow =
       isVip?: boolean;
       isUnlocked?: boolean | "unknown";
       index?: number;
+      cover?: string;
       height: number;
     };
 type RemoteDirectoryVolume = {
@@ -140,6 +142,8 @@ type RemoteDirectoryVolume = {
  * 三种内容的字段名不同：文字章节是 `chapId` + `accessState === "available"`，
  * 音视频是 `id` + `isUnlocked`。这份映射原先在桌面与抽屉两个构建器里各写一遍，
  * 改漏一处不会报错，只会让 VIP 标记或解锁状态显示错误。
+ *
+ * 只有小说与有声有分卷；漫画整体平铺（`title` 为空即不渲染卷标题与间隔）。
  */
 const directoryVolumes = computed<RemoteDirectoryVolume[]>(() => {
   if (mode.value === "novel") {
@@ -154,9 +158,22 @@ const directoryVolumes = computed<RemoteDirectoryVolume[]>(() => {
     }));
   }
 
-  const volumes =
-    mode.value === "audio" ? audioVolumes.value : comicVolumes.value;
-  return volumes.map((volume) => ({
+  if (mode.value === "comic") {
+    return [
+      {
+        title: "",
+        chapters: comicChapters.value.map((chapter) => ({
+          id: chapter.id,
+          title: chapter.title,
+          isVip: chapter.isVip,
+          isUnlocked: chapter.isUnlocked,
+          cover: chapter.cover,
+        })),
+      },
+    ];
+  }
+
+  return audioVolumes.value.map((volume) => ({
     title: volume.title,
     chapters: volume.chapters.map((chapter) => ({
       id: chapter.id,
@@ -170,19 +187,33 @@ const directoryVolumes = computed<RemoteDirectoryVolume[]>(() => {
 const desktopDirectoryRows = computed<RemoteDesktopRow[]>(() => {
   const rows: RemoteDesktopRow[] = [];
   directoryVolumes.value.forEach((volume, volumeIndex) => {
-    if (volumeIndex > 0)
+    // 漫画没有分卷：不插卷标题，章节直接平铺。
+    if (volume.title) {
+      if (volumeIndex > 0)
+        rows.push({
+          kind: "gap",
+          key: `desktop-gap-${volumeIndex}`,
+          height: 12,
+        });
       rows.push({
-        kind: "gap",
-        key: `desktop-gap-${volumeIndex}`,
-        height: 12,
+        kind: "volume",
+        key: `desktop-volume-${volumeIndex}`,
+        title: volume.title,
+        // `.remote-volume-heading` 自身 40px + 8px 下边距，行高必须按 48 记账。
+        height: 48,
       });
-    rows.push({
-      kind: "volume",
-      key: `desktop-volume-${volumeIndex}`,
-      title: volume.title,
-      // `.remote-volume-heading` 自身 40px + 8px 下边距，行高必须按 48 记账。
-      height: 48,
-    });
+    }
+    if (mode.value === "comic") {
+      // 漫画桌面目录是双列封面卡，一行放两章；54px 行 + 7px 网格间距。
+      for (let index = 0; index < volume.chapters.length; index += 2)
+        rows.push({
+          kind: "chapters",
+          key: `desktop-comic-${volumeIndex}-${index}`,
+          chapters: volume.chapters.slice(index, index + 2),
+          height: 61,
+        });
+      return;
+    }
     for (let index = 0; index < volume.chapters.length; index += 3)
       rows.push({
         kind: "chapters",
@@ -198,18 +229,20 @@ const drawerDirectoryRows = computed<RemoteDrawerRow[]>(() => {
   const rows: RemoteDrawerRow[] = [];
   let queueIndex = 0;
   directoryVolumes.value.forEach((volume, volumeIndex) => {
-    if (volumeIndex > 0)
+    if (volume.title) {
+      if (volumeIndex > 0)
+        rows.push({
+          kind: "gap",
+          key: `drawer-gap-${volumeIndex}`,
+          height: 9,
+        });
       rows.push({
-        kind: "gap",
-        key: `drawer-gap-${volumeIndex}`,
-        height: 9,
+        kind: "volume",
+        key: `drawer-volume-${volumeIndex}`,
+        title: volume.title,
+        height: DIRECTORY_GROUP_HEIGHT,
       });
-    rows.push({
-      kind: "volume",
-      key: `drawer-volume-${volumeIndex}`,
-      title: volume.title,
-      height: DIRECTORY_GROUP_HEIGHT,
-    });
+    }
     for (const chapter of volume.chapters) {
       // 有声目录的序号是跨卷的播放队列位置，与桌面列表和播放器编号一致。
       const queuePosition = mode.value === "audio" ? queueIndex++ : undefined;
@@ -221,7 +254,9 @@ const drawerDirectoryRows = computed<RemoteDrawerRow[]>(() => {
         isVip: chapter.isVip,
         isUnlocked: chapter.isUnlocked,
         index: queuePosition,
-        height: 48,
+        cover: chapter.cover,
+        // 漫画行要放下 44px 的封面缩略图，其余按文字行记账。
+        height: mode.value === "comic" ? 66 : 48,
       });
     }
   });
@@ -375,6 +410,7 @@ watch(
   },
   { immediate: true },
 );
+/** 有声目录按 `volume` 字段分组；漫画没有分卷，不走这里。 */
 function groupChaptersByVolume(chapters: Chapter[]) {
   const groups = new Map<string, Chapter[]>();
   for (const chapter of chapters) {
@@ -763,13 +799,31 @@ function groupChaptersByVolume(chapters: Chapter[]) {
             <h4 v-else-if="row.kind === 'volume'" class="remote-volume-heading">
               {{ row.title }}
             </h4>
-            <div v-else class="remote-volume-chapters">
+            <div
+              v-else
+              class="remote-volume-chapters"
+              :class="{ 'remote-comic-chapters': mode === 'comic' }"
+            >
               <button
                 v-for="chapter in row.chapters"
                 :key="chapter.id"
                 class="remote-chapter-row"
+                :class="{ 'remote-comic-row': mode === 'comic' }"
                 @click="startOnline(chapter.id)"
               >
+                <img
+                  v-if="chapter.cover"
+                  class="remote-comic-cover"
+                  :src="chapter.cover"
+                  :alt="`${chapter.title} 预览`"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <Images
+                  v-else-if="mode === 'comic'"
+                  class="remote-comic-cover"
+                  :size="18"
+                />
                 <strong>{{ chapter.title }}</strong>
                 <span
                   v-if="chapter.isVip"
@@ -782,7 +836,8 @@ function groupChaptersByVolume(chapters: Chapter[]) {
                     aria-label="已解锁"
                   />VIP</span
                 >
-                <Play :size="13" />
+                <ChevronRight v-if="mode === 'comic'" :size="13" />
+                <Play v-else :size="13" />
               </button>
             </div>
           </template>
@@ -856,6 +911,7 @@ function groupChaptersByVolume(chapters: Chapter[]) {
           <button
             v-else
             class="remote-drawer-row"
+            :class="{ 'remote-comic-row': mode === 'comic' }"
             @click="startOnline(row.id)"
           >
             <span
@@ -863,6 +919,15 @@ function groupChaptersByVolume(chapters: Chapter[]) {
               class="remote-drawer-index"
               >{{ String(row.index + 1).padStart(3, "0") }}</span
             >
+            <img
+              v-if="row.cover"
+              class="remote-comic-cover"
+              :src="row.cover"
+              :alt="`${row.title} 预览`"
+              loading="lazy"
+              decoding="async"
+            />
+            <Images v-else-if="mode === 'comic'" class="remote-comic-cover" :size="21" />
             <strong>{{ row.title }}</strong>
             <span
               v-if="row.isVip"
@@ -875,7 +940,8 @@ function groupChaptersByVolume(chapters: Chapter[]) {
                 aria-label="已解锁"
               />VIP</span
             >
-            <Play :size="16" />
+            <ChevronRight v-if="mode === 'comic'" :size="16" />
+            <Play v-else :size="16" />
           </button>
         </template>
         <div
@@ -1125,6 +1191,11 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   gap: 7px 12px;
   align-content: start;
 }
+/* 漫画桌面目录：双列封面卡；容器与虚拟行高（54px 格 + 7px 间距）一致。 */
+.remote-comic-chapters {
+  height: 61px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .remote-chapter-row {
   display: flex;
   height: 34px;
@@ -1255,6 +1326,29 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   flex: 0 0 38px;
   color: #ad9f8d;
   font: 11px monospace;
+}
+/* 漫画行：抽屉 66px、桌面格 54px，都要放下 44px 高的封面缩略图。 */
+.remote-comic-row.remote-drawer-row {
+  height: 66px;
+  min-height: 66px;
+  padding: 7px 20px;
+}
+.remote-comic-row.remote-chapter-row {
+  height: 54px;
+  min-height: 54px;
+}
+img.remote-comic-cover {
+  width: 64px;
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  object-fit: cover;
+}
+svg.remote-comic-cover {
+  /* 占位图标留在行首；`.remote-drawer-row > svg` 会把它推到行尾。 */
+  flex: 0 0 auto;
+  margin-left: 0;
+  color: #b3a08f;
 }
 @media (min-width: 901px) {
   .detail-page {

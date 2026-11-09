@@ -1,31 +1,25 @@
 <script setup lang="ts">
-const props = withDefaults(
-  defineProps<{
-    open: boolean;
-    backdropClass?: "playlist-backdrop" | "desktop-playlist-backdrop";
-  }>(),
-  {
-    backdropClass: "playlist-backdrop",
-  },
-);
-
-const emit = defineEmits<{
-  close: [];
-}>();
+/**
+ * 播放器移动抽屉：遮罩 + 进出的交给它，面板样式由调用方给（`.player-drawer`）。
+ *
+ * 章节目录已经改用通用 `DrawerShell`；这里只剩播放设置这类非目录面板，所以不再
+ * 区分桌面/移动遮罩——移动端才会用到它。
+ */
+defineProps<{ open: boolean }>();
+const emit = defineEmits<{ close: [] }>();
 </script>
 
 <template>
   <Transition name="drawer-backdrop">
     <div
-      v-if="props.open"
+      v-if="open"
       class="audio-drawer-backdrop"
-      :class="props.backdropClass"
       aria-hidden="true"
       @click="emit('close')"
     />
   </Transition>
   <Transition name="audio-drawer">
-    <slot v-if="props.open" />
+    <slot v-if="open" />
   </Transition>
 </template>
 
@@ -35,13 +29,6 @@ const emit = defineEmits<{
   z-index: 15;
   inset: 0;
   background: rgba(77, 47, 40, 0.24);
-}
-.audio-drawer-backdrop.desktop-playlist-backdrop {
-  position: absolute;
-  z-index: 2;
-  background: rgba(48, 29, 36, 0.28);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
 }
 .drawer-backdrop-enter-active,
 .drawer-backdrop-leave-active {
@@ -74,14 +61,6 @@ const emit = defineEmits<{
 }
 
 @media (max-width: 800px) {
-  .audio-drawer-backdrop.desktop-playlist-backdrop {
-    display: none;
-  }
-  .audio-drawer-backdrop.playlist-backdrop {
-    position: fixed;
-    z-index: 15;
-    background: rgba(77, 47, 40, 0.24);
-  }
   .player-drawer {
     box-sizing: border-box;
     position: fixed;

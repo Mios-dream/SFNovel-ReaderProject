@@ -361,6 +361,8 @@ pub(crate) struct ComicChapter {
     pub(crate) is_vip: bool,
     /// 当前账号的解锁状态。
     pub(crate) is_unlocked: ComicUnlockState,
+    /// 章节预览图地址（上游 `expand.chapCover`），缺失时目录退回占位图。
+    pub(crate) cover: Option<String>,
 }
 
 /// 章节选择器使用的漫画目录。
@@ -386,6 +388,8 @@ pub(crate) struct ComicChapterSummary {
     pub(crate) is_unlocked: ComicUnlockState,
     /// 该章节是否已经下载到本地。
     pub(crate) downloaded: bool,
+    /// 章节预览图地址；上游没有 `chapCover` 时为 `None`。
+    pub(crate) cover: Option<String>,
 }
 
 /// 书架中的一条小说、有声或漫画记录。

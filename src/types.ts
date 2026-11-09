@@ -111,6 +111,8 @@ export type Chapter = {
   /** `unknown` means the catalog only identifies a VIP chapter, not entitlement. */
   isUnlocked?: boolean | "unknown";
   downloaded?: boolean;
+  /** 漫画章节的预览图（上游 `expand.chapCover`），其他内容类型没有。 */
+  cover?: string;
 };
 
 export type ChapterVolume = {

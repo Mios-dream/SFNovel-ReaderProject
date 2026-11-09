@@ -6,6 +6,7 @@ import {
   onMounted,
   ref,
   watch,
+  type ComponentPublicInstance,
 } from "vue";
 import { useRouter } from "vue-router";
 import {
@@ -28,6 +29,7 @@ import {
   X,
 } from "@lucide/vue";
 import AudioPlayerDrawer from "../components/AudioPlayerDrawer.vue";
+import DrawerShell from "../components/DrawerShell.vue";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import { reportError, showToast } from "../composables/useToast";
 import { asRecord, readPreference, writePreference } from "../utils/preferences";
@@ -412,15 +414,6 @@ function toggleDesktopPlaylist() {
   desktopPlaylistOpen.value = !desktopPlaylistOpen.value;
 }
 
-function togglePlaylist() {
-  if (compactViewport.value) {
-    if (playlistOpen.value) closeMobileDrawers();
-    else openMobilePlaylist();
-    return;
-  }
-  toggleDesktopPlaylist();
-}
-
 function closePlaylistDrawer() {
   if (compactViewport.value) closeMobileDrawers();
   else desktopPlaylistOpen.value = false;
@@ -429,18 +422,12 @@ function closePlaylistDrawer() {
 /**
  * 播放器面板不是 `ModalShell`，需要各自入返回栈。
  *
- * 移动抽屉共用一个 `mobileDrawer` 状态（互斥），因此只注册一层；桌面播放列表与
- * 设置面板、定时菜单各自一层。带遮罩或 `aria-modal` 的面板才算一层，纯下拉不算。
+ * 设置面板与定时菜单各自注册一层。章节目录已经是 `DrawerShell`，入栈由
+ * `ModalShell` 负责；这里若再按 `mobileDrawer` 注册一次，返回键就要按两次。
  */
 useBackLayer(
-  () => mobileDrawer.value !== null,
+  () => mobileSettingsOpen.value,
   () => closeMobileDrawers(),
-);
-useBackLayer(
-  () => desktopPlaylistOpen.value,
-  () => {
-    desktopPlaylistOpen.value = false;
-  },
 );
 useBackLayer(
   () => desktopSettingsOpen.value,
@@ -454,6 +441,12 @@ useBackLayer(
     timerMenuOpen.value = false;
   },
 );
+
+function setTrackListBody(
+  element: Element | ComponentPublicInstance | null,
+) {
+  trackList.value = element instanceof HTMLElement ? element : undefined;
+}
 
 async function revealCurrentTrack() {
   if (!playlistOpen.value && !desktopPlaylistOpen.value) return;
@@ -1120,77 +1113,64 @@ async function retryOnlineAudio(shouldPlay = true) {
         </button>
       </section>
     </AudioPlayerDrawer>
-    <AudioPlayerDrawer
+    <DrawerShell
       :open="playlistOpen || desktopPlaylistOpen"
-      :backdrop-class="
-        compactViewport ? 'playlist-backdrop' : 'desktop-playlist-backdrop'
-      "
+      align="end"
+      title="章节目录"
+      :subtitle="bookName"
+      :body-ref="setTrackListBody"
       @close="closePlaylistDrawer"
+      @scroll="handleTrackListScroll"
     >
-      <aside
-        class="player-drawer track-section"
-        :aria-hidden="compactViewport ? !playlistOpen : !desktopPlaylistOpen"
+      <template #actions>
+        <span v-if="tracks.length" class="track-count"
+          >{{ tracks.length }} 章</span
+        >
+      </template>
+      <div
+        :style="{ height: `${trackWindow.top}px` }"
+        aria-hidden="true"
+      ></div>
+      <button
+        v-for="row in trackWindow.rows"
+        :key="row.key"
+        class="track-row"
+        :class="{ active: row.index === trackIndex }"
+        :disabled="playbackLoading"
+        @click="selectTrack(row.index, true)"
       >
-        <button
-          class="track-heading"
-          :aria-expanded="compactViewport ? playlistOpen : desktopPlaylistOpen"
-          @click="togglePlaylist"
+        <span class="track-index">{{
+          String(row.index + 1).padStart(3, "0")
+        }}</span>
+        <strong>{{ row.track.title }}</strong>
+        <span
+          class="track-access"
+          :class="{ unlocked: row.track.isUnlocked === true }"
+          :title="
+            row.track.isVip
+              ? row.track.isUnlocked === true
+                ? '已解锁'
+                : 'VIP 章节'
+              : undefined
+          "
+          ><LockKeyholeOpen
+            v-if="row.track.isVip && row.track.isUnlocked === true"
+            :size="14"
+            aria-label="已解锁"
+          /><LockKeyhole
+            v-else-if="row.track.isVip"
+            :size="14"
+            aria-label="VIP 章节"
+          /><small v-if="row.track.isVip">VIP</small></span
         >
-          <span><ListMusic :size="19" />章节目录</span
-          ><small>{{ tracks.length }} 章</small
-          ><X class="drawer-close" :size="19" />
-        </button>
-        <div
-          ref="trackList"
-          class="track-list"
-          @scroll.passive="handleTrackListScroll"
-        >
-          <div
-            :style="{ height: `${trackWindow.top}px` }"
-            aria-hidden="true"
-          ></div>
-          <button
-            v-for="row in trackWindow.rows"
-            :key="row.key"
-            :class="{ active: row.index === trackIndex }"
-            :disabled="playbackLoading"
-            @click="selectTrack(row.index, true)"
-          >
-            <span>{{ String(row.index + 1).padStart(3, "0") }}</span
-            ><strong>{{ row.track.title }}</strong
-            ><span
-              class="track-access"
-              :class="{ unlocked: row.track.isUnlocked === true }"
-              :title="
-                row.track.isVip
-                  ? row.track.isUnlocked === true
-                    ? '已解锁'
-                    : 'VIP 章节'
-                  : undefined
-              "
-              ><LockKeyholeOpen
-                v-if="row.track.isVip && row.track.isUnlocked === true"
-                :size="14"
-                aria-label="已解锁"
-              /><LockKeyhole
-                v-else-if="row.track.isVip"
-                :size="14"
-                aria-label="VIP 章节"
-              /><small v-if="row.track.isVip">VIP</small></span
-            ><Play
-              v-if="row.index === trackIndex && !playing"
-              :size="16" /><Pause
-              v-else-if="row.index === trackIndex"
-              :size="16"
-            />
-          </button>
-          <div
-            :style="{ height: `${trackWindow.bottom}px` }"
-            aria-hidden="true"
-          ></div>
-        </div>
-      </aside>
-    </AudioPlayerDrawer>
+        <Play v-if="row.index === trackIndex && !playing" :size="16" />
+        <Pause v-else-if="row.index === trackIndex" :size="16" />
+      </button>
+      <div
+        :style="{ height: `${trackWindow.bottom}px` }"
+        aria-hidden="true"
+      ></div>
+    </DrawerShell>
   </section>
 </template>
 
@@ -1436,84 +1416,63 @@ async function retryOnlineAudio(shouldPlay = true) {
   color: #fff;
   background: var(--theme-color);
 }
-.track-section {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
+/* 章节目录：面板、标题栏与滚动区由 DrawerShell 提供，这里只管行内排版。 */
+.track-count {
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #b8664e;
+  background: #fff0e7;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
-.track-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 0 20px 14px;
-  border: 0;
-  color: #69453d;
-  background: none;
-  font: inherit;
-  text-align: left;
-}
-.track-heading span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: KaTongFont, "Microsoft YaHei", sans-serif;
-  font-size: 18px;
-}
-.track-heading small {
-  color: #ad877a;
-  font-size: 12px;
-}
-.track-list {
-  min-height: 0;
-  flex: 1 1 auto;
-  overflow-y: auto;
-  border-top: 1px solid rgba(187, 132, 111, 0.15);
-}
-.track-list button {
+.track-row {
   display: grid;
-  grid-template-columns: 37px minmax(0, 1fr) auto 20px;
-  align-items: center;
-  gap: 8px;
   width: 100%;
   height: 54px;
   min-height: 54px;
-  padding: 0 18px;
+  grid-template-columns: 37px minmax(0, 1fr) auto 20px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px;
   border: 0;
   border-bottom: 1px solid rgba(187, 132, 111, 0.12);
   color: #65433c;
   background: none;
   text-align: left;
 }
-.track-list button:hover,
-.track-list button.active {
+.track-row:hover,
+.track-row.active {
   background: #fff1e9;
 }
-.track-list button.active {
+.track-row.active {
   color: var(--theme-color-dark);
 }
-.track-list span {
+.track-row:disabled {
+  opacity: 0.45;
+}
+.track-index {
   color: #a47b6d;
   font: 11px monospace;
 }
-.track-list strong {
+.track-row strong {
   overflow: hidden;
   font-size: 13px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.track-list .track-access {
+.track-row .track-access {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   color: #a3654c;
   font: 12px/1 "Microsoft YaHei", sans-serif;
 }
-.track-list .track-access.unlocked {
+.track-row .track-access.unlocked {
   color: #5f9079;
 }
-.track-list .track-access small {
+.track-row .track-access small {
   font-size: 12px;
   font-weight: 500;
 }
@@ -1905,26 +1864,6 @@ async function retryOnlineAudio(shouldPlay = true) {
     display: grid;
     align-items: center;
   }
-  .track-heading .drawer-close {
-    display: block;
-    margin-left: 12px;
-  }
-  .track-section {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 3;
-    width: min(320px, 29vw);
-    overflow: hidden;
-    padding: 24px 0 0;
-    border: 1px solid rgba(255, 255, 255, 0.38);
-    border-radius: 20px 0 0 20px;
-    background: rgba(255, 250, 247, 0.62);
-    box-shadow: 0 15px 36px rgba(34, 24, 31, 0.16);
-    backdrop-filter: blur(22px);
-    -webkit-backdrop-filter: blur(22px);
-  }
 }
 
 /* Mobile layout: touch controls and bottom-sheet drawers. */
@@ -1983,24 +1922,6 @@ async function retryOnlineAudio(shouldPlay = true) {
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px); */
   }
-  .track-section {
-    width: 100%;
-    max-width: none;
-    max-height: min(70dvh, 510px);
-    padding: 0;
-  }
-  .track-heading {
-    min-height: 65px;
-    padding: 0 18px;
-    border-bottom: 1px solid rgba(187, 132, 111, 0.14);
-  }
-  .drawer-close {
-    display: block;
-    margin-left: 12px;
-  }
-  .track-heading small {
-    margin-left: auto;
-  }
   .drawer-heading {
     display: flex;
     align-items: center;
@@ -2018,9 +1939,6 @@ async function retryOnlineAudio(shouldPlay = true) {
     color: #895c51;
     background: rgba(255, 242, 234, 0.9);
     place-items: center;
-  }
-  .track-list {
-    padding-bottom: env(safe-area-inset-bottom);
   }
   .cover-frame {
     width: min(232px, 54vw);

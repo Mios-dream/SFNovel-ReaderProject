@@ -377,6 +377,7 @@ mod tests {
             path_name: format!("c{id}"),
             is_vip: true,
             is_unlocked: unlock,
+            cover: None,
         }
     }
 

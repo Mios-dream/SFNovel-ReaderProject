@@ -35,6 +35,9 @@ import DrawerShell from "../components/DrawerShell.vue";
 import DirectoryGroupTitle, {
   DIRECTORY_GROUP_HEIGHT,
 } from "../components/DirectoryGroupTitle.vue";
+import ReaderChrome, {
+  type ReaderAction,
+} from "../components/ReaderChrome.vue";
 
 import { useAuth, useLibrary, useOnline, useWorkspace } from "../desk";
 
@@ -436,6 +439,18 @@ function toggleReaderPanel(panel: ReaderPanel) {
   activePanel.value = activePanel.value === panel ? null : panel;
 }
 
+/** 底部控制栏的三个入口；顺序与漫画阅读器一致，避免两页位置漂移。 */
+const readerActions = computed<ReaderAction[]>(() => [
+  { key: "directory", label: "目录" },
+  { key: "font", label: "字体", active: activePanel.value === "font" },
+  { key: "mode", label: "阅读方式", active: activePanel.value === "mode" },
+]);
+
+function handleReaderAction(key: string) {
+  if (key === "directory") showDirectory();
+  else if (key === "font" || key === "mode") toggleReaderPanel(key);
+}
+
 function toggleControls() {
   controlsVisible.value = !controlsVisible.value;
   if (!controlsVisible.value) activePanel.value = null;
@@ -584,27 +599,6 @@ onBeforeUnmount(() => {
     @click="handleReaderClick"
     @scroll.passive="updateScrollProgress"
   >
-    <Transition name="reader-top">
-      <header
-        v-show="controlsVisible"
-        class="reader-floating-bar reader-top-bar"
-        @click.stop
-      >
-        <button
-          class="icon-button"
-          title="返回书籍详情"
-          aria-label="返回书籍详情"
-          @click="goBack"
-        >
-          <ChevronLeft :size="21" />
-        </button>
-        <div class="reader-heading">
-          <small>{{ chapter.volume }}</small>
-          <strong>{{ chapter.title }}</strong>
-        </div>
-      </header>
-    </Transition>
-
     <div v-if="onlineError" class="reader-error-banner" @click.stop>
       <span>{{ onlineError }}</span>
       <button
@@ -667,8 +661,15 @@ onBeforeUnmount(() => {
       </div>
     </main>
 
-    <Transition name="reader-dock">
-      <footer v-show="controlsVisible" class="reader-dock" @click.stop>
+    <ReaderChrome
+      :visible="controlsVisible"
+      :subtitle="chapter.volume"
+      :title="chapter.title"
+      :actions="readerActions"
+      @back="goBack"
+      @action="handleReaderAction"
+    >
+      <template #panel>
         <Transition name="reader-swap" mode="out-in">
           <section
             v-if="activePanel === 'font'"
@@ -678,7 +679,7 @@ onBeforeUnmount(() => {
           >
             <div class="reader-setting-row">
               <span class="reader-setting-label">字号</span>
-              <div class="reader-font-stepper">
+              <div class="reader-stepper">
                 <button
                   type="button"
                   title="减小字号"
@@ -688,7 +689,7 @@ onBeforeUnmount(() => {
                 >
                   −
                 </button>
-                <span>{{ fontSize }}</span>
+                <span class="reader-stepper-value">{{ fontSize }}</span>
                 <button
                   type="button"
                   title="增大字号"
@@ -776,41 +777,15 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </Transition>
+      </template>
 
-        <nav class="reader-control-bar" aria-label="阅读设置">
-          <button
-            type="button"
-            class="reader-control-action"
-            title="打开章节目录"
-            @click="showDirectory"
-          >
-            <ListTree :size="20" /><span>目录</span>
-          </button>
-          <button
-            type="button"
-            class="reader-control-action"
-            :class="{ active: activePanel === 'font' }"
-            title="字体设置"
-            :aria-expanded="activePanel === 'font'"
-            @click="toggleReaderPanel('font')"
-          >
-            <ALargeSmall :size="20" /><span>字体</span>
-          </button>
-          <button
-            type="button"
-            class="reader-control-action"
-            :class="{ active: activePanel === 'mode' }"
-            title="阅读方式设置"
-            :aria-expanded="activePanel === 'mode'"
-            @click="toggleReaderPanel('mode')"
-          >
-            <ScrollText v-if="displayMode === 'vertical'" :size="20" />
-            <Columns2 v-else :size="20" />
-            <span>阅读方式</span>
-          </button>
-        </nav>
-      </footer>
-    </Transition>
+      <template #directory><ListTree :size="20" /></template>
+      <template #font><ALargeSmall :size="20" /></template>
+      <template #mode>
+        <ScrollText v-if="displayMode === 'vertical'" :size="20" />
+        <Columns2 v-else :size="20" />
+      </template>
+    </ReaderChrome>
   </article>
 
   <section v-else class="reader-state">
@@ -914,7 +889,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .reader {
-  --reader-dock-width: min(430px, calc(100vw - 24px));
   position: fixed;
   inset: 0;
   overflow-y: auto;
@@ -950,349 +924,6 @@ onBeforeUnmount(() => {
   max-height: 80vh;
   margin: 20px auto;
   object-fit: contain;
-}
-.reader-floating-bar {
-  position: fixed;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  min-height: 52px;
-  background: white;
-}
-.reader-top-bar {
-  top: max(10px, env(safe-area-inset-top));
-  left: 50%;
-  width: var(--reader-dock-width);
-  min-height: 52px;
-  justify-content: flex-start;
-  gap: 4px;
-  padding: 5px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.74);
-  border-radius: 999px;
-  background: rgba(255, 252, 249, 0.9);
-  box-shadow:
-    0 18px 42px rgba(89, 57, 48, 0.18),
-    0 2px 8px rgba(89, 57, 48, 0.06);
-  transform: translateX(-50%);
-  backdrop-filter: blur(22px) saturate(1.15);
-  -webkit-backdrop-filter: blur(22px) saturate(1.15);
-}
-.reader-heading {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0 40px 0 0;
-  color: var(--theme-color-dark);
-}
-.reader-heading small {
-  flex: 0 0 auto;
-  font-size: 14px;
-}
-.reader-heading strong {
-  overflow: hidden;
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.icon-button {
-  display: inline-flex;
-  width: 40px;
-  height: 40px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 18px;
-  color: var(--theme-color-dark);
-  background: transparent;
-}
-.icon-button:hover,
-.icon-button.active {
-  color: var(--theme-color-dark);
-  background: var(--theme-color-light);
-}
-.icon-button:disabled {
-  opacity: 0.32;
-}
-.reader-dock {
-  position: fixed;
-  z-index: 30;
-  left: 50%;
-  bottom: max(10px, env(safe-area-inset-bottom));
-  display: flex;
-  width: var(--reader-dock-width);
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  transform: translateX(-50%);
-}
-.reader-control-bar {
-  display: grid;
-  width: 100%;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.74);
-  border-radius: 999px;
-  background: rgba(255, 250, 247, 0.9);
-  box-shadow:
-    0 18px 42px rgba(89, 57, 48, 0.18),
-    0 2px 8px rgba(89, 57, 48, 0.06);
-  backdrop-filter: blur(22px) saturate(1.15);
-  -webkit-backdrop-filter: blur(22px) saturate(1.15);
-}
-.reader-control-action {
-  display: flex;
-  height: 54px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  border: 0;
-  border-radius: 999px;
-  color: var(--theme-color-dark);
-  background: transparent;
-  font-size: 12px;
-  line-height: 1;
-  transition:
-    color 150ms ease,
-    background 150ms ease,
-    transform 150ms ease;
-}
-.reader-control-action:hover {
-  background: rgba(242, 219, 205, 0.6);
-}
-.reader-control-action.active {
-  color: #a85a39;
-  background: rgba(226, 148, 100, 0.16);
-}
-.reader-control-action:active {
-  transform: scale(0.96);
-}
-.reader-progress-control {
-  display: flex;
-  width: min(340px, calc(100% - 42px));
-  min-height: 42px;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 5px;
-  border: 1px solid rgba(255, 255, 255, 0.74);
-  border-radius: 999px;
-  background: rgba(255, 252, 249, 0.9);
-  box-shadow: 0 10px 26px rgba(89, 57, 48, 0.12);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-}
-.reader-turn-button {
-  display: inline-flex;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 50%;
-  color: var(--theme-color-dark);
-  background: transparent;
-  transition:
-    color 150ms ease,
-    background 150ms ease,
-    transform 150ms ease;
-}
-.reader-turn-button:hover:not(:disabled) {
-  background: rgba(242, 219, 205, 0.7);
-}
-.reader-turn-button:active:not(:disabled) {
-  transform: scale(0.92);
-}
-.reader-turn-button:disabled {
-  opacity: 0.28;
-  cursor: default;
-}
-.reader-progress-main {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  align-items: center;
-}
-.reader-progress-track {
-  height: 4px;
-  flex: 1 1 auto;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(201, 111, 72, 0.16);
-}
-.reader-progress-track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #e29464, #cf7952);
-  transition: width 180ms ease-out;
-}
-.reader-panel {
-  width: min(340px, 100%);
-  padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.74);
-  border-radius: 18px;
-  background: rgba(255, 252, 249, 0.92);
-  box-shadow: 0 12px 30px rgba(89, 57, 48, 0.13);
-  backdrop-filter: blur(20px) saturate(1.1);
-  -webkit-backdrop-filter: blur(20px) saturate(1.1);
-}
-.reader-setting-row {
-  display: flex;
-  min-height: 34px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-.reader-setting-row + .reader-setting-row {
-  margin-top: 2px;
-  padding-top: 2px;
-  border-top: 1px solid rgba(202, 174, 159, 0.24);
-}
-.reader-setting-label {
-  color: var(--muted);
-  font-size: 12px;
-}
-.reader-font-stepper,
-.reader-segment {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 10px;
-  background: rgba(242, 228, 218, 0.82);
-}
-.reader-font-stepper button {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 8px;
-  color: var(--theme-color-dark);
-  background: transparent;
-  font-size: 16px;
-  line-height: 1;
-  transition:
-    color 150ms ease,
-    background 150ms ease,
-    transform 150ms ease;
-}
-.reader-font-stepper button:hover:not(:disabled) {
-  background: #fffaf6;
-}
-.reader-font-stepper button:active:not(:disabled) {
-  transform: scale(0.92);
-}
-.reader-font-stepper button:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-.reader-font-stepper span {
-  min-width: 24px;
-  color: var(--theme-color-dark);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-.reader-segment button {
-  height: 28px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 8px;
-  color: #8b7167;
-  background: transparent;
-  font-size: 12px;
-  transition:
-    color 150ms ease,
-    background 150ms ease;
-}
-.reader-segment button.active {
-  color: var(--theme-color-dark);
-  background: #fffaf6;
-  box-shadow: 0 1px 4px rgba(89, 57, 48, 0.1);
-}
-.reader-mode-options {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-.reader-mode-options button {
-  display: flex;
-  height: 38px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0;
-  border: 0;
-  border-radius: 12px;
-  color: #8b7167;
-  background: rgba(242, 228, 218, 0.6);
-  font-size: 12px;
-  font-weight: 500;
-  transition:
-    color 150ms ease,
-    background 150ms ease,
-    box-shadow 150ms ease;
-}
-.reader-mode-options button.active {
-  color: var(--theme-color-dark);
-  background: #fffaf6;
-  box-shadow: 0 1px 5px rgba(89, 57, 48, 0.11);
-}
-.reader-control-action:focus-visible,
-.reader-turn-button:focus-visible,
-.reader-font-stepper button:focus-visible,
-.reader-segment button:focus-visible,
-.reader-mode-options button:focus-visible {
-  outline: 2px solid rgba(201, 111, 72, 0.55);
-  outline-offset: 2px;
-}
-.reader-dock-enter-active {
-  transition:
-    opacity 240ms ease-out,
-    transform 250ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.reader-dock-leave-active {
-  transition:
-    opacity 180ms ease-in,
-    transform 200ms ease-in;
-}
-.reader-dock-enter-from,
-.reader-dock-leave-to {
-  opacity: 0;
-  transform: translate(-50%, 16px) scale(0.97);
-}
-.reader-top-enter-active {
-  transition:
-    opacity 240ms ease-out,
-    transform 250ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.reader-top-leave-active {
-  transition:
-    opacity 180ms ease-in,
-    transform 200ms ease-in;
-}
-.reader-top-enter-from,
-.reader-top-leave-to {
-  opacity: 0;
-  transform: translate(-50%, -14px) scale(0.97);
-}
-.reader-swap-enter-active {
-  transition:
-    opacity 220ms ease-out,
-    transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.reader-swap-leave-active {
-  transition:
-    opacity 140ms ease-in,
-    transform 160ms ease-in;
-}
-.reader-swap-enter-from,
-.reader-swap-leave-to {
-  opacity: 0;
-  transform: translateY(8px) scale(0.97);
 }
 .paged-reader {
   overflow: hidden;
@@ -1553,90 +1184,6 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 760px) {
-  .reader {
-    --reader-dock-width: min(330px, calc(100vw - 40px));
-  }
-  .reader-top-bar {
-    top: max(8px, env(safe-area-inset-top));
-    min-height: 44px;
-    gap: 2px;
-    padding: 4px 5px;
-    border-radius: 999px;
-  }
-  .reader-top-bar .icon-button {
-    width: 34px;
-    height: 34px;
-    border-radius: 15px;
-  }
-  .reader-heading {
-    gap: 6px;
-    padding-right: 34px;
-  }
-  .reader-heading small,
-  .reader-heading strong {
-    font-size: 13px;
-  }
-  .reader-dock {
-    bottom: max(8px, env(safe-area-inset-bottom));
-    gap: 6px;
-  }
-
-  .reader-control-action {
-    height: 46px;
-    gap: 2px;
-    border-radius: 999px;
-  }
-  .reader-control-action svg {
-    width: 18px;
-    height: 18px;
-  }
-  .reader-progress-control {
-    width: min(270px, calc(100% - 48px));
-    min-height: 36px;
-    gap: 5px;
-    padding: 3px 4px;
-    border-radius: 999px;
-  }
-  .reader-turn-button {
-    width: 28px;
-    height: 28px;
-  }
-  .reader-turn-button svg {
-    width: 16px;
-    height: 16px;
-  }
-  .reader-progress-main {
-    gap: 0;
-  }
-  .reader-progress-track {
-    height: 3px;
-  }
-  .reader-panel {
-    width: min(270px, calc(100% - 48px));
-    padding: 4px 8px;
-    border-radius: 16px;
-  }
-  .reader-setting-row {
-    min-height: 30px;
-    gap: 12px;
-  }
-  .reader-font-stepper button {
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
-  }
-  .reader-font-stepper span {
-    min-width: 22px;
-  }
-  .reader-segment button {
-    height: 26px;
-    padding: 0 8px;
-    border-radius: 7px;
-  }
-  .reader-mode-options button {
-    height: 32px;
-    border-radius: 10px;
-  }
   .chapter-content {
     border: 0;
     background: none;
@@ -1659,23 +1206,6 @@ onBeforeUnmount(() => {
     right: max(10px, env(safe-area-inset-right));
     bottom: max(12px, env(safe-area-inset-bottom));
     max-width: 62%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .reader-top-enter-active,
-  .reader-top-leave-active,
-  .reader-dock-enter-active,
-  .reader-dock-leave-active,
-  .reader-swap-enter-active,
-  .reader-swap-leave-active,
-  .reader-progress-track span {
-    transition: none;
-  }
-  .reader-control-action:active,
-  .reader-turn-button:active,
-  .reader-font-stepper button:active {
-    transform: none;
   }
 }
 </style>

@@ -4,11 +4,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Columns2,
-  EyeOff,
   Images,
   ListTree,
   LoaderCircle,
   MapPin,
+  Maximize,
   ScrollText,
   ZoomIn,
   ZoomOut,
@@ -18,6 +18,9 @@ import DrawerShell from "../components/DrawerShell.vue";
 import DirectoryGroupTitle, {
   DIRECTORY_GROUP_HEIGHT,
 } from "../components/DirectoryGroupTitle.vue";
+import ReaderChrome, {
+  type ReaderAction,
+} from "../components/ReaderChrome.vue";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import type { DisplayMode } from "../types";
 
@@ -54,6 +57,8 @@ const chapters = computed<ComicChapterEntry[]>(() => {
       id: chapter.id,
       title: chapter.title,
       isVip: chapter.isVip,
+      // 在线目录的预览图来自上游 `expand.chapCover`，本地章节取首图兜底。
+      cover: chapter.cover,
     }));
   return (book.value?.comicChapters || []).map((chapter) => ({
     id: chapter.id,
@@ -84,9 +89,31 @@ const nextChapter = computed(() => chapters.value[chapterIndex.value + 1]);
 const controlsVisible = ref(true);
 const directoryOpen = ref(false);
 const displayMode = ref<DisplayMode>("vertical");
+type ComicPanel = "zoom" | "mode";
+/** null 表示坞里显示翻页进度条。 */
+const activePanel = ref<ComicPanel | null>(null);
 const pageIndex = ref(0);
+/** 竖屏模式下的滚动进度，与翻页模式的页码进度共用同一条进度条。 */
+const scrollProgress = ref(0);
 const chapterLoading = ref(false);
 const pageCount = computed(() => comicChapter.value?.pages.length || 0);
+const progressPercent = computed(() => {
+  if (displayMode.value === "paged")
+    return pageCount.value
+      ? Math.round(((pageIndex.value + 1) / pageCount.value) * 100)
+      : 0;
+  return Math.round(scrollProgress.value);
+});
+const canGoPrevious = computed(
+  () =>
+    Boolean(previousChapter.value) ||
+    (displayMode.value === "paged" && pageIndex.value > 0),
+);
+const canGoNext = computed(
+  () =>
+    Boolean(nextChapter.value) ||
+    (displayMode.value === "paged" && pageIndex.value < pageCount.value - 1),
+);
 const requestedChapterId = ref<number>();
 const onlineError = computed(() =>
   online.value ? reading.chapterError.value || reading.directoryError.value : "",
@@ -224,6 +251,7 @@ async function openChapter(chapterId?: number, showLastPage = false) {
       : 0;
     resetImageView();
     resetCarouselPosition();
+    scrollProgress.value = 0;
     directoryOpen.value = false;
     await nextTick();
     readerElement.value?.scrollTo({ top: 0 });
@@ -271,22 +299,27 @@ function next() {
 
 function handleReaderScroll() {
   const element = readerElement.value;
-  if (
-    displayMode.value === "vertical" &&
-    element &&
-    element.scrollTop + element.clientHeight >= element.scrollHeight - 32
-  ) {
+  if (!element || displayMode.value !== "vertical") return;
+  const scrollable = element.scrollHeight - element.clientHeight;
+  scrollProgress.value =
+    scrollable > 0 ? Math.min(100, (element.scrollTop / scrollable) * 100) : 0;
+  if (element.scrollTop + element.clientHeight >= element.scrollHeight - 32)
     void openChapter(nextChapter.value?.id);
-  }
 }
 
 function setDisplayMode(mode: DisplayMode) {
+  if (displayMode.value === mode) return;
   displayMode.value = mode;
   resetImageView();
-  controlsVisible.value = mode === "vertical";
+  scrollProgress.value = 0;
   void nextTick(() => {
     readerElement.value?.scrollTo({ top: 0 });
   });
+}
+
+function toggleControls() {
+  controlsVisible.value = !controlsVisible.value;
+  if (!controlsVisible.value) activePanel.value = null;
 }
 
 function handleReaderClick(event: MouseEvent) {
@@ -296,13 +329,28 @@ function handleReaderClick(event: MouseEvent) {
   }
   const rect = readerElement.value?.getBoundingClientRect();
   if (!rect) return;
+  if (displayMode.value === "paged") {
+    // 与小说翻页一致：左右三分区翻页，中间切换菜单（阈值同 pagedEngine）。
+    const ratio = (event.clientX - rect.left) / Math.max(1, rect.width);
+    if (ratio < 0.3) previous();
+    else if (ratio > 0.7) next();
+    else toggleControls();
+    return;
+  }
   const localY = event.clientY - rect.top;
   if (localY < rect.height * 0.25 || localY > rect.height * 0.75) return;
-  controlsVisible.value = !controlsVisible.value;
+  toggleControls();
 }
 
 function handleFlipPointerDown(event: PointerEvent) {
   if (displayMode.value !== "paged" || carouselTransitioning.value) return;
+  // 从按钮上开始的按下不接管翻页手势：一旦在舞台容器上 setPointerCapture，
+  // pointerup 会被改派到这里，顺带把 click 改派成容器，按钮自己的 click 收不到。
+  if (
+    event.target instanceof Element &&
+    event.target.closest("button, a, [role='button']")
+  )
+    return;
   activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   event.currentTarget instanceof HTMLElement &&
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -383,8 +431,25 @@ function handleFlipPointerCancel(event: PointerEvent) {
   resetCarouselPosition();
 }
 
+/** 底部控制栏的三个入口；顺序与小说阅读器一致。 */
+const comicActions = computed<ReaderAction[]>(() => [
+  { key: "directory", label: "目录" },
+  { key: "zoom", label: "缩放", active: activePanel.value === "zoom" },
+  { key: "mode", label: "阅读方式", active: activePanel.value === "mode" },
+]);
+
+function toggleComicPanel(panel: ComicPanel) {
+  activePanel.value = activePanel.value === panel ? null : panel;
+}
+
+function handleComicAction(key: string) {
+  if (key === "directory") showDirectory();
+  else if (key === "zoom" || key === "mode") toggleComicPanel(key);
+}
+
 function showDirectory() {
   directoryOpen.value = true;
+  activePanel.value = null;
 }
 
 function setDirectoryBody(element: HTMLElement | null) {
@@ -479,33 +544,6 @@ watch(
     @scroll="handleReaderScroll"
     @click="handleReaderClick"
   >
-    <header
-      v-show="controlsVisible"
-      class="comic-floating-bar comic-top-bar"
-      @click.stop
-    >
-      <button
-        class="icon-button"
-        title="返回书籍详情"
-        aria-label="返回书籍详情"
-        @click="goBack"
-      >
-        <ChevronLeft :size="21" />
-      </button>
-      <div class="comic-heading">
-        <small>第 {{ chapterIndex + 1 }} 章</small
-        ><strong>{{ comicChapter.title }}</strong>
-      </div>
-      <button
-        class="icon-button"
-        title="漫画目录"
-        aria-label="漫画目录"
-        @click="showDirectory"
-      >
-        <ListTree :size="20" />
-      </button>
-    </header>
-
     <div v-if="onlineError" class="comic-error-banner" @click.stop>
       <span>{{ onlineError }}</span>
       <button
@@ -539,7 +577,11 @@ watch(
         @pointerup="handleFlipPointerUp"
         @pointercancel="handleFlipPointerCancel"
       >
-        <header class="comic-page-chrome comic-page-topbar" @click.stop>
+        <header
+          v-show="!controlsVisible"
+          class="comic-page-chrome comic-page-topbar"
+          @click.stop
+        >
           <button
             class="comic-page-back"
             title="返回书籍详情"
@@ -585,6 +627,7 @@ watch(
           </div>
         </div>
         <div
+          v-show="!controlsVisible"
           class="comic-page-chrome comic-page-bottom-meta"
           aria-label="书名和页数"
         >
@@ -594,78 +637,128 @@ watch(
       </div>
     </main>
 
-    <footer
-      v-show="controlsVisible"
-      class="comic-floating-bar comic-bottom-bar"
-      @click.stop
+    <ReaderChrome
+      :visible="controlsVisible"
+      :subtitle="`第 ${chapterIndex + 1} 章`"
+      :title="comicChapter.title"
+      :actions="comicActions"
+      @back="goBack"
+      @action="handleComicAction"
     >
-      <button
-        class="icon-button"
-        title="上一章或上一页"
-        aria-label="上一章或上一页"
-        :disabled="
-          !previousChapter && (displayMode === 'vertical' || pageIndex === 0)
-        "
-        @click="previous"
-      >
-        <ChevronLeft :size="21" />
-      </button>
-      <button
-        class="icon-button mode-toggle"
-        :title="
-          displayMode === 'vertical' ? '切换到翻页显示' : '切换到竖屏显示'
-        "
-        :aria-label="
-          displayMode === 'vertical' ? '切换到翻页显示' : '切换到竖屏显示'
-        "
-        @click="
-          setDisplayMode(displayMode === 'vertical' ? 'paged' : 'vertical')
-        "
-      >
-        <ScrollText v-if="displayMode === 'vertical'" :size="18" />
-        <Columns2 v-else :size="18" />
-      </button>
-      <button
-        class="icon-button"
-        title="隐藏阅读菜单"
-        aria-label="隐藏阅读菜单"
-        @click="controlsVisible = false"
-      >
-        <EyeOff :size="19" />
-      </button>
-      <button
-        v-if="displayMode === 'paged'"
-        class="icon-button"
-        title="放大图片"
-        aria-label="放大图片"
-        :disabled="imageScale >= 3"
-        @click="zoomImage(0.25)"
-      >
-        <ZoomIn :size="19" />
-      </button>
-      <button
-        v-if="displayMode === 'paged'"
-        class="icon-button"
-        title="缩小图片"
-        aria-label="缩小图片"
-        :disabled="imageScale <= 1"
-        @click="zoomImage(-0.25)"
-      >
-        <ZoomOut :size="19" />
-      </button>
-      <button
-        class="icon-button"
-        title="下一章或下一页"
-        aria-label="下一章或下一页"
-        :disabled="
-          !nextChapter &&
-          (displayMode === 'vertical' || pageIndex === pageCount - 1)
-        "
-        @click="next"
-      >
-        <ChevronRight :size="21" />
-      </button>
-    </footer>
+      <template #panel>
+        <Transition name="reader-swap" mode="out-in">
+          <section
+            v-if="activePanel === 'zoom'"
+            key="zoom"
+            class="reader-panel"
+            aria-label="画面缩放"
+          >
+            <div class="reader-setting-row">
+              <span class="reader-setting-label">缩放</span>
+              <div class="reader-stepper">
+                <button
+                  type="button"
+                  title="缩小"
+                  aria-label="缩小"
+                  :disabled="imageScale <= 1"
+                  @click="zoomImage(-0.25)"
+                >
+                  <ZoomOut :size="16" />
+                </button>
+                <span class="reader-stepper-value"
+                  >{{ Math.round(imageScale * 100) }}%</span
+                >
+                <button
+                  type="button"
+                  title="放大"
+                  aria-label="放大"
+                  :disabled="imageScale >= 3"
+                  @click="zoomImage(0.25)"
+                >
+                  <ZoomIn :size="16" />
+                </button>
+                <span class="reader-stepper-divider" aria-hidden="true"></span>
+                <button
+                  type="button"
+                  title="适应屏幕"
+                  aria-label="适应屏幕"
+                  :disabled="imageScale === 1"
+                  @click="resetImageView()"
+                >
+                  <Maximize :size="15" />
+                </button>
+              </div>
+            </div>
+          </section>
+          <section
+            v-else-if="activePanel === 'mode'"
+            key="mode"
+            class="reader-panel"
+            aria-label="阅读方式设置"
+          >
+            <div class="reader-mode-options">
+              <button
+                type="button"
+                :class="{ active: displayMode === 'vertical' }"
+                :aria-pressed="displayMode === 'vertical'"
+                @click="setDisplayMode('vertical')"
+              >
+                <ScrollText :size="18" /><span>滚动</span>
+              </button>
+              <button
+                type="button"
+                :class="{ active: displayMode === 'paged' }"
+                :aria-pressed="displayMode === 'paged'"
+                @click="setDisplayMode('paged')"
+              >
+                <Columns2 :size="18" /><span>翻页</span>
+              </button>
+            </div>
+          </section>
+          <div v-else key="progress" class="reader-progress-control">
+            <button
+              type="button"
+              class="reader-turn-button"
+              title="上一章或上一页"
+              aria-label="上一章或上一页"
+              :disabled="!canGoPrevious"
+              @click="previous"
+            >
+              <ChevronLeft :size="20" />
+            </button>
+            <div class="reader-progress-main">
+              <div
+                class="reader-progress-track"
+                role="progressbar"
+                aria-label="本章阅读进度"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-valuenow="progressPercent"
+              >
+                <span :style="{ width: `${progressPercent}%` }"></span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="reader-turn-button"
+              title="下一章或下一页"
+              aria-label="下一章或下一页"
+              :disabled="!canGoNext"
+              @click="next"
+            >
+              <ChevronRight :size="20" />
+            </button>
+          </div>
+        </Transition>
+      </template>
+
+      <template #directory><ListTree :size="20" /></template>
+      <template #zoom><ZoomIn :size="20" /></template>
+      <template #mode>
+        <ScrollText v-if="displayMode === 'vertical'" :size="20" />
+        <Columns2 v-else :size="20" />
+      </template>
+    </ReaderChrome>
   </article>
 
   <section v-else class="comic-reader-state">
@@ -795,73 +888,6 @@ watch(
   cursor: default;
   pointer-events: none;
 }
-.comic-floating-bar {
-  position: fixed;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  min-height: 52px;
-  background: white;
-  box-shadow: 0 5px 20px rgba(89, 57, 48, 0.12);
-  backdrop-filter: blur(14px);
-}
-.comic-top-bar {
-  /* top: max(12px, env(safe-area-inset-top)); */
-  right: 0;
-  left: 0;
-  justify-content: space-between;
-  padding: 5px;
-  padding-top: max(12px, env(safe-area-inset-top));
-}
-.comic-bottom-bar {
-  right: 0;
-  left: 0;
-  /* bottom: max(14px, env(safe-area-inset-bottom)); */
-  bottom: 0;
-  justify-content: center;
-  gap: 8px;
-  padding: 5px;
-  padding-bottom: max(14px, env(safe-area-inset-bottom));
-  border-radius: 20px 20px 0 0;
-}
-.comic-heading {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-}
-.comic-heading small {
-  flex: 0 0 auto;
-  color: var(--theme-color-dark);
-  font-size: 14px;
-}
-.comic-heading strong {
-  overflow: hidden;
-  color: var(--theme-color-dark);
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.icon-button {
-  display: inline-flex;
-  width: 40px;
-  height: 40px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 5px;
-  color: var(--theme-color-dark);
-  background: transparent;
-}
-.icon-button:hover,
-.icon-button.active {
-  color: var(--theme-color-dark);
-  background: var(--theme-color-light);
-}
-.icon-button:disabled {
-  opacity: 0.32;
-}
 .comic-stage.paged {
   box-sizing: border-box;
   height: 100dvh;
@@ -909,10 +935,11 @@ watch(
   position: absolute;
   z-index: 20;
   color: var(--theme-color-dark);
-  pointer-events: auto;
+  /* 仅按钮本身开启命中，容器不遮挡翻页手势。 */
+  pointer-events: none;
 }
 .comic-page-topbar {
-  top: max(8px, env(safe-area-inset-top));
+  top: max(12px, env(safe-area-inset-top));
   right: 0;
   left: 0;
   display: flex;
@@ -941,23 +968,21 @@ watch(
   border-radius: 50%;
   color: var(--theme-color-dark);
   background: transparent;
+  pointer-events: auto;
 }
 .comic-page-back:hover {
   background: var(--theme-color-light);
 }
 .comic-page-bottom-meta {
-  position: fixed;
-  right: 0;
-  bottom: 0;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
   display: flex;
   max-width: min(60%, 360px);
   gap: 8px;
   align-items: center;
-  color: white;
+  color: var(--muted);
   font-size: 11px;
   line-height: 1.2;
-  padding: 4px 8px;
-  background: rgba(0, 0, 0, 0.5);
 }
 .comic-page-bottom-meta span:first-child {
   overflow: hidden;
@@ -981,10 +1006,6 @@ watch(
   will-change: transform;
 }
 
-.comic-single-page span {
-  color: white;
-  font-size: 12px;
-}
 .directory-count {
   padding: 5px 9px;
   border-radius: 999px;

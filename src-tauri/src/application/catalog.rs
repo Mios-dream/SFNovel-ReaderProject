@@ -271,6 +271,7 @@ impl<'a, R: RemoteGateway, S: LibraryStore> CatalogService<'a, R, S> {
                     is_vip: chapter.is_vip,
                     is_unlocked: chapter.is_unlocked,
                     downloaded: downloaded.contains(&chapter.id),
+                    cover: chapter.cover,
                 })
                 .collect(),
         })
