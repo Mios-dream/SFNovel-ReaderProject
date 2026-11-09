@@ -3,6 +3,8 @@
  * 弹窗外壳：遮罩、层级、进出场动画与全部交互都在这里定义，使用方只提供内容。
  *
  * - 遮罩颜色、模糊、内边距、z-index 全站统一，不接受外部传入
+ * - 层经 `Teleport` 挂到 `body`：页面里带 `transform` / `filter` / `backdrop-filter`
+ *   的容器会替换 `position: fixed` 的包含块，留在原地会让抽屉缩在容器内、四周露出缝隙
  * - 打开期间锁住页面滚动，关闭后原地恢复（按层计数，嵌套弹窗不会提前解锁）
  * - 滚轮与触摸在层内没有可滚动容器时不再落到背后页面；层内滚动到边界靠
  *   `[data-modal-layer] * { overscroll-behavior: contain }` 兜住惯性
@@ -191,20 +193,22 @@ onBeforeUnmount(detach);
 </script>
 
 <template>
-  <Transition name="modal-shell" appear @after-leave="onAfterLeave">
-    <div
-      v-if="open"
-      ref="root"
-      class="modal-shell"
-      :class="`modal-shell--${align}`"
-      data-modal-layer
-      tabindex="-1"
-      @pointerdown="onPointerDown"
-      @click="onClick"
-    >
-      <slot />
-    </div>
-  </Transition>
+  <Teleport to="body">
+    <Transition name="modal-shell" appear @after-leave="onAfterLeave">
+      <div
+        v-if="open"
+        ref="root"
+        class="modal-shell"
+        :class="`modal-shell--${align}`"
+        data-modal-layer
+        tabindex="-1"
+        @pointerdown="onPointerDown"
+        @click="onClick"
+      >
+        <slot />
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -222,23 +226,31 @@ onBeforeUnmount(detach);
   -webkit-backdrop-filter: blur(4px);
   outline: none;
 }
-.modal-shell--start {
-  justify-content: flex-start;
-  padding: 0;
-}
-.modal-shell--end {
-  justify-content: flex-end;
-  padding: 0;
-}
-.modal-shell--bottom {
-  align-items: flex-end;
-  padding: 0;
-}
 @media (max-width: 680px) {
   .modal-shell {
     padding: 10px;
   }
 }
+
+/*
+ * 抽屉类落点贴齐视口，内边距恒为 0。这组规则必须排在居中内边距与其窄屏
+ * 覆盖之后：三者权重相同，靠源码顺序取胜，否则会被上面 10px 的覆盖撑出缝。
+ */
+.modal-shell--start,
+.modal-shell--end,
+.modal-shell--bottom {
+  padding: 0;
+}
+.modal-shell--start {
+  justify-content: flex-start;
+}
+.modal-shell--end {
+  justify-content: flex-end;
+}
+.modal-shell--bottom {
+  align-items: flex-end;
+}
+
 /* 设置、更新这类长内容在窄屏改成贴底部弹出。 */
 @media (max-width: 600px) {
   .modal-shell--sheet {

@@ -17,7 +17,6 @@ import {
   LoaderCircle,
   LockKeyholeOpen,
   ScrollText,
-  X,
   MapPin,
 } from "@lucide/vue";
 import { useRouter } from "vue-router";
@@ -32,7 +31,10 @@ import {
 } from "../reader/chapterParts";
 import type { DisplayMode } from "../types";
 import { asRecord, readPreference, writePreference } from "../utils/preferences";
-import ModalShell from "../components/ModalShell.vue";
+import DrawerShell from "../components/DrawerShell.vue";
+import DirectoryGroupTitle, {
+  DIRECTORY_GROUP_HEIGHT,
+} from "../components/DirectoryGroupTitle.vue";
 
 import { useAuth, useLibrary, useOnline, useWorkspace } from "../desk";
 
@@ -151,7 +153,7 @@ type DirectoryRow =
       isVip?: boolean;
       isUnlocked?: boolean;
     };
-const DIRECTORY_VOLUME_HEIGHT = 44;
+const DIRECTORY_VOLUME_HEIGHT = DIRECTORY_GROUP_HEIGHT;
 const DIRECTORY_CHAPTER_HEIGHT = 48;
 const DIRECTORY_OVERSCAN = 6;
 const directoryRows = computed<DirectoryRow[]>(() =>
@@ -515,6 +517,10 @@ async function revealCurrentChapter() {
   directoryScrollTop.value = list.scrollTop;
 }
 
+function setDirectoryBody(element: HTMLElement | null) {
+  directoryList.value = element ?? undefined;
+}
+
 function handleDirectoryScroll() {
   const list = directoryList.value;
   if (!list) return;
@@ -844,93 +850,66 @@ onBeforeUnmount(() => {
     </div>
   </section>
 
-  <ModalShell
+  <DrawerShell
     :open="directoryOpen"
     align="start"
+    title="章节目录"
+    :subtitle="bookName"
+    :body-ref="setDirectoryBody"
     @close="directoryOpen = false"
+    @scroll="handleDirectoryScroll"
   >
-    <section
-      class="directory-panel"
-      role="dialog"
-      aria-modal="true"
-      aria-label="小说目录"
-    >
-      <header class="directory-header">
-        <div class="directory-title">
-          <small>{{ bookName }}</small>
-          <h2>章节目录</h2>
-        </div>
-        <div class="directory-header-actions">
-          <button
-            class="directory-close"
-            type="button"
-            title="关闭目录"
-            aria-label="关闭目录"
-            @click="directoryOpen = false"
-          >
-            <X :size="19" />
-          </button>
-        </div>
-      </header>
-      <div v-if="reading.directoryLoading.value" class="directory-state">
-        <LoaderCircle class="spin" :size="24" />正在读取目录
-      </div>
+    <div v-if="reading.directoryLoading.value" class="drawer-state">
+      <LoaderCircle class="spin" :size="24" />正在读取目录
+    </div>
+    <div v-else-if="reading.directoryError.value" class="drawer-state error">
+      <span>{{ reading.directoryError.value }}</span>
+      <button type="button" @click="retryOnlineLoad">重试</button>
+    </div>
+    <template v-else-if="directoryRows.length">
       <div
-        v-else-if="reading.directoryError.value"
-        class="directory-state error"
-      >
-        {{ reading.directoryError.value }}
-        <button type="button" @click="retryOnlineLoad">重试</button>
-      </div>
+        :style="{ height: `${directoryWindow.top}px` }"
+        aria-hidden="true"
+      ></div>
+      <template v-for="row in directoryWindow.rows" :key="row.key">
+        <DirectoryGroupTitle
+          v-if="row.kind === 'volume'"
+          :label="row.title"
+        />
+        <button
+          v-else
+          class="directory-chapter"
+          :class="{ active: row.id === chapter?.id }"
+          @click="openChapter(row.id)"
+        >
+          <strong>{{ row.title }}</strong>
+          <span class="directory-row-meta">
+            <small
+              v-if="row.isVip"
+              class="vip-badge"
+              :class="{ unlocked: row.isUnlocked === true }"
+              ><LockKeyholeOpen
+                v-if="row.isUnlocked === true"
+                :size="12"
+                aria-label="已解锁"
+              />VIP</small
+            >
+            <MapPin
+              v-if="row.id === chapter?.id"
+              class="directory-current-icon"
+              :size="16"
+              aria-hidden="true"
+            />
+          </span>
+        </button>
+      </template>
       <div
-        v-else-if="directoryRows.length"
-        ref="directoryList"
-        class="directory-list"
-        @scroll.passive="handleDirectoryScroll"
-      >
-        <div
-          :style="{ height: `${directoryWindow.top}px` }"
-          aria-hidden="true"
-        ></div>
-        <template v-for="row in directoryWindow.rows" :key="row.key">
-          <h3 v-if="row.kind === 'volume'" class="directory-volume-title">
-            {{ row.title }}
-          </h3>
-          <button
-            v-else
-            class="directory-chapter"
-            :class="{ active: row.id === chapter?.id }"
-            @click="openChapter(row.id)"
-          >
-            <strong>{{ row.title }}</strong>
-            <span class="directory-row-meta">
-              <small
-                v-if="row.isVip"
-                class="vip-badge"
-                :class="{ unlocked: row.isUnlocked === true }"
-                ><LockKeyholeOpen
-                  v-if="row.isUnlocked === true"
-                  :size="12"
-                  aria-label="已解锁"
-                />VIP</small
-              >
-              <MapPin
-                v-if="row.id === chapter?.id"
-                class="directory-current-icon"
-                :size="16"
-                aria-hidden="true"
-              />
-            </span>
-          </button>
-        </template>
-        <div
-          :style="{ height: `${directoryWindow.bottom}px` }"
-          aria-hidden="true"
-        ></div>
-      </div>
-      <div v-else class="directory-state">暂无目录内容</div>
-    </section>
-  </ModalShell>
+        :style="{ height: `${directoryWindow.bottom}px` }"
+        aria-hidden="true"
+      ></div>
+    </template>
+    <div v-else class="drawer-state">暂无目录内容</div>
+  </DrawerShell>
 </template>
 
 <style scoped>
@@ -1407,99 +1386,6 @@ onBeforeUnmount(() => {
   font-size: clamp(24px, 5vw, 34px);
   line-height: 1.35;
 }
-.directory-panel {
-  display: flex;
-  width: min(350px, 70vw);
-  height: 100%;
-  flex-direction: column;
-  overflow: hidden;
-  border-right: 1px solid rgba(255, 255, 255, 0.74);
-  border-radius: 0 22px 22px 0;
-  background: rgba(255, 252, 249, 0.9);
-  box-shadow: 20px 0 48px rgba(89, 57, 48, 0.18);
-  backdrop-filter: blur(22px) saturate(1.15);
-  -webkit-backdrop-filter: blur(22px) saturate(1.15);
-}
-.directory-header {
-  display: flex;
-  min-height: 64px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: max(14px, env(safe-area-inset-top)) 14px 12px 20px;
-  border-bottom: 1px solid rgba(202, 174, 159, 0.24);
-}
-.directory-title {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-.directory-title small {
-  display: block;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.directory-title h2 {
-  margin: 3px 0 0;
-  overflow: hidden;
-  color: var(--ink);
-  font-family: KaTongFont, "Microsoft YaHei", sans-serif;
-  font-size: 20px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.directory-header-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 10px;
-}
-.directory-close {
-  display: inline-flex;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 12px;
-  color: var(--muted);
-  background: rgba(242, 228, 218, 0.82);
-  transition:
-    color 150ms ease,
-    background 150ms ease,
-    transform 150ms ease;
-}
-.directory-close:hover {
-  color: var(--theme-color-dark);
-  background: rgba(246, 195, 160, 0.5);
-}
-.directory-close:active {
-  transform: scale(0.94);
-}
-.directory-list {
-  min-height: 0;
-  flex: 1 1 auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-bottom: env(safe-area-inset-bottom);
-  scrollbar-color: rgba(201, 111, 72, 0.35) transparent;
-  scrollbar-width: thin;
-}
-.directory-volume-title {
-  display: flex;
-  height: 44px;
-  align-items: center;
-  margin: 0;
-  padding: 0 18px;
-  color: var(--muted);
-  background: rgba(246, 235, 226, 0.55);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
 .directory-chapter {
   display: flex;
   width: 100%;
@@ -1592,8 +1478,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .reader-error-banner button,
-.reader-state-actions button,
-.directory-state button {
+.reader-state-actions button {
   flex: 0 0 auto;
   padding: 6px 10px;
   border: 1px solid rgba(214, 143, 113, 0.56);
@@ -1603,8 +1488,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 .reader-error-banner button:hover,
-.reader-state-actions button:hover,
-.directory-state button:hover {
+.reader-state-actions button:hover {
   color: #fff;
   background: var(--theme-color);
 }
@@ -1658,22 +1542,6 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 8px;
   margin-top: 6px;
-}
-.directory-state {
-  display: flex;
-  min-height: 0;
-  flex: 1 1 auto;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 28px;
-  color: #7f6f68;
-  font-size: 13px;
-  text-align: center;
-}
-.directory-state.error {
-  flex-direction: column;
-  color: #a4503a;
 }
 .spin {
   animation: reader-spin 0.9s linear infinite;
@@ -1807,9 +1675,6 @@ onBeforeUnmount(() => {
   .reader-control-action:active,
   .reader-turn-button:active,
   .reader-font-stepper button:active {
-    transform: none;
-  }
-  .directory-close:active {
     transform: none;
   }
 }

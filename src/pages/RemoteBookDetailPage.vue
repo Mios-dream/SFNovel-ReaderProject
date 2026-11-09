@@ -30,6 +30,10 @@ import {
 import BookCommentCard from "../components/BookCommentCard.vue";
 import DiscussionDanmaku from "../components/DiscussionDanmaku.vue";
 import DiscussionTabs from "../components/DiscussionTabs.vue";
+import DrawerShell from "../components/DrawerShell.vue";
+import DirectoryGroupTitle, {
+  DIRECTORY_GROUP_HEIGHT,
+} from "../components/DirectoryGroupTitle.vue";
 import ModalShell from "../components/ModalShell.vue";
 import { useBookDiscussions } from "../composables/useBookDiscussions";
 import { useVirtualRows } from "../composables/useVirtualRows";
@@ -176,7 +180,8 @@ const desktopDirectoryRows = computed<RemoteDesktopRow[]>(() => {
       kind: "volume",
       key: `desktop-volume-${volumeIndex}`,
       title: volume.title,
-      height: 40,
+      // `.remote-volume-heading` 自身 40px + 8px 下边距，行高必须按 48 记账。
+      height: 48,
     });
     for (let index = 0; index < volume.chapters.length; index += 3)
       rows.push({
@@ -191,48 +196,35 @@ const desktopDirectoryRows = computed<RemoteDesktopRow[]>(() => {
 
 const drawerDirectoryRows = computed<RemoteDrawerRow[]>(() => {
   const rows: RemoteDrawerRow[] = [];
-  if (mode.value === "novel") {
-    directoryVolumes.value.forEach((volume, volumeIndex) => {
-      if (volumeIndex > 0)
-        rows.push({
-          kind: "gap",
-          key: `drawer-gap-${volumeIndex}`,
-          height: 9,
-        });
+  let queueIndex = 0;
+  directoryVolumes.value.forEach((volume, volumeIndex) => {
+    if (volumeIndex > 0)
       rows.push({
-        kind: "volume",
-        key: `drawer-volume-${volumeIndex}`,
-        title: volume.title,
-        height: 42,
+        kind: "gap",
+        key: `drawer-gap-${volumeIndex}`,
+        height: 9,
       });
-      for (const chapter of volume.chapters)
-        rows.push({
-          kind: "chapter",
-          key: `drawer-text-${volumeIndex}-${chapter.id}`,
-          id: chapter.id,
-          title: chapter.title,
-          isVip: chapter.isVip,
-          isUnlocked: chapter.isUnlocked,
-          height: 48,
-        });
-    });
-    return rows;
-  }
-
-  // 音视频不展示分卷标题，直接平铺；index 用于播放队列定位。
-  const chapters = directoryVolumes.value.flatMap((volume) => volume.chapters);
-  chapters.forEach((chapter, index) =>
     rows.push({
-      kind: "chapter",
-      key: `drawer-${mode.value}-${chapter.id}`,
-      id: chapter.id,
-      title: chapter.title,
-      isVip: chapter.isVip,
-      isUnlocked: chapter.isUnlocked,
-      index: mode.value === "audio" ? index : undefined,
-      height: 48,
-    }),
-  );
+      kind: "volume",
+      key: `drawer-volume-${volumeIndex}`,
+      title: volume.title,
+      height: DIRECTORY_GROUP_HEIGHT,
+    });
+    for (const chapter of volume.chapters) {
+      // 有声目录的序号是跨卷的播放队列位置，与桌面列表和播放器编号一致。
+      const queuePosition = mode.value === "audio" ? queueIndex++ : undefined;
+      rows.push({
+        kind: "chapter",
+        key: `drawer-${mode.value}-${volumeIndex}-${chapter.id}`,
+        id: chapter.id,
+        title: chapter.title,
+        isVip: chapter.isVip,
+        isUnlocked: chapter.isUnlocked,
+        index: queuePosition,
+        height: 48,
+      });
+    }
+  });
   return rows;
 });
 const {
@@ -830,90 +822,71 @@ function groupChaptersByVolume(chapters: Chapter[]) {
         <Play :size="17" />{{ onlineActionLabel }}
       </button>
     </nav>
-    <ModalShell
+    <DrawerShell
       :open="directoryOpen"
       align="bottom"
+      :title="`${currentMediaLabel}目录`"
+      :body-ref="setDrawerDirectoryElement"
       @close="directoryOpen = false"
+      @scroll="handleDrawerDirectoryScroll"
     >
-      <section
-        class="directory-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="remote-directory-drawer-title"
-      >
-        <div class="drawer-handle" aria-hidden="true" />
-        <header class="drawer-heading">
-          <div>
-            <h3 id="remote-directory-drawer-title">
-              {{ currentMediaLabel }}目录
-            </h3>
-          </div>
-          <button title="关闭目录" @click="directoryOpen = false">
-            <X :size="20" />
-          </button>
-        </header>
-        <div v-if="directoryLoading" class="drawer-empty">
-          <LoaderCircle class="spin" :size="27" />正在读取目录
-        </div>
-        <div v-else-if="directoryError" class="drawer-empty error">
-          <span>{{ directoryError }}</span>
-          <div class="directory-error-actions">
-            <button @click="ensureDirectory(true)">重试</button>
-          </div>
-        </div>
+      <div v-if="directoryLoading" class="drawer-state">
+        <LoaderCircle class="spin" :size="24" />正在读取目录
+      </div>
+      <div v-else-if="directoryError" class="drawer-state error">
+        <span>{{ directoryError }}</span>
+        <button @click="ensureDirectory(true)">重试</button>
+      </div>
+      <template v-else-if="currentDirectoryCount">
         <div
-          v-else-if="currentDirectoryCount"
-          :ref="setDrawerDirectoryElement"
-          class="drawer-list"
-          @scroll.passive="handleDrawerDirectoryScroll"
-        >
+          :style="{ height: `${drawerDirectoryWindow.top}px` }"
+          aria-hidden="true"
+        ></div>
+        <template v-for="row in drawerDirectoryWindow.rows" :key="row.key">
           <div
-            :style="{ height: `${drawerDirectoryWindow.top}px` }"
+            v-if="row.kind === 'gap'"
+            class="remote-volume-gap"
+            :style="{ height: `${row.height}px` }"
             aria-hidden="true"
           ></div>
-          <template v-for="row in drawerDirectoryWindow.rows" :key="row.key">
-            <div
-              v-if="row.kind === 'gap'"
-              class="remote-volume-gap"
-              :style="{ height: `${row.height}px` }"
-              aria-hidden="true"
-            ></div>
-            <h4 v-else-if="row.kind === 'volume'">{{ row.title }}</h4>
-            <button
-              v-else
-              class="remote-drawer-row"
-              @click="startOnline(row.id)"
+          <DirectoryGroupTitle
+            v-else-if="row.kind === 'volume'"
+            :label="row.title"
+          />
+          <button
+            v-else
+            class="remote-drawer-row"
+            @click="startOnline(row.id)"
+          >
+            <span
+              v-if="row.index !== undefined"
+              class="remote-drawer-index"
+              >{{ String(row.index + 1).padStart(3, "0") }}</span
             >
-              <span
-                v-if="row.index !== undefined"
-                class="remote-drawer-index"
-                >{{ String(row.index + 1).padStart(3, "0") }}</span
-              >
-              <strong>{{ row.title }}</strong>
-              <span
-                v-if="row.isVip"
-                class="chapter-badge vip"
-                :class="{ unlocked: row.isUnlocked === true }"
-                :title="row.isUnlocked === true ? '已解锁' : 'VIP 章节'"
-                ><LockKeyholeOpen
-                  v-if="row.isUnlocked === true"
-                  :size="12"
-                  aria-label="已解锁"
-                />VIP</span
-              >
-              <Play :size="16" />
-            </button>
-          </template>
-          <div
-            :style="{ height: `${drawerDirectoryWindow.bottom}px` }"
-            aria-hidden="true"
-          ></div>
-        </div>
-        <div v-else class="drawer-empty">
-          <ListTree :size="27" />暂无目录内容
-        </div>
-      </section>
-    </ModalShell>
+            <strong>{{ row.title }}</strong>
+            <span
+              v-if="row.isVip"
+              class="chapter-badge vip"
+              :class="{ unlocked: row.isUnlocked === true }"
+              :title="row.isUnlocked === true ? '已解锁' : 'VIP 章节'"
+              ><LockKeyholeOpen
+                v-if="row.isUnlocked === true"
+                :size="12"
+                aria-label="已解锁"
+              />VIP</span
+            >
+            <Play :size="16" />
+          </button>
+        </template>
+        <div
+          :style="{ height: `${drawerDirectoryWindow.bottom}px` }"
+          aria-hidden="true"
+        ></div>
+      </template>
+      <div v-else class="drawer-state">
+        <ListTree :size="24" />暂无目录内容
+      </div>
+    </DrawerShell>
   </section>
   <main v-else class="detail-page detail-state">
     <header class="detail-navigation">
@@ -1282,9 +1255,6 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   flex: 0 0 38px;
   color: #ad9f8d;
   font: 11px monospace;
-}
-.drawer-empty.error {
-  color: #b96e5b;
 }
 @media (min-width: 901px) {
   .detail-page {
@@ -2241,84 +2211,8 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   line-height: 2;
   white-space: pre-line;
 }
-.directory-drawer {
-  display: flex;
-  width: min(100%, 720px);
-  max-height: min(82dvh, 720px);
-  flex-direction: column;
-  overflow: hidden;
-  padding: 8px 0 0;
-  border-radius: 24px 24px 0 0;
-  background: #fffdf8;
-  box-shadow: 0 -20px 48px rgba(46, 40, 33, 0.26);
-}
-.drawer-handle {
-  width: 42px;
-  height: 5px;
-  margin: 8px auto 7px;
-  border-radius: 3px;
-  background: #d2c9b9;
-}
-.drawer-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 9px 20px 16px;
-  border-bottom: 1px solid #eee8dc;
-}
-.drawer-heading small {
-  color: #b59885;
-  font: 10px monospace;
-  letter-spacing: 0.08em;
-}
-.drawer-heading h3 {
-  margin: 4px 0 0;
-  color: #443e36;
-  font-family: KaTongFont, "Microsoft YaHei", sans-serif;
-  font-size: 22px;
-}
-.drawer-heading button {
-  display: inline-flex;
-  width: 38px;
-  height: 38px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 50%;
-  color: #79695e;
-  background: #f4eee4;
-}
-.drawer-list {
-  overflow-y: auto;
-  padding-bottom: env(safe-area-inset-bottom);
-  background: #fffdf8;
-}
 .remote-volume-gap {
   background: #f7f3ea;
-}
-.drawer-list h4 {
-  display: block;
-  height: 42px;
-  margin: 0;
-  padding: 0 20px;
-  overflow: hidden;
-  color: #887f70;
-  font-size: 12px;
-  line-height: 42px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.drawer-empty {
-  display: flex;
-  min-height: 160px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: #a0998d;
-  font-size: 13px;
 }
 @media (prefers-reduced-motion: reduce) {
   .desktop-favorite,

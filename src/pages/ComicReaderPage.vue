@@ -10,12 +10,14 @@ import {
   LoaderCircle,
   MapPin,
   ScrollText,
-  X,
   ZoomIn,
   ZoomOut,
 } from "@lucide/vue";
 import { useRouter } from "vue-router";
-import ModalShell from "../components/ModalShell.vue";
+import DrawerShell from "../components/DrawerShell.vue";
+import DirectoryGroupTitle, {
+  DIRECTORY_GROUP_HEIGHT,
+} from "../components/DirectoryGroupTitle.vue";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import type { DisplayMode } from "../types";
 
@@ -60,7 +62,7 @@ const chapters = computed<ComicChapterEntry[]>(() => {
   }));
 });
 const directoryRows = computed(() => [
-  { kind: "header" as const, key: "header", height: 44 },
+  { kind: "header" as const, key: "header", height: DIRECTORY_GROUP_HEIGHT },
   ...chapters.value.map((item, index) => ({
     kind: "chapter" as const,
     key: `chapter-${item.id}`,
@@ -385,6 +387,10 @@ function showDirectory() {
   directoryOpen.value = true;
 }
 
+function setDirectoryBody(element: HTMLElement | null) {
+  directoryList.value = element ?? undefined;
+}
+
 async function revealCurrentChapter() {
   if (!directoryOpen.value || reading.directoryLoading.value) return;
   await nextTick();
@@ -704,93 +710,65 @@ watch(
     </div>
   </section>
 
-  <ModalShell
+  <DrawerShell
     :open="directoryOpen"
     align="start"
+    title="章节目录"
+    :subtitle="bookName"
+    :body-ref="setDirectoryBody"
     @close="directoryOpen = false"
+    @scroll="handleDirectoryScroll"
   >
-    <section
-      class="directory-panel"
-      role="dialog"
-      aria-modal="true"
-      aria-label="漫画目录"
-    >
-      <header class="directory-header">
-        <div class="directory-title">
-          <small>{{ bookName }}</small>
-          <h2>章节目录</h2>
-        </div>
-        <div class="directory-header-actions">
-          <span v-if="chapters.length" class="directory-count"
-            >{{ chapters.length }} 章</span
-          >
-          <button
-            class="directory-close"
-            type="button"
-            title="关闭目录"
-            aria-label="关闭目录"
-            @click="directoryOpen = false"
-          >
-            <X :size="19" />
-          </button>
-        </div>
-      </header>
-      <div v-if="reading.directoryLoading.value" class="directory-state">
-        <LoaderCircle class="spin" :size="24" />正在读取目录
-      </div>
-      <div
-        v-else-if="reading.directoryError.value"
-        class="directory-state error"
+    <template #actions>
+      <span v-if="chapters.length" class="directory-count"
+        >{{ chapters.length }} 章</span
       >
-        {{ reading.directoryError.value }}
-        <button type="button" @click="retryOnlineLoad">重试</button>
-      </div>
+    </template>
+    <div v-if="reading.directoryLoading.value" class="drawer-state">
+      <LoaderCircle class="spin" :size="24" />正在读取目录
+    </div>
+    <div v-else-if="reading.directoryError.value" class="drawer-state error">
+      <span>{{ reading.directoryError.value }}</span>
+      <button type="button" @click="retryOnlineLoad">重试</button>
+    </div>
+    <template v-else-if="chapters.length">
       <div
-        v-else-if="chapters.length"
-        ref="directoryList"
-        class="directory-list"
-        @scroll.passive="handleDirectoryScroll"
-      >
-        <div
-          :style="{ height: `${directoryWindow.top}px` }"
-          aria-hidden="true"
-        ></div>
-        <template v-for="row in directoryWindow.rows" :key="row.key">
-          <h3 v-if="row.kind === 'header'" class="directory-section-title">
-            全部章节
-          </h3>
-          <button
-            v-else
-            class="directory-item directory-chapter"
-            :class="{ active: row.item.id === comicChapter?.id }"
-            @click="openChapter(row.item.id)"
-          >
-            <img
-              v-if="row.item.cover"
-              class="directory-cover"
-              :src="row.item.cover"
-              :alt="`${row.item.title} 首图`"
+        :style="{ height: `${directoryWindow.top}px` }"
+        aria-hidden="true"
+      ></div>
+      <template v-for="row in directoryWindow.rows" :key="row.key">
+        <DirectoryGroupTitle v-if="row.kind === 'header'" label="全部章节" />
+        <button
+          v-else
+          class="directory-item directory-chapter"
+          :class="{ active: row.item.id === comicChapter?.id }"
+          @click="openChapter(row.item.id)"
+        >
+          <img
+            v-if="row.item.cover"
+            class="directory-cover"
+            :src="row.item.cover"
+            :alt="`${row.item.title} 首图`"
+          />
+          <strong>{{ row.item.title }}</strong>
+          <span class="directory-row-meta">
+            <small v-if="row.item.isVip" class="vip-badge">VIP</small>
+            <MapPin
+              v-if="row.item.id === comicChapter?.id"
+              class="directory-current-icon"
+              :size="16"
+              aria-hidden="true"
             />
-            <strong>{{ row.item.title }}</strong>
-            <span class="directory-row-meta">
-              <small v-if="row.item.isVip" class="vip-badge">VIP</small>
-              <MapPin
-                v-if="row.item.id === comicChapter?.id"
-                class="directory-current-icon"
-                :size="16"
-                aria-hidden="true"
-              />
-            </span>
-          </button>
-        </template>
-        <div
-          :style="{ height: `${directoryWindow.bottom}px` }"
-          aria-hidden="true"
-        ></div>
-      </div>
-      <div v-else class="directory-state">暂无目录内容</div>
-    </section>
-  </ModalShell>
+          </span>
+        </button>
+      </template>
+      <div
+        :style="{ height: `${directoryWindow.bottom}px` }"
+        aria-hidden="true"
+      ></div>
+    </template>
+    <div v-else class="drawer-state">暂无目录内容</div>
+  </DrawerShell>
 </template>
 
 <style scoped>
@@ -1007,56 +985,6 @@ watch(
   color: white;
   font-size: 12px;
 }
-.directory-panel {
-  display: flex;
-  width: min(350px, 70vw);
-  height: 100%;
-  flex-direction: column;
-  overflow: hidden;
-  border-right: 1px solid #eaded1;
-  border-radius: 0 22px 22px 0;
-  background: #fffdf8;
-  box-shadow: 20px 0 48px rgba(46, 40, 33, 0.24);
-}
-.directory-header {
-  display: flex;
-  min-height: 78px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: max(18px, env(safe-area-inset-top)) 18px 15px 20px;
-  border-bottom: 1px solid #eee8dc;
-  background: linear-gradient(180deg, #fffaf3 0%, #fffdf8 100%);
-}
-.directory-title {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-.directory-title small {
-  display: block;
-  overflow: hidden;
-  color: #b59885;
-  font: 10px monospace;
-  letter-spacing: 0.08em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.directory-title h2 {
-  margin: 5px 0 0;
-  overflow: hidden;
-  color: #443e36;
-  font-family: KaTongFont, "Microsoft YaHei", sans-serif;
-  font-size: 22px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.directory-header-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 10px;
-}
 .directory-count {
   padding: 5px 9px;
   border-radius: 999px;
@@ -1065,33 +993,6 @@ watch(
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
-}
-.directory-close {
-  display: inline-flex;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 50%;
-  color: #79695e;
-  background: #f4eee4;
-  transition:
-    color 0.18s ease,
-    background 0.18s ease;
-}
-.directory-close:hover {
-  color: #fff;
-  background: var(--theme-color);
-}
-.directory-list {
-  min-height: 0;
-  flex: 1 1 auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-bottom: env(safe-area-inset-bottom);
-  scrollbar-color: #e7cbbb transparent;
-  scrollbar-width: thin;
 }
 .directory-item {
   display: flex;
@@ -1150,17 +1051,6 @@ watch(
   flex: 0 0 auto;
   color: #d87a56;
 }
-.directory-section-title {
-  display: flex;
-  height: 44px;
-  align-items: center;
-  margin: 0;
-  padding: 0 20px;
-  color: #887f70;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
 .vip-badge {
   display: inline-flex;
   min-height: 18px;
@@ -1200,8 +1090,7 @@ watch(
   white-space: nowrap;
 }
 .comic-error-banner button,
-.comic-state-actions button,
-.directory-state button {
+.comic-state-actions button {
   flex: 0 0 auto;
   padding: 6px 10px;
   border: 1px solid rgba(214, 143, 113, 0.56);
@@ -1211,8 +1100,7 @@ watch(
   font-size: 12px;
 }
 .comic-error-banner button:hover,
-.comic-state-actions button:hover,
-.directory-state button:hover {
+.comic-state-actions button:hover {
   color: #fff;
   background: var(--theme-color);
 }
@@ -1266,22 +1154,6 @@ watch(
   justify-content: center;
   gap: 8px;
   margin-top: 6px;
-}
-.directory-state {
-  display: flex;
-  min-height: 0;
-  flex: 1 1 auto;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 28px;
-  color: #7f6f68;
-  font-size: 13px;
-  text-align: center;
-}
-.directory-state.error {
-  flex-direction: column;
-  color: #a4503a;
 }
 .spin {
   animation: comic-spin 0.9s linear infinite;

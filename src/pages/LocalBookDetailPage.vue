@@ -27,6 +27,10 @@ import {
   X,
 } from "@lucide/vue";
 import ExportModal from "../components/ExportModal.vue";
+import DrawerShell from "../components/DrawerShell.vue";
+import DirectoryGroupTitle, {
+  DIRECTORY_GROUP_HEIGHT,
+} from "../components/DirectoryGroupTitle.vue";
 import ModalShell from "../components/ModalShell.vue";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import { formatMetric, formatSourceDate, scoreToneClass } from "../utils/format";
@@ -134,7 +138,7 @@ const DESKTOP_ROW_METRICS: DirectoryRowMetrics = {
 const MOBILE_ROW_METRICS: DirectoryRowMetrics = {
   prefix: "mobile",
   gap: 9,
-  volume: 42,
+  volume: DIRECTORY_GROUP_HEIGHT,
   text: 48,
   audio: 48,
   comic: 66,
@@ -930,88 +934,67 @@ watch(
       </button>
     </nav>
 
-    <ModalShell
+    <DrawerShell
       :open="directoryOpen"
       align="bottom"
+      :title="`${mediaTitle(selectedMediaType)}目录`"
+      :body-ref="setMobileDirectoryElement"
       @close="directoryOpen = false"
+      @scroll="handleMobileDirectoryScroll"
     >
-      <section
-        class="directory-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="directory-title"
-      >
-        <div class="drawer-handle" aria-hidden="true" />
-        <header class="drawer-heading">
-          <div>
-            <h3 id="directory-title">
-              {{ mediaTitle(selectedMediaType) }}目录
-            </h3>
-          </div>
-          <button title="关闭目录" @click="directoryOpen = false">
-            <X :size="20" />
-          </button>
-        </header>
+      <template v-if="mobileDirectoryRows.length">
         <div
-          v-if="mobileDirectoryRows.length"
-          :ref="setMobileDirectoryElement"
-          class="drawer-list"
-          @scroll.passive="handleMobileDirectoryScroll"
-        >
+          :style="{ height: `${mobileDirectoryWindow.top}px` }"
+          aria-hidden="true"
+        ></div>
+        <template v-for="row in mobileDirectoryWindow.rows" :key="row.key">
           <div
-            :style="{ height: `${mobileDirectoryWindow.top}px` }"
+            v-if="row.kind === 'gap'"
+            class="directory-volume-gap"
+            :style="{ height: `${row.height}px` }"
             aria-hidden="true"
           ></div>
-          <template v-for="row in mobileDirectoryWindow.rows" :key="row.key">
-            <div
-              v-if="row.kind === 'gap'"
-              class="directory-volume-gap"
-              :style="{ height: `${row.height}px` }"
-              aria-hidden="true"
-            ></div>
-            <h4 v-else-if="row.kind === 'volume'">{{ row.title }}</h4>
-            <button
-              v-else-if="row.kind === 'text'"
-              class="drawer-text-row"
-              @click="readChapter(row.id)"
-            >
-              <strong>{{ row.title }}</strong
-              ><ChevronRight :size="16" />
-            </button>
-            <button
-              v-else-if="row.kind === 'audio'"
-              class="audio-row"
-              @click="playAudio(row.index)"
-            >
-              <span>{{ String(row.index + 1).padStart(3, "0") }}</span
-              ><strong>{{ row.title }}</strong
-              ><Headphones :size="16" />
-            </button>
-            <button
-              v-else
-              class="comic-directory-row"
-              @click="readComicChapter(row.id)"
-            >
-              <img
-                v-if="row.cover"
-                :src="row.cover"
-                :alt="`${row.title} 首图`"
-              />
-              <Images v-else :size="21" />
-              <strong>{{ row.title }}</strong
-              ><ChevronRight :size="16" />
-            </button>
-          </template>
-          <div
-            :style="{ height: `${mobileDirectoryWindow.bottom}px` }"
-            aria-hidden="true"
-          ></div>
-        </div>
-        <div v-else class="drawer-empty">
-          <ListTree :size="27" />暂无已下载内容
-        </div>
-      </section>
-    </ModalShell>
+          <DirectoryGroupTitle
+            v-else-if="row.kind === 'volume'"
+            :label="row.title"
+          />
+          <button
+            v-else-if="row.kind === 'text'"
+            class="drawer-text-row"
+            @click="readChapter(row.id)"
+          >
+            <strong>{{ row.title }}</strong
+            ><ChevronRight :size="16" />
+          </button>
+          <button
+            v-else-if="row.kind === 'audio'"
+            class="audio-row"
+            @click="playAudio(row.index)"
+          >
+            <span>{{ String(row.index + 1).padStart(3, "0") }}</span
+            ><strong>{{ row.title }}</strong
+            ><Headphones :size="16" />
+          </button>
+          <button
+            v-else
+            class="comic-directory-row"
+            @click="readComicChapter(row.id)"
+          >
+            <img v-if="row.cover" :src="row.cover" :alt="`${row.title} 首图`" />
+            <Images v-else :size="21" />
+            <strong>{{ row.title }}</strong
+            ><ChevronRight :size="16" />
+          </button>
+        </template>
+        <div
+          :style="{ height: `${mobileDirectoryWindow.bottom}px` }"
+          aria-hidden="true"
+        ></div>
+      </template>
+      <div v-else class="drawer-state">
+        <ListTree :size="24" />暂无已下载内容
+      </div>
+    </DrawerShell>
   </section>
   <ExportModal
     :open="exportModalOpen"
@@ -1077,7 +1060,6 @@ watch(
 .format-switch,
 .desktop-primary-actions button,
 .desktop-secondary-actions button,
-.drawer-heading button,
 .expand-description,
 .mobile-latest-chapter {
   font: inherit;
@@ -1100,7 +1082,6 @@ watch(
 .desktop-book-copy h2,
 .section-title h3,
 .desktop-directory h3,
-.drawer-heading h3,
 .description-modal h3 {
   font-family: KaTongFont, "Microsoft YaHei", sans-serif;
 }
@@ -1629,10 +1610,6 @@ watch(
     line-height: 40px;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .directory-volume-gap {
-    background: #f8f3eb;
   }
 
   .desktop-directory-list button {
@@ -2204,7 +2181,7 @@ watch(
   }
 }
 
-/* Modal and chapter drawer shared by both form factors. */
+/* Modal 与抽屉共用同一套暖白面板与标题排版。 */
 .description-modal {
   width: min(680px, 100%);
   max-height: min(72dvh, 620px);
@@ -2216,40 +2193,33 @@ watch(
   box-shadow: 0 22px 55px rgba(56, 43, 34, 0.22);
 }
 
-.description-modal header,
-.drawer-heading {
+.description-modal header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-}
-
-.description-modal header {
   padding-bottom: 15px;
   border-bottom: 1px solid #eee5d9;
 }
 
-.description-modal header small,
-.drawer-heading small {
+.description-modal header small {
   color: #b59885;
   font: 10px monospace;
   letter-spacing: 0.08em;
 }
 
-.description-modal h3,
-.drawer-heading h3 {
+.description-modal h3 {
   margin: 4px 0 0;
   color: #4c4037;
   font-size: 22px;
 }
 
-.description-modal header button,
-.drawer-heading button {
+.description-modal header button {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 34px;
   height: 34px;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 50%;
   color: #79695e;
@@ -2264,56 +2234,9 @@ watch(
   white-space: pre-line;
 }
 
-.directory-drawer {
-  display: flex;
-  width: min(100%, 720px);
-  max-height: min(78dvh, 680px);
-  flex-direction: column;
-  overflow: hidden;
-  padding: 8px 0 0;
-  border-radius: 19px 19px 0 0;
-  background: #fffdf8;
-  box-shadow: 0 -18px 40px rgba(46, 40, 33, 0.2);
-}
-
-.drawer-handle {
-  width: 37px;
-  height: 4px;
-  margin: 0 auto 6px;
-  border-radius: 3px;
-  background: #d6cfc0;
-}
-
-.drawer-heading {
-  padding: 8px 20px 13px;
-  border-bottom: 1px solid #eee8dc;
-}
-
-.drawer-heading h3 {
-  color: #443e36;
-  font-size: 20px;
-}
-
-.drawer-list {
-  overflow-y: auto;
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-.drawer-list .directory-volume-gap {
+/* 目录抽屉内容：面板、标题栏与滚动区由 DrawerShell 统一提供。 */
+.directory-volume-gap {
   background: #f7f3ea;
-}
-
-.drawer-list h4 {
-  display: block;
-  height: 42px;
-  margin: 0;
-  padding: 0 20px;
-  overflow: hidden;
-  color: #887f70;
-  font-size: 12px;
-  line-height: 42px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .drawer-text-row,
@@ -2406,51 +2329,5 @@ watch(
   flex: 0 0 auto;
   margin-left: auto;
   color: #a99f90;
-}
-
-.drawer-empty {
-  display: flex;
-  min-height: 160px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: #a0998d;
-  font-size: 13px;
-}
-
-/* Mobile drawer: full-width bottom sheet, independent from the page dock. */
-@media (max-width: 900px) {
-  .directory-drawer {
-    width: 100%;
-    max-height: min(82dvh, 720px);
-    border-radius: 24px 24px 0 0;
-    box-shadow: 0 -20px 48px rgba(46, 40, 33, 0.26);
-  }
-
-  .drawer-handle {
-    width: 42px;
-    height: 5px;
-    margin: 8px auto 7px;
-    background: #d2c9b9;
-  }
-
-  .drawer-heading {
-    padding: 9px 20px 16px;
-  }
-
-  .drawer-heading h3 {
-    font-size: 22px;
-  }
-
-  .drawer-heading button {
-    width: 38px;
-    height: 38px;
-    background: #f4eee4;
-  }
-
-  .drawer-list {
-    background: #fffdf8;
-  }
 }
 </style>

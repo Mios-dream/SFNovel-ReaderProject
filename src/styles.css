@@ -127,6 +127,37 @@ button {
   animation: rotate 1s linear infinite;
 }
 
+/* 抽屉内的加载、空与错误状态：所有抽屉共用一套居中排版。
+   侧边抽屉高度确定时撑满滚动区居中，贴底抽屉按内容高度收到 200px。 */
+.drawer-state {
+  display: flex;
+  height: 100%;
+  min-height: 200px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 20px;
+  color: #a0998d;
+  font-size: 13px;
+  text-align: center;
+}
+.drawer-state.error {
+  color: #a4503a;
+}
+.drawer-state button {
+  padding: 6px 12px;
+  border: 1px solid rgba(214, 143, 113, 0.56);
+  border-radius: 6px;
+  color: var(--theme-color-dark);
+  background: #fffaf7;
+  font-size: 12px;
+}
+.drawer-state button:hover {
+  color: #fff;
+  background: var(--theme-color);
+}
+
 @keyframes rotate {
   to {
     transform: rotate(360deg);

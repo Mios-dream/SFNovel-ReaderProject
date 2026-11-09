@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { Heart, LoaderCircle, MessageCircle, X } from "@lucide/vue";
+import { Heart, LoaderCircle, MessageCircle } from "@lucide/vue";
 import type { BookComment, BookCommentReply } from "../types";
 import { useRemote } from "../desk";
 import { nativeErrorMessage } from "../utils/native";
-import ModalShell from "./ModalShell.vue";
+import DrawerShell from "./DrawerShell.vue";
 
 const props = defineProps<{
   comment: BookComment;
@@ -107,155 +107,101 @@ watch(
 </script>
 
 <template>
-  <ModalShell :open="true" align="end" @close="close">
-    <aside
-      class="comment-detail-panel"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="comment-detail-title"
-    >
-      <header class="detail-heading">
-        <span id="comment-detail-title">讨论详情</span>
-        <button type="button" title="关闭" @click="close">
-          <X :size="18" />
-        </button>
-      </header>
+  <DrawerShell
+    :open="true"
+    align="end"
+    size="detail"
+    title="讨论详情"
+    @close="close"
+  >
+    <div class="detail-body">
+      <section class="detail-comment">
+        <div class="detail-avatar">
+          <span>{{ initial }}</span>
+          <img
+            v-if="comment.avatar && !avatarFailed"
+            :src="comment.avatar"
+            :alt="`${comment.userName} 的头像`"
+            @error="avatarFailed = true"
+          />
+        </div>
+        <div class="detail-author">
+          <div>
+            <strong>{{ comment.userName }}</strong>
+            <span v-if="comment.roleName" class="detail-role">{{ comment.roleName }}</span>
+            <span v-if="comment.isStick" class="detail-role stick">置顶</span>
+          </div>
+          <time v-if="createdAt">{{ createdAt }}</time>
+        </div>
+        <h2 v-if="comment.title">{{ comment.title }}</h2>
+        <p class="detail-content">{{ content }}</p>
+        <footer class="detail-stats">
+          <span><MessageCircle :size="15" />{{ comment.replyCount }} 条回复</span>
+          <span><Heart :size="15" />{{ comment.likeCount }} 人喜欢</span>
+        </footer>
+      </section>
 
-      <div class="detail-scroll">
-        <section class="detail-comment">
-          <div class="detail-avatar">
-            <span>{{ initial }}</span>
-            <img
-              v-if="comment.avatar && !avatarFailed"
-              :src="comment.avatar"
-              :alt="`${comment.userName} 的头像`"
-              @error="avatarFailed = true"
-            />
-          </div>
-          <div class="detail-author">
-            <div>
-              <strong>{{ comment.userName }}</strong>
-              <span v-if="comment.roleName" class="detail-role">{{ comment.roleName }}</span>
-              <span v-if="comment.isStick" class="detail-role stick">置顶</span>
-            </div>
-            <time v-if="createdAt">{{ createdAt }}</time>
-          </div>
-          <h2 v-if="comment.title">{{ comment.title }}</h2>
-          <p class="detail-content">{{ content }}</p>
-          <footer class="detail-stats">
-            <span><MessageCircle :size="15" />{{ comment.replyCount }} 条回复</span>
-            <span><Heart :size="15" />{{ comment.likeCount }} 人喜欢</span>
-          </footer>
-        </section>
+      <section class="replies-section" aria-labelledby="replies-title">
+        <header class="replies-heading">
+          <h3 id="replies-title">回复</h3>
+          <span>{{ replies.length || comment.replyCount }}</span>
+        </header>
 
-        <section class="replies-section" aria-labelledby="replies-title">
-          <header class="replies-heading">
-            <h3 id="replies-title">回复</h3>
-            <span>{{ replies.length || comment.replyCount }}</span>
-          </header>
-
-          <div v-if="loading" class="replies-state">
-            <LoaderCircle class="spin" :size="20" />正在读取回复
+        <div v-if="loading" class="replies-state">
+          <LoaderCircle class="spin" :size="20" />正在读取回复
+        </div>
+        <div v-else-if="error && !replies.length" class="replies-state error">
+          <span>{{ error }}</span>
+          <button type="button" @click="load()">重试</button>
+        </div>
+        <div v-else-if="!replies.length" class="replies-state">
+          <MessageCircle :size="20" />暂无回复
+        </div>
+        <template v-else>
+          <div class="reply-list">
+            <article v-for="reply in replies" :key="reply.replyId" class="reply-item">
+              <div class="reply-avatar">
+                <span>{{ reply.userName.trim().slice(0, 1) || "读" }}</span>
+                <img
+                  v-if="reply.avatar && !failedReplies.has(reply.replyId)"
+                  :src="reply.avatar"
+                  :alt="`${reply.userName} 的头像`"
+                  @error="failedReplies.add(reply.replyId)"
+                />
+              </div>
+              <div class="reply-copy">
+                <header>
+                  <strong>{{ reply.userName }}</strong>
+                  <span v-if="reply.repliedUserName"
+                    >回复 {{ reply.repliedUserName }}</span
+                  >
+                  <time>{{ formatDate(reply.createdAt) }}</time>
+                </header>
+                <p>{{ cleanText(reply.content) }}</p>
+                <span v-if="reply.likeCount" class="reply-like">
+                  <Heart :size="13" />{{ reply.likeCount }}
+                </span>
+              </div>
+            </article>
           </div>
-          <div v-else-if="error && !replies.length" class="replies-state error">
-            <span>{{ error }}</span>
-            <button type="button" @click="load()">重试</button>
-          </div>
-          <div v-else-if="!replies.length" class="replies-state">
-            <MessageCircle :size="20" />暂无回复
-          </div>
-          <template v-else>
-            <div class="reply-list">
-              <article v-for="reply in replies" :key="reply.replyId" class="reply-item">
-                <div class="reply-avatar">
-                  <span>{{ reply.userName.trim().slice(0, 1) || "读" }}</span>
-                  <img
-                    v-if="reply.avatar && !failedReplies.has(reply.replyId)"
-                    :src="reply.avatar"
-                    :alt="`${reply.userName} 的头像`"
-                    @error="failedReplies.add(reply.replyId)"
-                  />
-                </div>
-                <div class="reply-copy">
-                  <header>
-                    <strong>{{ reply.userName }}</strong>
-                    <span v-if="reply.repliedUserName"
-                      >回复 {{ reply.repliedUserName }}</span
-                    >
-                    <time>{{ formatDate(reply.createdAt) }}</time>
-                  </header>
-                  <p>{{ cleanText(reply.content) }}</p>
-                  <span v-if="reply.likeCount" class="reply-like">
-                    <Heart :size="13" />{{ reply.likeCount }}
-                  </span>
-                </div>
-              </article>
-            </div>
-            <button
-              v-if="hasMore"
-              type="button"
-              class="load-more-replies"
-              :disabled="loadingMore"
-              @click="load(false)"
-            >
-              <LoaderCircle v-if="loadingMore" class="spin" :size="16" />
-              {{ loadingMore ? "正在加载" : "加载更多回复" }}
-            </button>
-          </template>
-        </section>
-      </div>
-    </aside>
-  </ModalShell>
+          <button
+            v-if="hasMore"
+            type="button"
+            class="load-more-replies"
+            :disabled="loadingMore"
+            @click="load(false)"
+          >
+            <LoaderCircle v-if="loadingMore" class="spin" :size="16" />
+            {{ loadingMore ? "正在加载" : "加载更多回复" }}
+          </button>
+        </template>
+      </section>
+    </div>
+  </DrawerShell>
 </template>
 
 <style scoped>
-.comment-detail-panel {
-  position: relative;
-  display: flex;
-  width: min(520px, calc(100vw - 48px));
-  height: calc(100dvh - 32px);
-  flex-direction: column;
-  margin: 16px 16px 16px 0;
-  overflow: hidden;
-  border: 1px solid rgba(239, 224, 213, 0.95);
-  border-radius: 24px;
-  background: #fffaf6;
-  box-shadow: -18px 18px 56px rgba(66, 43, 31, 0.22);
-}
-.detail-heading {
-  display: flex;
-  min-height: 66px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px 0 24px;
-  border-bottom: 1px solid #efe4db;
-  color: #57473d;
-  background: rgba(255, 250, 246, 0.92);
-  font-size: 14px;
-  font-weight: 600;
-}
-.detail-heading button {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border: 0;
-  border-radius: 11px;
-  color: #8e7a6e;
-  background: #f4ebe4;
-  place-items: center;
-  transition:
-    color 140ms ease,
-    background-color 140ms ease;
-}
-.detail-heading button:hover {
-  color: #a95d40;
-  background: #f7e3d7;
-}
-.detail-scroll {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
+.detail-body {
   padding: 28px 28px 34px;
 }
 .detail-comment {
@@ -495,16 +441,8 @@ watch(
   border-radius: 11px;
 }
 @media (max-width: 900px) {
-  .comment-detail-panel {
-    width: 100%;
-    height: min(88dvh, 760px);
-    margin: 0;
-    border-width: 1px 0 0;
-    border-radius: 22px 22px 0 0;
-    box-shadow: 0 -18px 52px rgba(66, 43, 31, 0.24);
-  }
-  .detail-scroll {
-    padding: 22px 20px calc(26px + env(safe-area-inset-bottom));
+  .detail-body {
+    padding: 22px 20px 26px;
   }
   .detail-comment {
     grid-template-columns: 42px minmax(0, 1fr);
