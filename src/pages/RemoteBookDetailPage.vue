@@ -39,7 +39,11 @@ import { useBookDiscussions } from "../composables/useBookDiscussions";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import { reportError } from "../composables/useToast";
 import type { BookComment, Chapter, MediaType } from "../types";
-import { formatMetric, formatSourceDate, scoreToneClass } from "../utils/format";
+import {
+  formatMetric,
+  formatSourceDate,
+  scoreToneClass,
+} from "../utils/format";
 
 import { useOnline, usePicker, useRemote, useWorkspace } from "../desk";
 
@@ -287,7 +291,9 @@ function setDrawerDirectoryElement(
     element instanceof HTMLElement ? element : undefined;
 }
 const isFavorite = computed(() => remote.isRemoteFavorite(novel.value));
-const favoriteBusy = computed(() => remote.isRemoteFavoriteLoading(novel.value));
+const favoriteBusy = computed(() =>
+  remote.isRemoteFavoriteLoading(novel.value),
+);
 const remoteStatusLabel = computed(() =>
   novel.value?.isFinish == null
     ? ""
@@ -914,11 +920,9 @@ function groupChaptersByVolume(chapters: Chapter[]) {
             :class="{ 'remote-comic-row': mode === 'comic' }"
             @click="startOnline(row.id)"
           >
-            <span
-              v-if="row.index !== undefined"
-              class="remote-drawer-index"
-              >{{ String(row.index + 1).padStart(3, "0") }}</span
-            >
+            <span v-if="row.index !== undefined" class="remote-drawer-index">{{
+              String(row.index + 1).padStart(3, "0")
+            }}</span>
             <img
               v-if="row.cover"
               class="remote-comic-cover"
@@ -927,7 +931,11 @@ function groupChaptersByVolume(chapters: Chapter[]) {
               loading="lazy"
               decoding="async"
             />
-            <Images v-else-if="mode === 'comic'" class="remote-comic-cover" :size="21" />
+            <Images
+              v-else-if="mode === 'comic'"
+              class="remote-comic-cover"
+              :size="21"
+            />
             <strong>{{ row.title }}</strong>
             <span
               v-if="row.isVip"
@@ -949,9 +957,7 @@ function groupChaptersByVolume(chapters: Chapter[]) {
           aria-hidden="true"
         ></div>
       </template>
-      <div v-else class="drawer-state">
-        <ListTree :size="24" />暂无目录内容
-      </div>
+      <div v-else class="drawer-state"><ListTree :size="24" />暂无目录内容</div>
     </DrawerShell>
   </section>
   <main v-else class="detail-page detail-state">
@@ -961,7 +967,9 @@ function groupChaptersByVolume(chapters: Chapter[]) {
       </button>
     </header>
     <div class="detail-loading">
-      {{ remote.remoteBookLoading.value ? "正在读取作品详情" : "未找到远程作品" }}
+      {{
+        remote.remoteBookLoading.value ? "正在读取作品详情" : "未找到远程作品"
+      }}
     </div>
   </main>
 </template>
@@ -1788,7 +1796,7 @@ svg.remote-comic-cover {
     background-position: center 28%;
   }
   .detail-navigation {
-    padding: 14px 16px;
+    padding: calc(5px + env(safe-area-inset-top)) 16px 14px;
   }
   .nav-circle {
     width: 44px;

@@ -123,8 +123,7 @@ function openComment(comment: BookComment) {
 }
 
 function closeComment() {
-  if (route.query.comment)
-    void setCommentsQuery({ tab: activeTab.value });
+  if (route.query.comment) void setCommentsQuery({ tab: activeTab.value });
 }
 
 watch(
@@ -750,7 +749,7 @@ watch(
     width: 100%;
     min-height: 59px;
     gap: 10px;
-    padding: 9px 14px;
+    padding: calc(5px + env(safe-area-inset-top)) 14px 9px;
   }
   .back-button {
     width: 40px;

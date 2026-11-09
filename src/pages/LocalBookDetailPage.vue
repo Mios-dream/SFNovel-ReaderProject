@@ -33,7 +33,11 @@ import DirectoryGroupTitle, {
 } from "../components/DirectoryGroupTitle.vue";
 import ModalShell from "../components/ModalShell.vue";
 import { useVirtualRows } from "../composables/useVirtualRows";
-import { formatMetric, formatSourceDate, scoreToneClass } from "../utils/format";
+import {
+  formatMetric,
+  formatSourceDate,
+  scoreToneClass,
+} from "../utils/format";
 
 import { useLibrary, useWorkspace } from "../desk";
 
@@ -70,7 +74,9 @@ const mediaChapterCounts = computed<Record<MediaType, number>>(() => ({
  *   侧栏兜底小说，故由调用方决定。
  */
 function firstMediaWithContent(fallback: MediaType): MediaType {
-  return mediaTypes.find((media) => mediaChapterCounts.value[media] > 0) ?? fallback;
+  return (
+    mediaTypes.find((media) => mediaChapterCounts.value[media] > 0) ?? fallback
+  );
 }
 
 const selectedMediaType = ref<MediaType>(firstMediaWithContent("comic"));
@@ -213,10 +219,7 @@ function buildDirectoryRows(
 }
 
 const desktopDirectoryRows = computed(() =>
-  buildDirectoryRows(
-    desktopContentTab.value,
-    DESKTOP_ROW_METRICS,
-  ),
+  buildDirectoryRows(desktopContentTab.value, DESKTOP_ROW_METRICS),
 );
 const mobileDirectoryRows = computed(() =>
   buildDirectoryRows(chapterMode.value, MOBILE_ROW_METRICS),
@@ -240,12 +243,14 @@ watch([desktopContentTab, chapterMode], () => {
 function setDesktopDirectoryElement(
   element: Element | ComponentPublicInstance | null,
 ) {
-  desktopDirectoryList.value = element instanceof HTMLElement ? element : undefined;
+  desktopDirectoryList.value =
+    element instanceof HTMLElement ? element : undefined;
 }
 function setMobileDirectoryElement(
   element: Element | ComponentPublicInstance | null,
 ) {
-  mobileDirectoryList.value = element instanceof HTMLElement ? element : undefined;
+  mobileDirectoryList.value =
+    element instanceof HTMLElement ? element : undefined;
 }
 const mobileSwitchMediaTypes = computed(() =>
   mediaTypes.filter((media) => media !== selectedMediaType.value),
@@ -461,16 +466,12 @@ function resolveAvailableChapterMode(
 
 function openDirectory(mode?: MediaType) {
   chapterMode.value =
-    resolveAvailableChapterMode(
-      mode ?? selectedMediaType.value,
-    ) ?? "comic";
+    resolveAvailableChapterMode(mode ?? selectedMediaType.value) ?? "comic";
   directoryOpen.value = true;
 }
 
 function focusDesktopDirectory(mode?: MediaType) {
-  const resolved = resolveAvailableChapterMode(
-    mode ?? selectedMediaType.value,
-  );
+  const resolved = resolveAvailableChapterMode(mode ?? selectedMediaType.value);
   if (!resolved) {
     setMediaType("novel");
     return;
@@ -563,7 +564,9 @@ watch(
                 :class="{ finished: currentWork.isFinished }"
                 >{{ localStatusLabel }}</span
               >
-              <span v-if="currentWork.typeName">{{ currentWork.typeName }}</span>
+              <span v-if="currentWork.typeName">{{
+                currentWork.typeName
+              }}</span>
               <span v-for="tag in currentWork.tags" :key="tag">{{ tag }}</span>
             </div>
             <button
@@ -745,11 +748,17 @@ watch(
               aria-hidden="true"
             ></div>
             <h4 v-else-if="row.kind === 'volume'">{{ row.title }}</h4>
-            <button v-else-if="row.kind === 'text'" @click="readChapter(row.id)">
+            <button
+              v-else-if="row.kind === 'text'"
+              @click="readChapter(row.id)"
+            >
               <span>{{ row.title }}</span
               ><ChevronRight :size="15" />
             </button>
-            <button v-else-if="row.kind === 'audio'" @click="playAudio(row.index)">
+            <button
+              v-else-if="row.kind === 'audio'"
+              @click="playAudio(row.index)"
+            >
               <small>{{ String(row.index + 1).padStart(3, "0") }}</small
               ><span>{{ row.title }}</span
               ><Play :size="14" fill="currentColor" />
@@ -1691,7 +1700,7 @@ watch(
   }
 
   .detail-navigation {
-    padding: 14px 16px;
+    padding: calc(5px + env(safe-area-inset-top)) 16px 14px;
   }
 
   .nav-circle {
