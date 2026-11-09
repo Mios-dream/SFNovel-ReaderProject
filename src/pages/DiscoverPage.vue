@@ -32,11 +32,15 @@ const home = ref<DiscoverFeed>();
 const homeLoading = ref(false);
 const homeError = ref("");
 const activeCategory = ref<number>();
-const activeSlideIndex = ref(0);
+/** 轨道虚拟位置：0 为"末尾克隆"，1..total 为真实页，total+1 为"开头克隆"。 */
+const virtualIndex = ref(1);
+const sliding = ref(false);
+const silentMove = ref(false);
 const carouselPaused = ref(false);
 const heroTint = ref(HERO_TINT_FALLBACK);
 let homeRequest = 0;
 let carouselTimer: number | undefined;
+let slideTimer: number | undefined;
 let tintRequest = 0;
 const coverTints = new Map<string, string>();
 
@@ -52,7 +56,25 @@ const heroSlides = computed(() => {
   }
   return slides;
 });
+const activeSlideIndex = computed(() => {
+  const total = heroSlides.value.length;
+  if (!total) return 0;
+  return (((virtualIndex.value - 1) % total) + total) % total;
+});
 const activeSlide = computed(() => heroSlides.value[activeSlideIndex.value]);
+/** 渲染轨道：首尾各克隆一张，实现无缝循环。 */
+const trackSlides = computed(() => {
+  const slides = heroSlides.value;
+  if (slides.length < 2)
+    return slides.map((novel) => ({ novel, key: String(novel.novelId) }));
+  const first = slides[0]!;
+  const last = slides[slides.length - 1]!;
+  return [
+    { novel: last, key: `head-clone-${last.novelId}` },
+    ...slides.map((novel) => ({ novel, key: String(novel.novelId) })),
+    { novel: first, key: `tail-clone-${first.novelId}` },
+  ];
+});
 
 async function loadHome(typeId?: number) {
   const request = ++homeRequest;
@@ -65,7 +87,7 @@ async function loadHome(typeId?: number) {
     });
     if (request === homeRequest) {
       home.value = feed;
-      activeSlideIndex.value = 0;
+      resetCarouselState();
     }
   } catch (error) {
     if (request === homeRequest)
@@ -73,6 +95,16 @@ async function loadHome(typeId?: number) {
   } finally {
     if (request === homeRequest) homeLoading.value = false;
   }
+}
+
+function resetCarouselState() {
+  if (slideTimer != null) {
+    window.clearTimeout(slideTimer);
+    slideTimer = undefined;
+  }
+  sliding.value = false;
+  silentMove.value = false;
+  virtualIndex.value = 1;
 }
 
 function selectCategory(typeId?: number) {
@@ -84,18 +116,151 @@ function openNovel(novel: Novel) {
   remote.openRemoteBookDetail(novel);
 }
 
+const trackTransitionMs = 320;
+
+/** 带过渡的轨道移动；结束后若停在克隆页，则无声跳回真实页。 */
+function animateTo(position: number) {
+  if (sliding.value) return;
+  sliding.value = true;
+  virtualIndex.value = position;
+  if (slideTimer != null) window.clearTimeout(slideTimer);
+  slideTimer = window.setTimeout(() => {
+    slideTimer = undefined;
+    sliding.value = false;
+    settleTrack();
+  }, trackTransitionMs + 40);
+}
+
+/** 落在克隆页时关掉过渡瞬移回真实页，实现无缝循环。 */
+function settleTrack() {
+  const total = heroSlides.value.length;
+  if (total < 2) return;
+  const last = total + 1;
+  if (virtualIndex.value === last) jumpTo(1);
+  else if (virtualIndex.value === 0) jumpTo(total);
+}
+
+function jumpTo(position: number) {
+  silentMove.value = true;
+  virtualIndex.value = position;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      silentMove.value = false;
+    }),
+  );
+}
+
 function showSlide(index: number) {
   const total = heroSlides.value.length;
   if (!total) return;
-  activeSlideIndex.value = (index + total) % total;
+  animateTo(index + 1);
 }
 
 function previousSlide() {
-  showSlide(activeSlideIndex.value - 1);
+  if (heroSlides.value.length < 2) return;
+  animateTo(virtualIndex.value - 1);
 }
 
 function nextSlide() {
-  showSlide(activeSlideIndex.value + 1);
+  if (heroSlides.value.length < 2) return;
+  animateTo(virtualIndex.value + 1);
+}
+
+/** 轮播手势滑动：pointer 事件统一处理触摸与鼠标拖拽。 */
+const dragDX = ref(0);
+const dragLocked = ref(false);
+let dragPointerId: number | null = null;
+let dragStartX = 0;
+let dragStartY = 0;
+let dragStartTime = 0;
+let dragMoved = false;
+
+const prefersReducedMotion = window.matchMedia(
+  "(prefers-reduced-motion: reduce)",
+);
+
+const trackStyle = computed(() => {
+  if (heroSlides.value.length < 2) return undefined;
+  const noTransition =
+    dragLocked.value || silentMove.value || prefersReducedMotion.matches;
+  return {
+    transform: `translate3d(calc(${virtualIndex.value * -100}% + ${dragDX.value}px), 0, 0)`,
+    transition:
+      noTransition
+        ? "none"
+        : `transform ${trackTransitionMs}ms cubic-bezier(0.22, 0.61, 0.36, 1)`,
+  };
+});
+
+function onHeroPointerDown(event: PointerEvent) {
+  if (heroSlides.value.length < 2 || sliding.value) return;
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("button")) return; // 箭头/圆点按钮不参与滑动
+  dragPointerId = event.pointerId;
+  dragStartX = event.clientX;
+  dragStartY = event.clientY;
+  dragStartTime = performance.now();
+  dragMoved = false;
+}
+
+function onHeroPointerMove(event: PointerEvent) {
+  if (event.pointerId !== dragPointerId) return;
+  const dx = event.clientX - dragStartX;
+  const dy = event.clientY - dragStartY;
+  if (!dragLocked.value) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    if (Math.abs(dx) <= Math.abs(dy)) {
+      // 垂直方向意图（页面滚动），放弃手势
+      dragPointerId = null;
+      return;
+    }
+    dragLocked.value = true;
+    (event.currentTarget as HTMLElement)
+      .setPointerCapture?.(event.pointerId);
+  }
+  dragDX.value = dx;
+  if (Math.abs(dx) > 8) dragMoved = true;
+}
+
+function onHeroPointerUp(event: PointerEvent) {
+  if (event.pointerId !== dragPointerId) return;
+  const wasLocked = dragLocked.value;
+  const dx = dragDX.value;
+  const elapsed = performance.now() - dragStartTime;
+  const width = (event.currentTarget as HTMLElement).clientWidth || 1;
+  const threshold = Math.max(48, width * 0.12);
+  const flick = Math.abs(dx) > 30 && elapsed < 260;
+  resetDrag();
+  if (Math.abs(dx) >= threshold || flick) {
+    if (dx < 0) nextSlide();
+    else previousSlide();
+  } else if (wasLocked) {
+    // 未过阈值：弹回当前页
+    animateTo(virtualIndex.value);
+  }
+}
+
+function onHeroPointerCancel(event: PointerEvent) {
+  if (event.pointerId !== dragPointerId) return;
+  const wasLocked = dragLocked.value;
+  resetDrag();
+  if (wasLocked) animateTo(virtualIndex.value);
+}
+
+function resetDrag() {
+  dragPointerId = null;
+  dragLocked.value = false;
+  dragDX.value = 0;
+}
+
+function onHeroClickCapture(event: MouseEvent) {
+  if (dragMoved) {
+    // 拖拽结束后的 click 不应触发打开作品
+    event.stopPropagation();
+    event.preventDefault();
+    dragMoved = false;
+  }
 }
 
 function conciseDescription(value?: string) {
@@ -133,7 +298,8 @@ function restartCarousel() {
   )
     return;
   carouselTimer = window.setInterval(() => {
-    if (!carouselPaused.value) nextSlide();
+    if (!carouselPaused.value && !dragLocked.value && !sliding.value)
+      nextSlide();
   }, 6500);
 }
 
@@ -152,6 +318,7 @@ watch(() => activeSlide.value?.novelCover, updateHeroTint, { immediate: true });
 onMounted(() => void loadHome());
 onBeforeUnmount(() => {
   if (carouselTimer != null) window.clearInterval(carouselTimer);
+  if (slideTimer != null) window.clearTimeout(slideTimer);
   tintRequest += 1;
 });
 </script>
@@ -169,6 +336,7 @@ onBeforeUnmount(() => {
           <section
             v-else-if="activeSlide"
             class="hero"
+            :class="{ dragging: dragLocked }"
             :style="{ '--hero-tint': heroTint }"
             role="region"
             aria-roledescription="轮播图"
@@ -177,51 +345,64 @@ onBeforeUnmount(() => {
             @mouseleave="carouselPaused = false"
             @focusin="carouselPaused = true"
             @focusout="carouselPaused = false"
+            @pointerdown="onHeroPointerDown"
+            @pointermove="onHeroPointerMove"
+            @pointerup="onHeroPointerUp"
+            @pointercancel="onHeroPointerCancel"
+            @click.capture="onHeroClickCapture"
           >
-            <Transition name="hero-slide" mode="out-in">
-              <div :key="activeSlide.novelId" class="hero-slide">
+            <div class="hero-track" :style="trackStyle">
+              <div
+                v-for="(entry, index) in trackSlides"
+                :key="entry.key"
+                class="hero-slide"
+                :class="{ 'is-active': index === virtualIndex }"
+                :style="{ left: `${index * 100}%` }"
+                :aria-hidden="index !== virtualIndex"
+              >
                 <img
-                  v-if="activeSlide.novelCover"
+                  v-if="entry.novel.novelCover"
                   class="hero-art"
-                  :src="activeSlide.novelCover"
-                  :alt="`${activeSlide.novelName} 封面`"
+                  :src="entry.novel.novelCover"
+                  :alt="`${entry.novel.novelName} 封面`"
+                  draggable="false"
                 />
                 <BookOpen v-else class="hero-art-placeholder" :size="40" />
                 <div
                   class="hero-inner"
                   role="link"
-                  tabindex="0"
-                  :aria-label="`查看 ${activeSlide.novelName}`"
-                  @click="openNovel(activeSlide)"
-                  @keydown.enter="openNovel(activeSlide)"
+                  :tabindex="index === virtualIndex ? 0 : -1"
+                  :aria-label="`查看 ${entry.novel.novelName}`"
+                  @click="openNovel(entry.novel)"
+                  @keydown.enter="openNovel(entry.novel)"
                 >
                   <div class="hero-copy">
-                    <h1>{{ activeSlide.novelName }}</h1>
+                    <h1>{{ entry.novel.novelName }}</h1>
                     <p class="hero-author">
-                      著 / {{ activeSlide.authorName || "未知作者" }}
+                      著 / {{ entry.novel.authorName || "未知作者" }}
                     </p>
                   </div>
                   <div class="hero-description">
-                    <p>{{ conciseDescription(activeSlide.description) }}</p>
+                    <p>{{ conciseDescription(entry.novel.description) }}</p>
                     <div class="hero-meta">
-                      <span v-if="activeSlide.score != null"
+                      <span v-if="entry.novel.score != null"
                         ><Star :size="13" fill="currentColor" />{{
-                          activeSlide.score.toFixed(1)
+                          entry.novel.score.toFixed(1)
                         }}</span
                       >
-                      <span v-if="activeSlide.viewCount != null"
+                      <span v-if="entry.novel.viewCount != null"
                         ><Eye :size="13" />{{
-                          formatMetric(activeSlide.viewCount)
+                          formatMetric(entry.novel.viewCount)
                         }}</span
                       >
                       <span>{{
-                        activeSlide.isFinish ? "已完结" : "连载中"
+                        entry.novel.isFinish ? "已完结" : "连载中"
                       }}</span>
                     </div>
                   </div>
                 </div>
               </div>
-            </Transition>
+            </div>
             <div v-if="heroSlides.length > 1" class="hero-controls">
               <button
                 class="hero-arrow"
@@ -383,12 +564,22 @@ onBeforeUnmount(() => {
                       novel.description || "暂无简介"
                     }}</span>
                     <span class="recent-footer">
-                      <span v-if="novel.latestChapterTitle"
-                        >更新至 {{ novel.latestChapterTitle }}</span
-                      >
-                      <time v-else>{{
-                        formatMonthDay(novel.lastUpdateTime)
-                      }}</time>
+                      <template v-if="novel.tags?.length">
+                        <span
+                          v-for="tag in novel.tags.slice(0, 2)"
+                          :key="tag"
+                          class="recent-tag"
+                          >{{ tag }}</span
+                        >
+                      </template>
+                      <template v-else>
+                        <span v-if="novel.latestChapterTitle"
+                          >更新至 {{ novel.latestChapterTitle }}</span
+                        >
+                        <time v-else>{{
+                          formatMonthDay(novel.lastUpdateTime)
+                        }}</time>
+                      </template>
                     </span>
                   </span>
                 </button>
@@ -486,6 +677,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   /* border: 1px solid rgba(255, 255, 255, 0.3); */
   border-radius: 24px;
+  touch-action: pan-y;
   background:
     linear-gradient(
       90deg,
@@ -496,11 +688,23 @@ onBeforeUnmount(() => {
     var(--hero-tint, rgb(226 148 100));
   box-shadow: 0 18px 42px rgba(77, 47, 54, 0.2);
 }
+.hero-track {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  will-change: transform;
+}
 .hero-slide {
-  position: relative;
-  min-height: 252px;
+  position: absolute;
+  top: 0;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   border-radius: inherit;
+  pointer-events: none;
+}
+.hero-slide.is-active {
+  pointer-events: auto;
 }
 .hero-art {
   position: absolute;
@@ -672,15 +876,10 @@ onBeforeUnmount(() => {
   width: 20px;
   background: #fff;
 }
-.hero-slide-enter-active {
-  transition: opacity 250ms ease-out;
-}
-.hero-slide-leave-active {
-  transition: opacity 200ms ease-in;
-}
-.hero-slide-enter-from,
-.hero-slide-leave-to {
-  opacity: 0;
+.hero.dragging {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .home-loading {
   display: flex;
@@ -1009,12 +1208,25 @@ onBeforeUnmount(() => {
   -webkit-line-clamp: 2;
 }
 .recent-footer {
+  display: flex;
+  gap: 4px;
   overflow: hidden;
   margin-top: auto;
   color: #b28c7d;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.recent-tag {
+  flex: 0 0 auto;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: #956653;
+  background: rgba(247, 228, 216, 0.86);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
 }
 .results-section {
   margin-top: 24px;
@@ -1228,8 +1440,6 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .hero-arrow,
   .hero-dots button,
-  .hero-slide-enter-active,
-  .hero-slide-leave-active,
   .primary-button,
   .category-list button,
   .rank-cover,

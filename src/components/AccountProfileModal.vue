@@ -375,7 +375,7 @@ function balance(value: number | null) {
 }
 .logout-button {
   border: 1px solid #e7c8bd;
-  color: #a76253;
+  color: white;
   background: var(--theme-color);
 }
 .logout-button:hover {
