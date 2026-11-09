@@ -30,6 +30,7 @@ import {
 import BookCommentCard from "../components/BookCommentCard.vue";
 import DiscussionDanmaku from "../components/DiscussionDanmaku.vue";
 import DiscussionTabs from "../components/DiscussionTabs.vue";
+import ModalShell from "../components/ModalShell.vue";
 import { useBookDiscussions } from "../composables/useBookDiscussions";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import { reportError } from "../composables/useToast";
@@ -552,10 +553,9 @@ function groupChaptersByVolume(chapters: Chapter[]) {
       </aside>
     </section>
 
-    <div
-      v-if="descriptionModalOpen"
-      class="description-modal-backdrop"
-      @click.self="descriptionModalOpen = false"
+    <ModalShell
+      :open="descriptionModalOpen"
+      @close="descriptionModalOpen = false"
     >
       <section
         class="description-modal"
@@ -574,7 +574,7 @@ function groupChaptersByVolume(chapters: Chapter[]) {
         </header>
         <p>{{ novel.description || "暂无简介" }}</p>
       </section>
-    </div>
+    </ModalShell>
 
     <section class="desktop-content-tabs" aria-label="远程作品类型">
       <button
@@ -830,10 +830,10 @@ function groupChaptersByVolume(chapters: Chapter[]) {
         <Play :size="17" />{{ onlineActionLabel }}
       </button>
     </nav>
-    <div
-      v-if="directoryOpen"
-      class="directory-backdrop"
-      @click.self="directoryOpen = false"
+    <ModalShell
+      :open="directoryOpen"
+      align="bottom"
+      @close="directoryOpen = false"
     >
       <section
         class="directory-drawer"
@@ -913,7 +913,7 @@ function groupChaptersByVolume(chapters: Chapter[]) {
           <ListTree :size="27" />暂无目录内容
         </div>
       </section>
-    </div>
+    </ModalShell>
   </section>
   <main v-else class="detail-page detail-state">
     <header class="detail-navigation">
@@ -2193,16 +2193,6 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   }
 }
 
-.description-modal-backdrop {
-  position: fixed;
-  z-index: 70;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(43, 36, 31, 0.38);
-}
 .description-modal {
   width: min(680px, 100%);
   max-height: min(72dvh, 620px);
@@ -2250,16 +2240,6 @@ function groupChaptersByVolume(chapters: Chapter[]) {
   font-size: 14px;
   line-height: 2;
   white-space: pre-line;
-}
-.directory-backdrop {
-  position: fixed;
-  z-index: 50;
-  inset: 0;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 0;
-  background: rgba(43, 36, 31, 0.46);
 }
 .directory-drawer {
   display: flex;

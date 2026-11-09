@@ -8,6 +8,7 @@ import {
 } from "@lucide/vue";
 import { computed } from "vue";
 import type { UpdateInfo, UpdateStatus } from "../desk";
+import ModalShell from "./ModalShell.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -41,7 +42,7 @@ const versionLabel = computed(() =>
 </script>
 
 <template>
-  <div v-if="open" class="update-backdrop" @click.self="emit('close')">
+  <ModalShell :open="open" align="sheet" @close="emit('close')">
     <section class="update-modal glass" aria-labelledby="update-title">
       <button class="close-button" title="关闭" @click="emit('close')">
         <X :size="20" />
@@ -89,27 +90,17 @@ const versionLabel = computed(() =>
         </div>
       </template>
     </section>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.update-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: grid;
-  padding: 18px;
-  background: rgba(91, 49, 39, 0.24);
-  place-items: center;
-  animation: update-fade 180ms ease-out;
-}
 .update-modal {
   position: relative;
   width: min(430px, 100%);
+  max-height: calc(100dvh - 36px);
   padding: 28px;
+  overflow-y: auto;
   border-radius: 22px;
-  background: rgba(255, 249, 245, 0.94);
-  animation: update-pop 280ms linear(0, 0.86 55%, 1.04 78%, 1);
 }
 .close-button {
   position: absolute;
@@ -237,22 +228,7 @@ h2 {
 .text-button:hover {
   color: var(--theme-color-dark);
 }
-@keyframes update-fade {
-  from {
-    opacity: 0;
-  }
-}
-@keyframes update-pop {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.98);
-  }
-}
-@media (max-width: 480px) {
-  .update-backdrop {
-    align-items: end;
-    padding: 0;
-  }
+@media (max-width: 600px) {
   .update-modal {
     width: 100%;
     padding: 24px 20px calc(20px + env(safe-area-inset-bottom, 0px));
@@ -263,12 +239,6 @@ h2 {
   }
   .actions {
     flex-wrap: wrap;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .update-backdrop,
-  .update-modal {
-    animation: none;
   }
 }
 </style>

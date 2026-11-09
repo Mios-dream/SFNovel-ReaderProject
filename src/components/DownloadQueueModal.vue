@@ -10,6 +10,7 @@ import {
   X,
 } from "@lucide/vue";
 import type { Job } from "../types";
+import ModalShell from "./ModalShell.vue";
 
 defineProps<{ open: boolean; jobs: Job[] }>();
 // 弹窗只派发任务操作事件，任务状态由父级 composable 统一更新。
@@ -22,7 +23,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
+  <ModalShell :open="open" @close="emit('close')">
     <section class="modal glass queue-modal">
       <button class="close-button" title="关闭" @click="emit('close')">
         <X :size="20" /></button
@@ -79,25 +80,15 @@ const emit = defineEmits<{
         </article>
       </div>
     </section>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: grid;
-  padding: 18px;
-  background: rgba(91, 49, 39, 0.24);
-  place-items: center;
-}
 .modal {
   position: relative;
   width: min(410px, 100%);
   padding: 28px;
   border-radius: 20px;
-  background: rgba(255, 249, 245, 0.8);
 }
 .queue-modal {
   width: min(680px, 100%);

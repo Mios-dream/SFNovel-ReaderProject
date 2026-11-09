@@ -32,6 +32,7 @@ import {
 } from "../reader/chapterParts";
 import type { DisplayMode } from "../types";
 import { asRecord, readPreference, writePreference } from "../utils/preferences";
+import ModalShell from "../components/ModalShell.vue";
 
 import { useAuth, useLibrary, useOnline, useWorkspace } from "../desk";
 
@@ -847,95 +848,93 @@ onBeforeUnmount(() => {
     </div>
   </section>
 
-  <Transition name="directory-drawer">
-    <div
-      v-if="directoryOpen"
-      class="directory-backdrop"
-      @click.self="directoryOpen = false"
+  <ModalShell
+    :open="directoryOpen"
+    align="start"
+    @close="directoryOpen = false"
+  >
+    <section
+      class="directory-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-label="小说目录"
     >
-      <section
-        class="directory-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label="小说目录"
+      <header class="directory-header">
+        <div class="directory-title">
+          <small>{{ bookName }}</small>
+          <h2>章节目录</h2>
+        </div>
+        <div class="directory-header-actions">
+          <button
+            class="directory-close"
+            type="button"
+            title="关闭目录"
+            aria-label="关闭目录"
+            @click="directoryOpen = false"
+          >
+            <X :size="19" />
+          </button>
+        </div>
+      </header>
+      <div v-if="reading.directoryLoading.value" class="directory-state">
+        <LoaderCircle class="spin" :size="24" />正在读取目录
+      </div>
+      <div
+        v-else-if="reading.directoryError.value"
+        class="directory-state error"
       >
-        <header class="directory-header">
-          <div class="directory-title">
-            <small>{{ bookName }}</small>
-            <h2>章节目录</h2>
-          </div>
-          <div class="directory-header-actions">
-            <button
-              class="directory-close"
-              type="button"
-              title="关闭目录"
-              aria-label="关闭目录"
-              @click="directoryOpen = false"
-            >
-              <X :size="19" />
-            </button>
-          </div>
-        </header>
-        <div v-if="reading.directoryLoading.value" class="directory-state">
-          <LoaderCircle class="spin" :size="24" />正在读取目录
-        </div>
+        {{ reading.directoryError.value }}
+        <button type="button" @click="retryOnlineLoad">重试</button>
+      </div>
+      <div
+        v-else-if="directoryRows.length"
+        ref="directoryList"
+        class="directory-list"
+        @scroll.passive="handleDirectoryScroll"
+      >
         <div
-          v-else-if="reading.directoryError.value"
-          class="directory-state error"
-        >
-          {{ reading.directoryError.value }}
-          <button type="button" @click="retryOnlineLoad">重试</button>
-        </div>
+          :style="{ height: `${directoryWindow.top}px` }"
+          aria-hidden="true"
+        ></div>
+        <template v-for="row in directoryWindow.rows" :key="row.key">
+          <h3 v-if="row.kind === 'volume'" class="directory-volume-title">
+            {{ row.title }}
+          </h3>
+          <button
+            v-else
+            class="directory-chapter"
+            :class="{ active: row.id === chapter?.id }"
+            @click="openChapter(row.id)"
+          >
+            <strong>{{ row.title }}</strong>
+            <span class="directory-row-meta">
+              <small
+                v-if="row.isVip"
+                class="vip-badge"
+                :class="{ unlocked: row.isUnlocked === true }"
+                ><LockKeyholeOpen
+                  v-if="row.isUnlocked === true"
+                  :size="12"
+                  aria-label="已解锁"
+                />VIP</small
+              >
+              <MapPin
+                v-if="row.id === chapter?.id"
+                class="directory-current-icon"
+                :size="16"
+                aria-hidden="true"
+              />
+            </span>
+          </button>
+        </template>
         <div
-          v-else-if="directoryRows.length"
-          ref="directoryList"
-          class="directory-list"
-          @scroll.passive="handleDirectoryScroll"
-        >
-          <div
-            :style="{ height: `${directoryWindow.top}px` }"
-            aria-hidden="true"
-          ></div>
-          <template v-for="row in directoryWindow.rows" :key="row.key">
-            <h3 v-if="row.kind === 'volume'" class="directory-volume-title">
-              {{ row.title }}
-            </h3>
-            <button
-              v-else
-              class="directory-chapter"
-              :class="{ active: row.id === chapter?.id }"
-              @click="openChapter(row.id)"
-            >
-              <strong>{{ row.title }}</strong>
-              <span class="directory-row-meta">
-                <small
-                  v-if="row.isVip"
-                  class="vip-badge"
-                  :class="{ unlocked: row.isUnlocked === true }"
-                  ><LockKeyholeOpen
-                    v-if="row.isUnlocked === true"
-                    :size="12"
-                    aria-label="已解锁"
-                  />VIP</small
-                >
-                <MapPin
-                  v-if="row.id === chapter?.id"
-                  class="directory-current-icon"
-                  :size="16"
-                  aria-hidden="true"
-                />
-              </span>
-            </button>
-          </template>
-          <div
-            :style="{ height: `${directoryWindow.bottom}px` }"
-            aria-hidden="true"
-          ></div>
-        </div>
-        <div v-else class="directory-state">暂无目录内容</div>
-      </section>
-    </div>
-  </Transition>
+          :style="{ height: `${directoryWindow.bottom}px` }"
+          aria-hidden="true"
+        ></div>
+      </div>
+      <div v-else class="directory-state">暂无目录内容</div>
+    </section>
+  </ModalShell>
 </template>
 
 <style scoped>
@@ -1412,16 +1411,6 @@ onBeforeUnmount(() => {
   font-size: clamp(24px, 5vw, 34px);
   line-height: 1.35;
 }
-.directory-backdrop {
-  position: fixed;
-  z-index: 40;
-  inset: 0;
-  display: flex;
-  justify-content: flex-start;
-  background: rgba(43, 36, 31, 0.34);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
 .directory-panel {
   display: flex;
   width: min(350px, 70vw);
@@ -1579,30 +1568,6 @@ onBeforeUnmount(() => {
 .vip-badge.unlocked {
   color: #4f8068;
   background: #e7f1ea;
-}
-.directory-drawer-enter-active,
-.directory-drawer-leave-active {
-  transition: opacity 240ms ease-out;
-}
-.directory-drawer-enter-active .directory-panel,
-.directory-drawer-leave-active .directory-panel {
-  transition:
-    opacity 240ms ease-out,
-    transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.directory-drawer-leave-active,
-.directory-drawer-leave-active .directory-panel {
-  transition-duration: 200ms;
-  transition-timing-function: ease-in;
-}
-.directory-drawer-enter-from,
-.directory-drawer-leave-to {
-  opacity: 0;
-}
-.directory-drawer-enter-from .directory-panel,
-.directory-drawer-leave-to .directory-panel {
-  opacity: 0;
-  transform: translateX(-100%);
 }
 .reader-error-banner {
   position: fixed;
@@ -1847,12 +1812,6 @@ onBeforeUnmount(() => {
   .reader-turn-button:active,
   .reader-font-stepper button:active {
     transform: none;
-  }
-  .directory-drawer-enter-active,
-  .directory-drawer-leave-active,
-  .directory-drawer-enter-active .directory-panel,
-  .directory-drawer-leave-active .directory-panel {
-    transition: none;
   }
   .directory-close:active {
     transform: none;

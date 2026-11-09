@@ -12,6 +12,7 @@ import {
   Ticket,
 } from "@lucide/vue";
 import type { AuthStatus, UserProfile } from "../types";
+import ModalShell from "./ModalShell.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -48,7 +49,7 @@ function balance(value: number | null) {
 </script>
 
 <template>
-  <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
+  <ModalShell :open="open" @close="emit('close')">
     <section class="modal glass" aria-labelledby="account-profile-title">
       <template v-if="loading && !profile">
         <div class="loading-state">
@@ -144,19 +145,10 @@ function balance(value: number | null) {
         </button>
       </div>
     </section>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: grid;
-  padding: 18px;
-  background: rgba(91, 49, 39, 0.24);
-  place-items: center;
-}
 .modal {
   position: relative;
   width: min(430px, 100%);
@@ -164,7 +156,6 @@ function balance(value: number | null) {
   padding: 28px;
   overflow-y: auto;
   border-radius: 20px;
-  background: rgba(255, 249, 245, 0.88);
 }
 .profile-header {
   display: flex;

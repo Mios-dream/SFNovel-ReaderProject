@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import { Trash2, X } from "@lucide/vue";
 import type { Book } from "../types";
+import ModalShell from "./ModalShell.vue";
 
 defineProps<{ book?: Book }>();
 const emit = defineEmits<{ close: []; confirm: [] }>();
 </script>
 
 <template>
-  <div v-if="book" class="modal-backdrop" @click.self="emit('close')">
+  <ModalShell :open="Boolean(book)" @close="emit('close')">
     <section class="modal glass confirm-modal">
       <button class="close-button" title="关闭" @click="emit('close')">
         <X :size="20" /></button
       ><span class="modal-icon danger-icon"><Trash2 :size="22" /></span>
       <h2>删除本地内容？</h2>
-      <p>《{{ book.name }}》的本地文件将被删除，此操作无法撤销。</p>
+      <p>《{{ book?.name }}》的本地文件将被删除，此操作无法撤销。</p>
       <div class="confirm-actions">
         <button class="text-button" @click="emit('close')">取消</button
         ><button class="danger-button" @click="emit('confirm')">
@@ -21,25 +22,17 @@ const emit = defineEmits<{ close: []; confirm: [] }>();
         </button>
       </div>
     </section>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: grid;
-  padding: 18px;
-  background: rgba(91, 49, 39, 0.24);
-  place-items: center;
-}
 .modal {
   position: relative;
   width: min(410px, 100%);
+  max-height: calc(100dvh - 36px);
   padding: 28px;
+  overflow-y: auto;
   border-radius: 20px;
-  background: rgba(255, 249, 245, 0.8);
 }
 .confirm-modal {
   width: min(420px, 100%);

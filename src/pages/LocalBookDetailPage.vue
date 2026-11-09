@@ -27,6 +27,7 @@ import {
   X,
 } from "@lucide/vue";
 import ExportModal from "../components/ExportModal.vue";
+import ModalShell from "../components/ModalShell.vue";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import { formatMetric, formatSourceDate, scoreToneClass } from "../utils/format";
 
@@ -774,10 +775,9 @@ watch(
         </div>
       </aside>
 
-      <div
-        v-if="descriptionModalOpen"
-        class="description-modal-backdrop"
-        @click.self="descriptionModalOpen = false"
+      <ModalShell
+        :open="descriptionModalOpen"
+        @close="descriptionModalOpen = false"
       >
         <section
           class="description-modal"
@@ -796,7 +796,7 @@ watch(
           </header>
           <p>{{ currentWork.description || "暂无本地简介" }}</p>
         </section>
-      </div>
+      </ModalShell>
     </section>
 
     <section class="book-detail-sheet">
@@ -930,10 +930,10 @@ watch(
       </button>
     </nav>
 
-    <div
-      v-if="directoryOpen"
-      class="directory-backdrop"
-      @click.self="directoryOpen = false"
+    <ModalShell
+      :open="directoryOpen"
+      align="bottom"
+      @close="directoryOpen = false"
     >
       <section
         class="directory-drawer"
@@ -1011,7 +1011,7 @@ watch(
           <ListTree :size="27" />暂无已下载内容
         </div>
       </section>
-    </div>
+    </ModalShell>
   </section>
   <ExportModal
     :open="exportModalOpen"
@@ -1938,10 +1938,9 @@ watch(
     gap: 8px;
     padding: 5px 10px;
     overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.7);
+    --glass-lift: 0 10px 22px -12px rgba(85, 73, 53, 0.28);
     border-radius: 14px;
     color: #4f4940;
-    box-shadow: 0 10px 22px rgba(85, 73, 53, 0.1);
     text-align: left;
   }
 
@@ -2206,18 +2205,6 @@ watch(
 }
 
 /* Modal and chapter drawer shared by both form factors. */
-.description-modal-backdrop,
-.directory-backdrop {
-  position: fixed;
-  z-index: 70;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(43, 36, 31, 0.38);
-}
-
 .description-modal {
   width: min(680px, 100%);
   max-height: min(72dvh, 620px);
@@ -2275,11 +2262,6 @@ watch(
   font-size: 14px;
   line-height: 2;
   white-space: pre-line;
-}
-
-.directory-backdrop {
-  z-index: 50;
-  align-items: flex-end;
 }
 
 .directory-drawer {
@@ -2439,11 +2421,6 @@ watch(
 
 /* Mobile drawer: full-width bottom sheet, independent from the page dock. */
 @media (max-width: 900px) {
-  .directory-backdrop {
-    padding: 0;
-    background: rgba(43, 36, 31, 0.46);
-  }
-
   .directory-drawer {
     width: 100%;
     max-height: min(82dvh, 720px);

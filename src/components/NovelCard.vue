@@ -104,7 +104,9 @@ const emit = defineEmits<{
   transition: 0.2s;
 }
 .novel-card:hover {
-  box-shadow: 0 18px 32px rgba(137, 76, 55, 0.16);
+  --glass-lift:
+    0 20px 34px -14px rgba(137, 76, 55, 0.3),
+    0 2px 3px rgba(137, 76, 55, 0.06);
   transform: translateY(-3px);
 }
 .clickable-card {

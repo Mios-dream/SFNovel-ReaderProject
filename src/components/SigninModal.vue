@@ -10,6 +10,7 @@ import {
 import { computed, watch } from "vue";
 import { useSignin } from "../desk";
 import type { SigninPrize, SigninReward, SigninWeekItem } from "../types";
+import ModalShell from "./ModalShell.vue";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -113,190 +114,179 @@ watch(
 </script>
 
 <template>
-  <Transition name="signin-view">
-    <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
-      <section
-        class="modal glass"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="signin-title"
-      >
-        <header class="modal-header">
-          <div class="title-block">
-            <span class="modal-icon"><CalendarCheck2 :size="22" /></span>
-            <h2 id="signin-title">签到</h2>
-          </div>
-          <button class="icon-button" title="关闭" @click="emit('close')">
-            <X :size="20" />
-          </button>
-        </header>
-
-        <div class="modal-body">
-          <div v-if="!overview" class="state-card" :aria-busy="loading">
-            <LoaderCircle v-if="loading" class="spin" :size="22" />
-            <CalendarCheck2 v-else :size="22" />
-            <span>{{
-              loading ? "正在读取签到信息" : "暂未读取到签到信息"
-            }}</span>
-          </div>
-
-          <section v-else class="signin-card" aria-label="本周签到">
-            <div class="summary">
-              <div class="summary-stat">
-                <span>连续签到</span>
-                <strong
-                  >{{ overview.continueDays.totalContinueDays
-                  }}<small>天</small></strong
-                >
-              </div>
-              <div class="summary-stat">
-                <span>本周签到</span>
-                <strong
-                  >{{ weekSignedCount
-                  }}<small>/{{ week.length }}</small></strong
-                >
-              </div>
-              <button
-                class="sign-button"
-                :class="{ done: todaySigned }"
-                :disabled="todaySigned || signing || loading"
-                @click="submitSignin"
-              >
-                <LoaderCircle v-if="signing" class="spin" :size="17" />
-                <Check v-else-if="todaySigned" :size="17" />
-                <span>{{ todaySigned ? "已签到" : "签到" }}</span>
-              </button>
-            </div>
-            <div v-if="showBackgroundHint" class="background-hint">
-              <span class="background-hint-text">
-                自动签到可能被系统清理，请允许自启动
-              </span>
-              <button
-                type="button"
-                class="background-hint-primary"
-                @click="openAppSettings"
-              >
-                打开设置
-              </button>
-            </div>
-            <div class="auto-signin">
-              <div class="auto-signin-copy">
-                <span class="auto-signin-label">自动签到</span>
-                <span class="auto-signin-time">{{
-                  noticeText || autoSigninTime
-                }}</span>
-              </div>
-              <button
-                type="button"
-                class="auto-signin-switch"
-                role="switch"
-                aria-label="自动签到"
-                :aria-checked="autoSigninEnabled"
-                :disabled="autoSigninSaving"
-                @click="toggleAutoSignin"
-              >
-                <span class="auto-signin-thumb" />
-              </button>
-            </div>
-
-            <div class="week-grid">
-              <article
-                v-for="item in week"
-                :key="item.date || item.day"
-                class="day-card"
-                :class="{ signed: item.isSignIn, today: weekItemToday(item) }"
-              >
-                <span class="day-name">{{ weekDayLabel(item) }}</span>
-                <span class="day-icon-wrap">
-                  <span class="day-icon" :class="{ signed: item.isSignIn }">
-                    <Check
-                      v-if="item.isSignIn"
-                      :size="20"
-                      :stroke-width="2.6"
-                    />
-                    <Ticket v-else :size="20" />
-                  </span>
-                  <span
-                    v-if="!item.isSignIn && item.rewards.length"
-                    class="day-count"
-                  >
-                    {{ prizeCount(item.rewards) }}
-                  </span>
-                </span>
-              </article>
-
-              <article
-                class="day-card full-week"
-                :class="{ complete: weekSignedCount === 7 }"
-                aria-label="满签7天奖励"
-              >
-                <span class="day-name">满签7天</span>
-                <span class="day-icon-wrap">
-                  <span class="gift-mark"><Gift :size="20" /></span>
-                  <span v-if="weeklyPrizes.length" class="day-count">
-                    {{ prizeCount(weeklyPrizes) }}
-                  </span>
-                </span>
-              </article>
-            </div>
-
-            <section class="streak-rewards" aria-label="连签奖励">
-              <div class="section-heading">
-                <h3><Gift :size="16" />连签奖励</h3>
-                <span v-if="claimableCount">{{ claimableCount }} 项可领取</span>
-              </div>
-              <div v-if="overview.rewards.length" class="reward-list">
-                <article
-                  v-for="reward in overview.rewards"
-                  :key="reward.recordId || reward.configId"
-                  class="reward-item"
-                  :class="{ claimable: canClaim(reward) }"
-                >
-                  <div class="reward-copy">
-                    <strong>{{ rewardTitle(reward) }}</strong>
-                    <div class="prize-list">
-                      <span v-for="prize in reward.rewards" :key="prize.name">{{
-                        prizeLabel(prize)
-                      }}</span>
-                    </div>
-                  </div>
-                  <button
-                    v-if="canClaim(reward)"
-                    class="claim-button"
-                    :disabled="claimingConfigId !== undefined"
-                    @click="claimReward(reward)"
-                  >
-                    <LoaderCircle
-                      v-if="claimingConfigId === reward.configId"
-                      class="spin"
-                      :size="15"
-                    />
-                    <span>领取</span>
-                  </button>
-                  <span v-else class="reward-state">{{
-                    rewardState(reward)
-                  }}</span>
-                </article>
-              </div>
-              <p v-else class="empty-rewards">暂无连签奖励</p>
-            </section>
-          </section>
+  <ModalShell :open="open" @close="emit('close')">
+    <section
+      class="modal glass"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="signin-title"
+    >
+      <header class="modal-header">
+        <div class="title-block">
+          <span class="modal-icon"><CalendarCheck2 :size="22" /></span>
+          <h2 id="signin-title">签到</h2>
         </div>
-      </section>
-    </div>
-  </Transition>
+        <button class="icon-button" title="关闭" @click="emit('close')">
+          <X :size="20" />
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <div v-if="!overview" class="state-card" :aria-busy="loading">
+          <LoaderCircle v-if="loading" class="spin" :size="22" />
+          <CalendarCheck2 v-else :size="22" />
+          <span>{{
+            loading ? "正在读取签到信息" : "暂未读取到签到信息"
+          }}</span>
+        </div>
+
+        <section v-else class="signin-card" aria-label="本周签到">
+          <div class="summary">
+            <div class="summary-stat">
+              <span>连续签到</span>
+              <strong
+                >{{ overview.continueDays.totalContinueDays
+                }}<small>天</small></strong
+              >
+            </div>
+            <div class="summary-stat">
+              <span>本周签到</span>
+              <strong
+                >{{ weekSignedCount
+                }}<small>/{{ week.length }}</small></strong
+              >
+            </div>
+            <button
+              class="sign-button"
+              :class="{ done: todaySigned }"
+              :disabled="todaySigned || signing || loading"
+              @click="submitSignin"
+            >
+              <LoaderCircle v-if="signing" class="spin" :size="17" />
+              <Check v-else-if="todaySigned" :size="17" />
+              <span>{{ todaySigned ? "已签到" : "签到" }}</span>
+            </button>
+          </div>
+          <div v-if="showBackgroundHint" class="background-hint">
+            <span class="background-hint-text">
+              自动签到可能被系统清理，请允许自启动
+            </span>
+            <button
+              type="button"
+              class="background-hint-primary"
+              @click="openAppSettings"
+            >
+              打开设置
+            </button>
+          </div>
+          <div class="auto-signin">
+            <div class="auto-signin-copy">
+              <span class="auto-signin-label">自动签到</span>
+              <span class="auto-signin-time">{{
+                noticeText || autoSigninTime
+              }}</span>
+            </div>
+            <button
+              type="button"
+              class="auto-signin-switch"
+              role="switch"
+              aria-label="自动签到"
+              :aria-checked="autoSigninEnabled"
+              :disabled="autoSigninSaving"
+              @click="toggleAutoSignin"
+            >
+              <span class="auto-signin-thumb" />
+            </button>
+          </div>
+
+          <div class="week-grid">
+            <article
+              v-for="item in week"
+              :key="item.date || item.day"
+              class="day-card"
+              :class="{ signed: item.isSignIn, today: weekItemToday(item) }"
+            >
+              <span class="day-name">{{ weekDayLabel(item) }}</span>
+              <span class="day-icon-wrap">
+                <span class="day-icon" :class="{ signed: item.isSignIn }">
+                  <Check
+                    v-if="item.isSignIn"
+                    :size="20"
+                    :stroke-width="2.6"
+                  />
+                  <Ticket v-else :size="20" />
+                </span>
+                <span
+                  v-if="!item.isSignIn && item.rewards.length"
+                  class="day-count"
+                >
+                  {{ prizeCount(item.rewards) }}
+                </span>
+              </span>
+            </article>
+
+            <article
+              class="day-card full-week"
+              :class="{ complete: weekSignedCount === 7 }"
+              aria-label="满签7天奖励"
+            >
+              <span class="day-name">满签7天</span>
+              <span class="day-icon-wrap">
+                <span class="gift-mark"><Gift :size="20" /></span>
+                <span v-if="weeklyPrizes.length" class="day-count">
+                  {{ prizeCount(weeklyPrizes) }}
+                </span>
+              </span>
+            </article>
+          </div>
+
+          <section class="streak-rewards" aria-label="连签奖励">
+            <div class="section-heading">
+              <h3><Gift :size="16" />连签奖励</h3>
+              <span v-if="claimableCount">{{ claimableCount }} 项可领取</span>
+            </div>
+            <div v-if="overview.rewards.length" class="reward-list">
+              <article
+                v-for="reward in overview.rewards"
+                :key="reward.recordId || reward.configId"
+                class="reward-item"
+                :class="{ claimable: canClaim(reward) }"
+              >
+                <div class="reward-copy">
+                  <strong>{{ rewardTitle(reward) }}</strong>
+                  <div class="prize-list">
+                    <span v-for="prize in reward.rewards" :key="prize.name">{{
+                      prizeLabel(prize)
+                    }}</span>
+                  </div>
+                </div>
+                <button
+                  v-if="canClaim(reward)"
+                  class="claim-button"
+                  :disabled="claimingConfigId !== undefined"
+                  @click="claimReward(reward)"
+                >
+                  <LoaderCircle
+                    v-if="claimingConfigId === reward.configId"
+                    class="spin"
+                    :size="15"
+                  />
+                  <span>领取</span>
+                </button>
+                <span v-else class="reward-state">{{
+                  rewardState(reward)
+                }}</span>
+              </article>
+            </div>
+            <p v-else class="empty-rewards">暂无连签奖励</p>
+          </section>
+        </section>
+      </div>
+    </section>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 12;
-  display: grid;
-  padding: 18px;
-  background: rgba(91, 49, 39, 0.24);
-  place-items: center;
-}
 .modal {
   display: flex;
   width: min(720px, 100%);
@@ -304,7 +294,6 @@ watch(
   flex-direction: column;
   overflow: hidden;
   border-radius: 24px;
-  background: rgba(255, 250, 246, 0.94);
 }
 .modal-header {
   display: flex;
@@ -731,44 +720,7 @@ watch(
   color: var(--muted);
   font-size: 12px;
 }
-.signin-view-enter-active {
-  animation: backdrop-in 250ms ease-out both;
-}
-.signin-view-leave-active {
-  animation: backdrop-out 200ms ease-in both;
-}
-.signin-view-enter-active .modal {
-  animation: modal-in 250ms linear(0, 0.96 70%, 1.015 86%, 1) both;
-}
-.signin-view-leave-active .modal {
-  animation: modal-out 200ms ease-in both;
-}
-@keyframes backdrop-in {
-  from {
-    opacity: 0;
-  }
-}
-@keyframes backdrop-out {
-  to {
-    opacity: 0;
-  }
-}
-@keyframes modal-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.98);
-  }
-}
-@keyframes modal-out {
-  to {
-    opacity: 0;
-    transform: translateY(6px) scale(0.99);
-  }
-}
 @media (max-width: 680px) {
-  .modal-backdrop {
-    padding: 10px;
-  }
   .modal {
     max-height: calc(100dvh - 20px);
     border-radius: 20px;
@@ -822,12 +774,6 @@ watch(
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .signin-view-enter-active,
-  .signin-view-leave-active,
-  .signin-view-enter-active .modal,
-  .signin-view-leave-active .modal {
-    animation: none;
-  }
   .icon-button,
   .sign-button,
   .claim-button,

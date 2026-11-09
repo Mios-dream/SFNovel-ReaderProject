@@ -1,5 +1,5 @@
 <template>
-  <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
+  <ModalShell :open="open" @close="emit('close')">
     <section class="modal glass chapter-modal">
       <header
         class="chapter-hero"
@@ -134,7 +134,7 @@
         </button></template
       >
     </section>
-  </div>
+  </ModalShell>
 </template>
 <script setup lang="ts">
 import { computed, nextTick, watch } from "vue";
@@ -149,6 +149,7 @@ import {
 } from "@lucide/vue";
 import { useVirtualRows } from "../composables/useVirtualRows";
 import type { Chapter, ChapterVolume, MediaType, Novel } from "../types";
+import ModalShell from "./ModalShell.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -168,6 +169,7 @@ const emit = defineEmits<{
   confirm: [];
   "switch-mode": [mode: MediaType];
 }>();
+
 
 type TextChapter = ChapterVolume["chapters"][number];
 type SelectableChapter = (TextChapter | Chapter) & {
@@ -411,21 +413,11 @@ function toggleChapter(id: number, checked: boolean) {
 </script>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: grid;
-  padding: 18px;
-  background: rgba(91, 49, 39, 0.24);
-  place-items: center;
-}
 .modal {
   position: relative;
   width: min(410px, 100%);
   padding: 28px;
   border-radius: 20px;
-  background: rgba(255, 249, 245, 0.8);
   display: flex;
   flex-direction: column;
 }

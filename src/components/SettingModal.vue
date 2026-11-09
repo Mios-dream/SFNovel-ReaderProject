@@ -14,6 +14,7 @@ import {
 import { computed, reactive, ref, watch } from "vue";
 import type { UpdateStatus } from "../desk";
 import type { AppSettings } from "../types";
+import ModalShell from "./ModalShell.vue";
 import SettingSelect from "./SettingSelect.vue";
 
 const props = defineProps<{
@@ -35,6 +36,11 @@ const emit = defineEmits<{
   showUpdate: [];
   openReleases: [];
 }>();
+
+// 保存进行中不关闭，避免设置已提交却仍留在页面上。
+function close() {
+  if (!props.saving) emit("close");
+}
 
 const defaultSettings: AppSettings = {
   download: {
@@ -138,7 +144,7 @@ function updateActionLabel() {
 </script>
 
 <template>
-  <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
+  <ModalShell :open="open" align="sheet" @close="close">
     <section class="modal glass settings-modal">
       <button
         class="close-button"
@@ -376,26 +382,15 @@ function updateActionLabel() {
         </footer>
       </form>
     </section>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
-  background: rgba(91, 49, 39, 0.24);
-}
 .modal {
   position: relative;
   width: min(410px, 100%);
   padding: 28px;
   border-radius: 20px;
-  background: rgba(255, 249, 245, 0.8);
   margin: 0;
 }
 .settings-modal {
@@ -476,7 +471,7 @@ function updateActionLabel() {
 }
 .settings-group {
   padding-bottom: 8px;
-  border: 1px solid rgba(217, 173, 151, 0.32);
+  /* border: 1px solid rgba(217, 173, 151, 0.32); */
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.58);
   box-shadow:
@@ -664,7 +659,8 @@ input[type="checkbox"] {
   justify-content: center;
   gap: 7px;
   min-height: 40px;
-  border: 1px solid #efd0c0;
+  /* border: 1px solid #efd0c0; */
+  border: none;
   border-radius: 10px;
   padding: 0 13px;
   color: #8d5948;
@@ -678,11 +674,6 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 600px) {
-  .modal-backdrop {
-    z-index: 20;
-    align-items: flex-end;
-    padding: 0;
-  }
   .settings-modal {
     width: 100%;
     height: auto;
@@ -692,8 +683,7 @@ input[type="checkbox"] {
     border-bottom: 0;
     border-left: 0;
     border-radius: 20px 20px 0 0;
-    background: rgba(255, 249, 245, 0.97);
-    box-shadow: 0 -12px 32px rgba(137, 76, 55, 0.16);
+    --glass-lift: 0 -12px 30px -12px rgba(137, 76, 55, 0.24);
   }
   .settings-header {
     gap: 10px;

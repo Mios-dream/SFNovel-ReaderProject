@@ -952,8 +952,8 @@ onBeforeUnmount(() => {
     transform 160ms ease;
 }
 .recent-card:hover {
-  background: rgba(255, 252, 248, 0.86);
-  box-shadow: 0 15px 28px rgba(137, 76, 55, 0.14);
+  --glass-lift:
+    0 18px 30px -14px rgba(137, 76, 55, 0.28), 0 2px 3px rgba(137, 76, 55, 0.06);
   transform: translateY(-2px);
 }
 .recent-card:focus-visible {
@@ -963,7 +963,7 @@ onBeforeUnmount(() => {
 .recent-cover {
   display: grid;
   width: 64px;
-  height: 91px;
+  /* height: 91px; */
   overflow: hidden;
   border-radius: 9px;
   color: #a56b54;
@@ -1212,7 +1212,7 @@ onBeforeUnmount(() => {
   }
   .recent-cover {
     width: 62px;
-    height: 88px;
+    /* height: 88px; */
   }
   .results-section {
     margin-top: 18px;

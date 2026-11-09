@@ -38,7 +38,7 @@ internal object AutoSigninNotifier {
         ensureChannel(manager)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("自动签到成功")
+            .setContentTitle("小萝帮您签到成功啦( •̀ ω •́ )✧~")
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_LOW)

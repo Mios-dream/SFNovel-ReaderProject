@@ -9,6 +9,7 @@ import {
   X,
 } from "@lucide/vue";
 import type { ExportFormat, MediaType } from "../types";
+import ModalShell from "./ModalShell.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -23,13 +24,18 @@ const emit = defineEmits<{
   export: [format: ExportFormat];
 }>();
 
+// 导出进行中不关闭，避免中断任务却仍留在页面上。
+function close() {
+  if (!props.exporting) emit("close");
+}
+
 function title(media: MediaType) {
   return media === "novel" ? "小说" : media === "audio" ? "有声" : "漫画";
 }
 </script>
 
 <template>
-  <div v-if="props.open" class="modal-backdrop" @click.self="emit('close')">
+  <ModalShell :open="props.open" @close="close">
     <section
       class="modal glass export-modal"
       aria-labelledby="export-modal-title"
@@ -103,25 +109,17 @@ function title(media: MediaType) {
         </button>
       </div>
     </section>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: grid;
-  padding: 18px;
-  background: rgba(91, 49, 39, 0.24);
-  place-items: center;
-}
 .modal {
   position: relative;
   width: min(440px, 100%);
+  max-height: calc(100dvh - 36px);
   padding: 28px;
+  overflow-y: auto;
   border-radius: 20px;
-  background: rgba(255, 249, 245, 0.94);
 }
 .modal-icon,
 .option-icon {

@@ -10,6 +10,7 @@ import {
 } from "@lucide/vue";
 import { ref, watch } from "vue";
 import type { AuthStatus } from "../types";
+import ModalShell from "./ModalShell.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -43,7 +44,7 @@ function submit() {
 </script>
 
 <template>
-  <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
+  <ModalShell :open="open" @close="emit('close')">
     <section class="modal glass">
       <button class="close-button" title="关闭" @click="emit('close')">
         <X :size="20" /></button
@@ -142,25 +143,17 @@ function submit() {
         </template>
       </div>
     </section>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: grid;
-  padding: 18px;
-  background: rgba(91, 49, 39, 0.24);
-  place-items: center;
-}
 .modal {
   position: relative;
   width: min(410px, 100%);
+  max-height: calc(100dvh - 36px);
   padding: 28px;
+  overflow-y: auto;
   border-radius: 20px;
-  background: rgba(255, 249, 245, 0.8);
 }
 .modal h2 {
   margin: 15px 0 5px;
