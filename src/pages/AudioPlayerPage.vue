@@ -33,6 +33,7 @@ import { reportError, showToast } from "../composables/useToast";
 import { asRecord, readPreference, writePreference } from "../utils/preferences";
 
 import { useAuth, useLibrary, useOnline, useWorkspace } from "../desk";
+import { useBackLayer } from "../desk/backLayers";
 
 const auth = useAuth();
 const library = useLibrary();
@@ -425,6 +426,35 @@ function closePlaylistDrawer() {
   else desktopPlaylistOpen.value = false;
 }
 
+/**
+ * 播放器面板不是 `ModalShell`，需要各自入返回栈。
+ *
+ * 移动抽屉共用一个 `mobileDrawer` 状态（互斥），因此只注册一层；桌面播放列表与
+ * 设置面板、定时菜单各自一层。带遮罩或 `aria-modal` 的面板才算一层，纯下拉不算。
+ */
+useBackLayer(
+  () => mobileDrawer.value !== null,
+  () => closeMobileDrawers(),
+);
+useBackLayer(
+  () => desktopPlaylistOpen.value,
+  () => {
+    desktopPlaylistOpen.value = false;
+  },
+);
+useBackLayer(
+  () => desktopSettingsOpen.value,
+  () => {
+    desktopSettingsOpen.value = false;
+  },
+);
+useBackLayer(
+  () => timerMenuOpen.value,
+  () => {
+    timerMenuOpen.value = false;
+  },
+);
+
 async function revealCurrentTrack() {
   if (!playlistOpen.value && !desktopPlaylistOpen.value) return;
   await nextTick();
@@ -672,11 +702,7 @@ watch(
 );
 
 function goBack() {
-  if (online.value) {
-    workspace.backFromOnlineReading();
-    return;
-  }
-  void workspace.navigate("libraryDetail", bookName.value);
+  workspace.back();
 }
 
 async function retryOnlineAudio(shouldPlay = true) {

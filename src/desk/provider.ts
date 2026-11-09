@@ -91,10 +91,7 @@ export function useDeskProvider() {
 
   registerDeskLifecycle({
     auth,
-    jobs,
     library,
-    picker,
-    remote,
     settings,
     signin,
     updater,

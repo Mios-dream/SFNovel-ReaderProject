@@ -387,8 +387,8 @@ async function loadRouteBook() {
   setMediaType(media);
 }
 
-async function goBack() {
-  await workspace.navigate("library");
+function goBack() {
+  workspace.back();
 }
 
 async function readChapter(chapterId: number) {

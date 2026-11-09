@@ -13,6 +13,7 @@ import NovelCard from "../components/NovelCard.vue";
 import PageFrame from "../components/PageFrame.vue";
 
 import { useBookshelf, usePicker, useRemote } from "../desk";
+import { useBackLayer } from "../desk/backLayers";
 import { formatMonthDay } from "../utils/format";
 
 const bookshelf = useBookshelf();
@@ -47,6 +48,12 @@ function openSearch() {
 function closeSearch() {
   searchOpen.value = false;
 }
+
+/** 搜索面板是一层：打开时返回先收起它，而不是直接离开书架。 */
+useBackLayer(
+  () => searchOpen.value,
+  () => closeSearch(),
+);
 
 function clearSearch() {
   shelfQuery.value = "";
@@ -135,7 +142,6 @@ function jumpToPage(event: Event) {
               autocomplete="off"
               placeholder="搜索书名或作者"
               aria-label="搜索书架中的书籍"
-              @keydown.esc.prevent="closeSearch"
             />
             <button
               class="clear-search"

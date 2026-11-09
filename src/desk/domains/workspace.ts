@@ -11,12 +11,15 @@ import type { LibraryDesk } from "./library";
 import type { OnlineDesk } from "./online";
 import type { PickerDesk } from "./picker";
 import {
+  currentLayer,
   currentView,
   isReaderView,
   pushComments,
   pushView,
   returnViews,
+  type RouteLayer,
 } from "../navigation";
+import { dismissTopLayer } from "../backLayers";
 import type { RemoteDesk } from "./remote";
 
 type WorkspaceDeskOptions = {
@@ -96,6 +99,47 @@ export function createWorkspaceDesk({
     await pushView(view, bookName ?? library.localBook.value?.name);
   }
 
+  /**
+   * 离开阅读页：在线阅读回进入时记下的来源，本地阅读回本地作品详情。
+   *
+   * 三个阅读页此前各写了一份相同的判断，现由返回表统一调用。
+   */
+  function leaveReader() {
+    if (readerSource.value === "online") backFromOnlineReading();
+    else void navigate("libraryDetail");
+  }
+
+  /**
+   * 路由返回表：键是当前层，值是按一次返回要执行的动作。
+   *
+   * 与浮层栈共用唯一的 `back()` 入口：浮层先出栈，没有浮层才执行这里的动作。
+   * 评论区是表中的普通一行；新增一层只加一行，不必改返回键、Esc 或页面按钮。
+   * 根层的动作为空——停在根页时不响应返回。
+   */
+  const BACK_ACTIONS: Record<RouteLayer, () => void> = {
+    discover: () => {},
+    bookshelf: () => {},
+    library: () => {},
+    comments: () =>
+      void navigate(remote.remoteBook.value ? "remoteDetail" : "discover"),
+    remoteDetail: () => remote.closeRemoteBookDetail(),
+    libraryDetail: () => void navigate("library"),
+    reader: leaveReader,
+    comicReader: leaveReader,
+    audioPlayer: leaveReader,
+  };
+
+  /**
+   * 唯一返回入口：Android 返回键、页面返回按钮都只调用它，Esc 只调用它的浮层部分。
+   *
+   * 一次返回恰好弹出一层。层级不再散落在 `ViewName`、`returnViews`、query 和各页面
+   * 本地 ref 里：浮层由 `backLayers` 按打开顺序维护，路由层由 `BACK_ACTIONS` 声明。
+   */
+  function back() {
+    if (dismissTopLayer()) return;
+    BACK_ACTIONS[currentLayer()]();
+  }
+
   function startOnlineReading(
     novel: Novel,
     mode: MediaType,
@@ -172,7 +216,7 @@ export function createWorkspaceDesk({
     navigate,
     startOnlineReading,
     startOnlineFromLibrary,
-    backFromOnlineReading,
+    back,
     continueDownload,
     openComments,
   };

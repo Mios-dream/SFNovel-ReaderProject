@@ -60,6 +60,8 @@ function handleKeydown(event: KeyboardEvent) {
 
   if (event.key === "Escape" && open.value) {
     event.preventDefault();
+    // 这是纯下拉菜单，不是返回层；别让 Esc 冒泡去关掉承载它的弹窗。
+    event.stopPropagation();
     closeMenu(true);
     return;
   }

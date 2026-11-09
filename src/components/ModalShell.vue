@@ -6,7 +6,8 @@
  * - 打开期间锁住页面滚动，关闭后原地恢复（按层计数，嵌套弹窗不会提前解锁）
  * - 滚轮与触摸在层内没有可滚动容器时不再落到背后页面；层内滚动到边界靠
  *   `[data-modal-layer] * { overscroll-behavior: contain }` 兜住惯性
- * - Esc 只关最上层，Tab 焦点收在层内，关闭后焦点还给触发元素
+ * - 每层在打开期间注册进全局返回栈，返回键/Esc 只关最上层
+ * - Tab 焦点收在层内，关闭后焦点还给触发元素
  * - 只有按下与抬手都在遮罩上、且位移不超过 8px 才算点击遮罩
  *
  * 由 `open` 驱动挂载，进出场动画在组件内部完成，调用方不要再套 `<Transition>`。
@@ -15,11 +16,19 @@
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** 已打开的层，顺序即叠放顺序，末位是最上层。 */
-const layers: HTMLElement[] = [];
+/**
+ * 已挂载的 DOM 层，末位是最上层。
+ *
+ * 只服务滚动锁计数与焦点环绕；返回层级由 `desk/backLayers` 的栈负责，后者按
+ * `open` 变化立即出入栈，不等这里的进出场动画。
+ */
+const domLayers: HTMLElement[] = [];
 
 function syncPageLock() {
-  document.documentElement.classList.toggle("modal-open", layers.length > 0);
+  document.documentElement.classList.toggle(
+    "modal-open",
+    domLayers.length > 0,
+  );
 }
 
 function isScrollable(element: HTMLElement) {
@@ -53,6 +62,7 @@ function consumesScroll(target: EventTarget | null, root: HTMLElement) {
 
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useBackLayer } from "../desk/backLayers";
 
 const props = withDefaults(
   defineProps<{
@@ -68,6 +78,12 @@ const props = withDefaults(
   { align: "center" },
 );
 const emit = defineEmits<{ close: [] }>();
+
+/** 打开即入返回栈；关闭时立即出栈，退场动画期间不再占用一次返回。 */
+useBackLayer(
+  () => props.open,
+  () => emit("close"),
+);
 
 const root = ref<HTMLElement | null>(null);
 /** 当前已挂到层栈上的元素，退场阶段仍需能摘掉监听。 */
@@ -99,14 +115,10 @@ function onClick(event: MouseEvent) {
   emit("close");
 }
 
+/** Esc 由应用级返回入口统一处理；这里只负责最上层的焦点环绕。 */
 function onKeydown(event: KeyboardEvent) {
   const element = root.value;
-  if (!element || layers[layers.length - 1] !== element) return;
-  if (event.key === "Escape") {
-    event.preventDefault();
-    emit("close");
-    return;
-  }
+  if (!element || domLayers[domLayers.length - 1] !== element) return;
   if (event.key !== "Tab") return;
   const items = Array.from(
     element.querySelectorAll<HTMLElement>(FOCUSABLE),
@@ -138,7 +150,7 @@ function attach(element: HTMLElement) {
     document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-  layers.push(element);
+  domLayers.push(element);
   syncPageLock();
   element.addEventListener("wheel", onWheel, { passive: false });
   element.addEventListener("touchmove", onTouchMove, { passive: false });
@@ -153,8 +165,8 @@ function detach() {
   document.removeEventListener("keydown", onKeydown, true);
   element.removeEventListener("wheel", onWheel);
   element.removeEventListener("touchmove", onTouchMove);
-  const index = layers.indexOf(element);
-  if (index >= 0) layers.splice(index, 1);
+  const index = domLayers.indexOf(element);
+  if (index >= 0) domLayers.splice(index, 1);
   syncPageLock();
   if (restoreFocus?.isConnected) restoreFocus.focus({ preventScroll: true });
   restoreFocus = null;

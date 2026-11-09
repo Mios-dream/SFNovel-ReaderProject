@@ -231,11 +231,7 @@ async function openChapter(chapterId?: number, showLastPage = false) {
 }
 
 function goBack() {
-  if (online.value) {
-    workspace.backFromOnlineReading();
-    return;
-  }
-  void workspace.navigate("libraryDetail", bookName.value);
+  workspace.back();
 }
 
 async function retryOnlineLoad() {

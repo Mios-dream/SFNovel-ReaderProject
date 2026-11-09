@@ -385,11 +385,7 @@ async function openChapter(
 }
 
 function goBack() {
-  if (online.value) {
-    workspace.backFromOnlineReading();
-    return;
-  }
-  void workspace.navigate("libraryDetail", bookName.value);
+  workspace.back();
 }
 
 async function retryOnlineLoad() {

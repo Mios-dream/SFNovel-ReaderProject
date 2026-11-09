@@ -288,7 +288,7 @@ const bookFacts = computed(() => {
 });
 
 function goBack() {
-  remote.closeRemoteBookDetail();
+  workspace.back();
 }
 function openComments() {
   workspace.openComments(discussionTab.value);

@@ -8,7 +8,7 @@ import {
   MessageCircle,
   Star,
 } from "@lucide/vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute } from "vue-router";
 import BookCommentCard from "../components/BookCommentCard.vue";
 import BookCommentDetail from "../components/BookCommentDetail.vue";
 import DiscussionDanmaku from "../components/DiscussionDanmaku.vue";
@@ -20,19 +20,24 @@ import {
 import type { BookComment } from "../types";
 
 import { useRemote, useWorkspace } from "../desk";
+import { setCommentsQuery } from "../desk/navigation";
 
 const remote = useRemote();
 const workspace = useWorkspace();
 
 const route = useRoute();
-const router = useRouter();
 const novel = computed(() => remote.remoteBook.value);
 const initialTab: DiscussionTab =
   route.query.tab === "reviews" ? "reviews" : "comments";
 const { activeTab, current, highlights, selectTab, loadMore, reload } =
   useBookDiscussions(novel, 16, initialTab);
 const pageElement = ref<HTMLElement>();
-const selectedComment = ref<BookComment>();
+/** 讨论详情由 query 驱动，页面内关闭与返回手势共用这一层状态。 */
+const selectedComment = computed(() => {
+  const commentId = Number(route.query.comment);
+  if (!commentId) return undefined;
+  return current.value.items.find((item) => item.commentId === commentId);
+});
 
 const mediaKind = computed<"novel" | "audio" | "comic">(
   () => novel.value?.bookshelfType || "novel",
@@ -88,9 +93,8 @@ function formatDate(value?: string) {
 
 function switchTab(tab: DiscussionTab) {
   if (tab === activeTab.value) return;
-  selectedComment.value = undefined;
   selectTab(tab);
-  void router.replace({ path: "/remote-book/comments", query: { tab } });
+  void setCommentsQuery({ tab });
   void nextTick(() => {
     pageElement.value?.scrollTo({ top: 0, behavior: "smooth" });
   });
@@ -104,7 +108,7 @@ function handleScroll() {
 }
 
 function goBack() {
-  void workspace.navigate(novel.value ? "remoteDetail" : "discover");
+  workspace.back();
 }
 
 function goDetail() {
@@ -112,40 +116,23 @@ function goDetail() {
 }
 
 function openComment(comment: BookComment) {
-  selectedComment.value = comment;
+  void setCommentsQuery({
+    tab: activeTab.value,
+    comment: String(comment.commentId),
+  });
 }
 
 function closeComment() {
-  selectedComment.value = undefined;
   if (route.query.comment)
-    void router.replace({
-      path: "/remote-book/comments",
-      query: { tab: activeTab.value },
-    });
+    void setCommentsQuery({ tab: activeTab.value });
 }
 
 watch(
   () => route.query.tab,
   (value) => {
     const tab: DiscussionTab = value === "reviews" ? "reviews" : "comments";
-    if (tab !== activeTab.value) {
-      selectedComment.value = undefined;
-      selectTab(tab);
-    }
+    if (tab !== activeTab.value) selectTab(tab);
   },
-);
-
-watch(
-  () => [current.value.items, route.query.comment] as const,
-  () => {
-    const commentId = Number(route.query.comment);
-    if (!commentId || selectedComment.value?.commentId === commentId) return;
-    const comment = current.value.items.find(
-      (item) => item.commentId === commentId,
-    );
-    if (comment) selectedComment.value = comment;
-  },
-  { immediate: true },
 );
 </script>
 

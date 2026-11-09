@@ -64,8 +64,9 @@ src/desk/
   index.ts              对外唯一入口：各域 hook 与门面类型
   keys.ts               每个域的 InjectionKey
   provider.ts           组合根：创建域、注入依赖、provide、注册生命周期
-  lifecycle.ts          应用级副作用：启动初始化、返回键逐层回退、复制拦截
-  navigation.ts         路由映射、评论页跳转、返回视图记忆（模块级单例）
+  lifecycle.ts          应用级副作用：启动初始化、返回事件接管、复制拦截
+  backLayers.ts         浮层返回栈：打开时注册、只弹最上层（模块级单例）
+  navigation.ts         路由映射、返回层识别、评论页跳转、返回视图记忆
   domains/
     auth.ts              登录态、弹窗、账户资料、音频播放门禁
     library.ts           本地书库、书籍详情、章节内容、导出
@@ -78,7 +79,7 @@ src/desk/
     online.ts            在线阅读会话：目录快照、三种媒态的章节取数
     picker.ts            章节选择弹窗与选择集
     remote.ts            远端详情会话、收藏、媒体变体、评论取数
-    workspace.ts         跨域流程与导航（不触达后端）
+    workspace.ts         跨域流程、导航与唯一返回入口 `back()`（不触达后端）
 
 src/utils/
   native.ts             本地资源地址、原生错误文案
@@ -95,7 +96,7 @@ domains/*  ←  workspace                  域之间互不 import；workspace �
 provider  →  lifecycle                   只装配与挂载，不实现业务
 ```
 
-`domains/*` 之间只通过构造参数互通，禁止互相 import。`workspace` 是唯一可以横向组合多个域的域，且只组合它真正需要的 5 个；`provider` 与 `lifecycle` 可接触全部域。
+`domains/*` 之间只通过构造参数互通，禁止互相 import。`workspace` 是唯一可以横向组合多个域的域，且只组合它真正需要的 5 个；`provider` 可接触全部域，`lifecycle` 只装配启动与返回事件所需的 6 个。`backLayers.ts` 是模块级单例，可被组件与 `workspace` 同时引用，不属于任何域。
 
 ### 域职责
 
@@ -133,8 +134,16 @@ provider  →  lifecycle                   只装配与挂载，不实现业务
 ## 6. 不变量
 
 - 页面在 provider 之下渲染；域上下文缺失即为装配错误，直接抛错，不返回 `undefined`。
-- `router.push` 只出现在 `desk/navigation.ts`；页面不出现任何裸路由跳转。
+- `router.push` 只出现在 `desk/navigation.ts`；`router.replace` 只允许出现在
+  `desk/navigation.ts`（评论区换层）与阅读/本地详情页的「会话失效时原地重定向」，
+  后者是错误恢复，不构成导航也不参与返回链。
 - `workspace.navigate` 是唯一的视图跳转入口，页面不自行调用 `router`。
+- `workspace.back()` 是唯一的返回入口：Android 返回键与所有页面的返回按钮都调它，
+  桌面 Esc 只调它的浮层部分（`dismissTopLayer()`）。页面不得自己拼返回目标路径。
+- 浮层一律在打开时经 `useBackLayer` 入栈；`ModalShell` 自动覆盖，非 `ModalShell`
+  的抽屉/面板由页面显式注册。返回链不靠任何装配层清单维护。
+- 路由返回层是 `Record<RouteLayer, () => void>` 中的一行；`RouteLayer` 新增成员时
+  类型检查会强制补齐所有返回动作。
 - 域之间无 import 依赖；`workspace` 只依赖 5 个域，`provider`/`lifecycle` 负责剩余编排。
 - 每个域的 `ref` 是「有消费者才存在」：新增字段前先确认消费方数量。
 - 后端命令只在 `desk/domains/*` 内出现；`src/desk/` 之外仅允许单视图独享的取数。
@@ -148,6 +157,8 @@ provider  →  lifecycle                   只装配与挂载，不实现业务
 | 构建 | `npx vite build` | 成功产出 |
 | 残留引用 | `grep -rn "desk\." src --include=*.vue --include=*.ts` | 只剩 `desk/` 目录内部 |
 | 导航唯一入口 | `grep -rn "router.push" src` | 仅 `desk/navigation.ts` |
+| 返回入口唯一 | `grep -rn "workspace.back()" src/pages` | 6 个页面各 1 处，页面内无第二个返回分支 |
+| 浮层已入栈 | `grep -rn "useBackLayer" src` | `ModalShell` 与所有非 `ModalShell` 抽屉/面板 |
 | 域内无横向 import | `grep -rn 'from "\./' src/desk/domains` | 只有同目录自身的相对引用 |
 | 门面未被绕过 | `grep -rn "desk/domains/" src \| grep -v "^src/desk/"` | 无 |
 | 裸 invoke | `grep -rn "invoke<\|invoke(" src --include=*.vue \| grep -v "^src/desk/"` | 仅 `DiscoverPage.vue` |
@@ -160,7 +171,9 @@ provider  →  lifecycle                   只装配与挂载，不实现业务
 3. 书架 → 详情 → 收藏切换 → 返回书架次数正确。
 4. 本地书库 → 详情 → 阅读/听书/漫画 → 返回详情 → 返回书库。
 5. 签到弹窗：签到、领取连签奖励、切换自动签到；关闭设置弹窗后重开，开关状态一致。
-6. Android 返回键：依次关闭章节弹窗、队列弹窗、签到、登录、账户、更新、设置，再逐层返回。
+6. Android 返回键：任意页内浮层（章节选择、目录抽屉、简介、导出、播放列表、定时菜单、书架搜索、全局弹窗）打开时，第一次返回只关浮层，第二次才回退页面；桌面 Esc 行为一致但不回退页面。
+7. 评论区逐层返回：讨论详情 → 评论区 → 作品详情 → 书架/发现页；从评论区回作品详情时作品数据仍在，顶部「返回」按钮与系统返回手势结果一致。
+8. 保存中/导出中的弹窗按返回不关闭、也不跳页，任务结束后再按返回才关弹窗。
 
 ## 8. 执行记录
 
@@ -225,6 +238,32 @@ provider  →  lifecycle                   只装配与挂载，不实现业务
 只影响错误提示文案（失败路径），正常路径行为不变，因此手测结论仍然有效；失败提示的
 文案需要下次遇到真实失败时才能确认。
 
+### 第四轮：统一返回栈
+
+起因是 Android 返回手势从评论区直接跳回书架：`currentView()` 按前缀把
+`/remote-book/comments` 归入 `remoteDetail`，系统键据此清掉了整个详情会话；而页面
+「返回」按钮却明确指向作品详情。两套返回逻辑漂移是根因，补一条旁路只能修一个点。
+
+| 改动 | 结果 |
+| --- | --- |
+| 新增 `backLayers.ts` | `registerBackLayer` / `dismissTopLayer` / `useBackLayer`；按打开顺序入栈，只弹最上层，层只要还开着就继续持有返回事件 |
+| `ModalShell` 自动入栈 | 8 个全局弹窗与全部页内弹窗（目录、简介、导出、讨论详情）一次性接入；Esc 从组件内移到应用级统一入口，组件只留 Tab 焦点环绕 |
+| `navigation.ts` 引入 `RouteLayer` / `currentLayer()` | 评论区是返回链上的普通一层，`currentView()` 仍按前缀归属远端详情以保住侧栏高亮与会话；删掉 `isCommentsView()` / `backFromComments()` 旁路 |
+| `workspace.BACK_ACTIONS` | `Record<RouteLayer, () => void>` 路由返回表，评论区只是其中一行；`back()` = 浮层出栈 → 查表回退一层，成为唯一返回入口 |
+| `lifecycle.ts` 瘦身 | 删除 8 项浮层 `if` 链、评论区特判与视图判断，依赖从 9 域降到 6 域；Android 返回键直调 `back()`，桌面 Esc 只调 `dismissTopLayer()` |
+| 六个页面 `goBack()` | 全部改为 `workspace.back()`；阅读页里三份重复的「在线/本地」判断收归 `leaveReader()` |
+| 评论页状态 | `selectedComment` 由 `query.comment` 派生，开关只写 query；页内改用 `setCommentsQuery()`，不再直接调用 `router` |
+| 非 `ModalShell` 浮层 | 播放器移动抽屉、桌面播放列表/设置面板、定时菜单、书架搜索面板显式入栈；`SettingSelect` 的 Esc 加 `stopPropagation` 以免冒泡关掉承载它的弹窗 |
+
+新的返回链按入口分叉，每层之上都可以再叠任意浮层：远端是
+**讨论详情 → 评论区 → 作品详情 → 书架/发现页**，本地是
+**本地详情 → 书库**、**阅读页 → 本地详情（或在线阅读的来源页）**。
+每一步恰好弹出一层，系统键与界面按钮不会再走到不同目标。
+
+本轮验证：`vue-tsc --noEmit` 零错误，`vite build` 成功；`isCommentsView`、
+`backFromComments`、页面内 `router.replace` 与 `backFromOnlineReading` 外部引用均清零。
+§7 新增的第 6–8 条仍需 Android 真机确认。
+
 ## 9. 已知取舍（评估过，决定不拆）
 
 按「文件按业务需要拆，不为对称而拆」的原则，以下四处保留现状，后续若出现第二个
@@ -233,8 +272,8 @@ provider  →  lifecycle                   只装配与挂载，不实现业务
 | 现状 | 为什么不拆 |
 | --- | --- |
 | `online.ts` 548 行，同一文件内含文本/漫画/音频三种章节取数 | 三种媒态共享同一份会话状态（`onlineBook`、`pendingChapterId`、目录快照、`cacheGeneration`）。物理拆分必须再造一个上下文对象把这些状态传回去，耦合不减反增。重复的取数骨架已抽成 `cachedChapter<T>` |
-| `ReaderPage` 与 `ComicReaderPage` 各有一份 `goBack`、`openChapter` | `goBack` 仅 5 行且逐字相同；`openChapter` 的差异在翻页模型（分页重排 vs 轮播手势复位），抽成组合式函数需要把「打开后做什么」再作为回调传入，可读性下降 |
-| `lifecycle.ts` 中返回键按固定顺序关闭浮层 | 这是「应用级浮层层级」的显式清单，属于装配知识。改成注册制会让层级顺序散落到各域，反而看不出全貌。新增浮层时在这里加一行即可 |
+| `ReaderPage` 与 `ComicReaderPage` 各有一份 `openChapter` | `goBack` 已收归 `workspace.back()`；剩下的差异在翻页模型（分页重排 vs 轮播手势复位），抽成组合式函数需要把「打开后做什么」再作为回调传入，可读性下降 |
+| 桌面浏览器后退不经过 `back()` | 要让 `router.back()` 成为唯一入口，得把所有层都塞进 URL / `history.state`，全局浮层状态从各域 ref 迁走且刷新后弹窗重现。Tauri 的 `onBackButtonPress` 已接管 Android 手势，桌面没有系统返回键，因此保留 vue-router 的 hash 历史，只保证「系统键 + UI 返回按钮 + 页内浮层」三者一致 |
 | `mediaTitle` 在两个详情页同名不同义 | 本地页文案为「小说/有声/漫画」，远端页为「小说原著/有声小说/漫画改编」，是两套产品措辞，合并会改变界面文字 |
 
 另一个已知的同名不同义是 `formatMetric`（详情页返回 `--`、首页返回空串、评论页取整
