@@ -33,6 +33,9 @@ struct AutoSigninOutcome {
     /// 是否需要在退避窗口后重试。
     #[serde(rename = "retry")]
     needs_retry: bool,
+    /// 本次是否真的提交并签到成功。已签过、维护时段或未登录时为 `false`，
+    /// Java 侧据此决定要不要发通知——只有当天第一次成功才值得提醒。
+    signed: bool,
     /// 写入系统日志的结论文本。
     message: String,
 }
@@ -42,6 +45,7 @@ impl AutoSigninOutcome {
     fn done(message: String) -> Self {
         Self {
             needs_retry: false,
+            signed: false,
             message,
         }
     }
@@ -103,12 +107,14 @@ fn run_auto_signin(
         Ok(true)
     });
     let needs_retry = result.as_ref().err().is_some_and(should_retry);
+    let signed = matches!(result.as_ref(), Ok(true));
     let notice = SigninNotice::new(&day, result, previous.as_ref());
     if let Err(error) = log.save(&cookie, &notice) {
         log_warn!("自动签到记录写入失败：{error}");
     }
     Ok(AutoSigninOutcome {
         needs_retry,
+        signed,
         message: format!("{} {}", notice.day, notice.message),
     })
 }
@@ -169,6 +175,7 @@ pub extern "system" fn Java_com_sansan_sf_1novel_1flow_AutoSigninBridge_run<'loc
         Ok(outcome) => outcome,
         Err(error) => AutoSigninOutcome {
             needs_retry: should_retry(&error),
+            signed: false,
             message: format!("自动签到失败：{error}"),
         },
     };

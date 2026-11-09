@@ -3,7 +3,6 @@ package com.sansan.sf_novel_flow
 import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -11,6 +10,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.Settings
+import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import androidx.core.content.ContextCompat
@@ -43,6 +43,10 @@ class SetAutoSigninArgs { var enabled: Boolean = false }
                 Manifest.permission.WRITE_EXTERNAL_STORAGE,
             ],
             alias = "externalStorage",
+        ),
+        Permission(
+            strings = [Manifest.permission.POST_NOTIFICATIONS],
+            alias = "notifications",
         ),
     ],
 )
@@ -114,10 +118,40 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
+     * 请求通知权限，返回请求后的实际状态。
+     *
+     * Android 13 起没有该权限时通知会被静默丢弃；低版本请求会直接视为已授予。
+     * 用户拒绝也不影响自动签到本身，只是收不到结果提醒。
+     *
+     * 别名解析不到时 Tauri 的 `requestPermissionForAliases` 直接返回、不回调，
+     * 前端会永远等下去，所以这里先自检一次，解析不到就当作未授予。
+     */
+    @Command
+    fun requestNotificationPermission(invoke: Invoke) {
+        if (AutoSigninNotifier.canNotify(activity)) {
+            invoke.resolve(JSObject().put("granted", true))
+            return
+        }
+        if (!isPermissionDeclared("notifications")) {
+            Log.w("AutoSignin", "通知权限别名未声明，跳过请求")
+            invoke.resolve(JSObject().put("granted", false))
+            return
+        }
+        requestPermissionForAlias("notifications", invoke, "onNotificationPermissionFinished")
+    }
+
+    @PermissionCallback
+    fun onNotificationPermissionFinished(invoke: Invoke) {
+        invoke.resolve(JSObject().put("granted", AutoSigninNotifier.canNotify(activity)))
+    }
+
+    /**
      * 打开本应用的系统详情页。
      *
      * 厂商的自启动页是私有 Activity、名字随系统版本变化，按品牌枚举并不可靠；
-     * 系统详情页在所有 Android 上都存在，由用户在其中找到「自启动 / 后台」开关。
+     * 系统详情页在所有 Android 上都存在，由用户在其中找到「自启动」开关。
+     * 实测该开关不在详情页首屏，而在「权限 → 查看所有权限 → 自启动」，前端跳转后
+     * 会补一句路径提示。
      *
      * 是否已授权无法查询（没有 API、没有 ContentProvider），因此这里不做任何校验。
      */

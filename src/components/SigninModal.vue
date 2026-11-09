@@ -45,9 +45,7 @@ const todaySigned = computed(() =>
  * 厂商的自启动开关无法查询，所以这里不判断是否已授权，只固定给出一条说明，
  * 让用户在签到没按时执行时知道去哪里处理。
  */
-const showBackgroundHint = computed(
-  () => isAndroid && autoSigninEnabled.value,
-);
+const showBackgroundHint = computed(() => isAndroid && autoSigninEnabled.value);
 const weekSignedCount = computed(
   () => week.value.filter((item) => item.isSignIn).length,
 );
@@ -169,7 +167,18 @@ watch(
                 <span>{{ todaySigned ? "已签到" : "签到" }}</span>
               </button>
             </div>
-
+            <div v-if="showBackgroundHint" class="background-hint">
+              <span class="background-hint-text">
+                自动签到可能被系统清理，请允许自启动
+              </span>
+              <button
+                type="button"
+                class="background-hint-primary"
+                @click="openAppSettings"
+              >
+                打开设置
+              </button>
+            </div>
             <div class="auto-signin">
               <div class="auto-signin-copy">
                 <span class="auto-signin-label">自动签到</span>
@@ -187,19 +196,6 @@ watch(
                 @click="toggleAutoSignin"
               >
                 <span class="auto-signin-thumb" />
-              </button>
-            </div>
-
-            <div v-if="showBackgroundHint" class="background-hint">
-              <span class="background-hint-text">
-                自动签到可能被系统清理，请允许自启动
-              </span>
-              <button
-                type="button"
-                class="background-hint-primary"
-                @click="openAppSettings"
-              >
-                打开设置
               </button>
             </div>
 

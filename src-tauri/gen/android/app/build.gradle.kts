@@ -56,7 +56,13 @@ android {
         }
         getByName("release") {
             signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = true
+            // 关闭 R8：本项目大量依赖「按名字找类」——Tauri 插件用字符串加载类名、
+            // JNI 用 Java_ 前缀符号名、注解在运行时反射读取、ONNX Runtime 用
+            // FindClass 找包装类。这些关系 R8 推断不出来，只能靠 keep 规则逐条补，
+            // 漏一条就是线上 ClassNotFoundException / UnsatisfiedLinkError。
+            // 体积换来的收益对个人应用无意义，稳定性优先。
+            isMinifyEnabled = false
+            // 重新开启混淆时这两行需要一并恢复。
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))

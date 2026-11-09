@@ -16,6 +16,9 @@ type SigninDeskOptions = {
   notify: Notify;
 };
 
+/** 桌面端自动签到在应用运行时执行，已有应用内提示，不需要系统通知。 */
+const isAndroid = /Android/i.test(navigator.userAgent);
+
 /**
  * 签到与连签奖励。
  *
@@ -98,14 +101,14 @@ export function createSigninDesk({ settings, notify }: SigninDeskOptions) {
   /**
    * 打开本应用的系统详情页。
    *
-   * 厂商的自启动页是私有 Activity，名称随系统版本变化，按品牌枚举并不可靠；
-   * 系统详情页在所有 Android 上都存在，由用户在其中找到「自启动 / 后台」开关。
-   *
+   * 自启动开关没有通用 Intent，位置也因厂商而异（vivo/小米/OPPO 在「权限」里，
+   * 华为叫「应用启动管理」），所以只跳到详情页并提示用户自己找这个开关。
    * 是否已授权无法查询，因此这里只负责跳转，不做校验。
    */
   async function openAppSettings() {
     try {
       await invoke("open_app_settings");
+      notify("请找到「自启动」并开启", "info");
     } catch (error) {
       notify(nativeErrorMessage(error, "打开应用设置失败"), "error");
     }
@@ -157,11 +160,29 @@ export function createSigninDesk({ settings, notify }: SigninDeskOptions) {
     await refresh();
   }
 
+  /**
+   * 请求通知权限。
+   *
+   * 只在 Android 上需要：后台签到完成时用户看不到应用内提示。用户拒绝也不阻断
+   * 自动签到，只是收不到结果提醒，所以这里只提示一次、不抛错。
+   */
+  async function requestNotificationPermission() {
+    if (!isAndroid) return;
+    try {
+      const granted = await invoke<boolean>("request_notification_permission");
+      if (!granted) notify("未授予通知权限，签到结果不会提醒", "info");
+    } catch {
+      // 通知属于附加能力，失败不影响签到本身。
+    }
+  }
+
   async function toggleAutoSignin() {
     if (autoSigninSaving.value) return;
     const next = !autoSigninEnabled.value;
     autoSigninSaving.value = true;
     try {
+      // 先要权限再开启：试签在 setAutoSignin 之后立刻执行，晚一步通知就赶不上。
+      if (next) await requestNotificationPermission();
       await settings.setAutoSignin(next);
       notify(
         next ? "已开启自动签到，正在试签今天" : "已关闭自动签到",
