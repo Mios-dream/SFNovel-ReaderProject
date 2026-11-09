@@ -168,32 +168,31 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    /** 同时清除 App 凭证与网页登录的全部 Cookie。 */
     @Command
     fun clearSessionCookie(invoke: Invoke) {
-        val manager = CookieManager.getInstance()
-        for (url in SFACG_COOKIE_URLS) {
-            manager.setCookie(url, ".SFCommunity=; Max-Age=0; Path=/; Secure")
-            manager.setCookie(url, "session_APP=; Max-Age=0; Path=/; Secure")
-            manager.setCookie(url, "session_PC=; Max-Age=0; Path=/; Secure")
-        }
-        activity.getSharedPreferences(DEVICE_PREFS, Activity.MODE_PRIVATE).edit().remove(APP_SESSION_KEY).apply()
-        manager.flush(); invoke.resolve()
+        clearAppSessionPreference()
+        clearWebSessionCookie(invoke)
     }
 
+    /** 只清除 App 凭证；网页登录在 WebView 中，不受影响。 */
     @Command
     fun clearAppSessionCookie(invoke: Invoke) {
-        activity.getSharedPreferences(DEVICE_PREFS, Activity.MODE_PRIVATE).edit().remove(APP_SESSION_KEY).apply()
+        clearAppSessionPreference()
         invoke.resolve()
     }
 
+    /** 清除网页登录 Cookie，完成后才回复，避免前端立刻又读到旧会话。 */
     @Command
     fun clearWebSessionCookie(invoke: Invoke) {
-        val manager = CookieManager.getInstance()
-        for (url in SFACG_COOKIE_URLS) {
-            manager.setCookie(url, ".SFCommunity=; Max-Age=0; Path=/; Secure")
-            manager.setCookie(url, "session_PC=; Max-Age=0; Path=/; Secure")
+        activity.runOnUiThread {
+            clearWebViewCookies { invoke.resolve() }
         }
-        manager.flush(); invoke.resolve()
+    }
+
+    private fun clearAppSessionPreference() {
+        activity.getSharedPreferences(DEVICE_PREFS, Activity.MODE_PRIVATE)
+            .edit().remove(APP_SESSION_KEY).apply()
     }
 
     @Command
@@ -306,7 +305,10 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
             val pair = part.trim(); val separator = pair.indexOf('=')
             if (separator <= 0) continue
             val name = pair.substring(0, separator)
-            if (name == ".SFCommunity" || name == "session_PC") cookiePairs[name] = pair.substring(separator + 1)
+            val value = pair.substring(separator + 1)
+            // 删除 Cookie 留下的空值不是会话，旧版本曾把它当成已登录。
+            if (value.isEmpty()) continue
+            if (name == ".SFCommunity" || name == "session_PC") cookiePairs[name] = value
         }
         if (!cookiePairs.containsKey(".SFCommunity")) return null
         return cookiePairs.entries.joinToString("; ") { (name, value) -> "$name=$value" }
@@ -316,5 +318,22 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         val SFACG_COOKIE_URLS = arrayOf("https://book.sfacg.com/", "https://api.sfacg.com/", "https://m.sfacg.com/login")
         const val SESSION_MAX_AGE = 30 * 24 * 60 * 60
         const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
+    }
+}
+
+/**
+ * 清空本应用 WebView 的全部 Cookie，完成后回调。
+ *
+ * 逐主机 `setCookie(Max-Age=0)` 删不掉 `.sfacg.com` 的域 Cookie：不带 `Domain`
+ * 的删除只会新建同名主机 Cookie，旧值仍会被 `getCookie` 读到。QQ 的 ptlogin 域
+ * Cookie 还会让授权页自动带出上次账号，所以退出登录时统一清空整个 Cookie 罐。
+ * 回调运行在调用方线程的 Looper 上，因此调用方须在主线程调用。
+ */
+internal fun clearWebViewCookies(onDone: () -> Unit) {
+    val manager = CookieManager.getInstance()
+    manager.removeAllCookies { _ ->
+        manager.flush()
+        Log.d("SfacgAuth", "WebView cookies cleared")
+        onDone()
     }
 }

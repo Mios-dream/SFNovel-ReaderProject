@@ -40,7 +40,17 @@ class SfacgLoginActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT,
         ))
         setContentView(container)
-        webView.loadUrl(OFFICIAL_LOGIN_URL)
+        // 与 Windows 端的 clear_all_browsing_data 对齐：每次新开登录页都从干净会话
+        // 开始。否则残留的 .SFCommunity 会让 onPageFinished 在第一屏就判定「已登录」
+        // 直接关闭，QQ 的 ptlogin Cookie 也会带出上次账号，用户换不了号。
+        // Activity 重建时不清理，避免打断进行中的 OAuth。
+        if (savedInstanceState == null) {
+            clearWebViewCookies {
+                if (!isFinishing && !isDestroyed) webView.loadUrl(OFFICIAL_LOGIN_URL)
+            }
+        } else {
+            webView.loadUrl(OFFICIAL_LOGIN_URL)
+        }
     }
 
     /** Creates a WebView that shares the official login session and OAuth handling. */
@@ -53,6 +63,10 @@ class SfacgLoginActivity : AppCompatActivity() {
             settings.domStorageEnabled = true
             settings.javaScriptCanOpenWindowsAutomatically = true
             settings.setSupportMultipleWindows(true)
+            // QQ 互联按 UA 分流：移动 UA 只提供「拉起手机 QQ」的一键登录，而手机 QQ
+            // 会把授权结果显式交给系统浏览器，本 WebView 拿不到 Cookie。桌面 UA 下
+            // 授权页改为在 iframe 内完成，回调仍落在同一个 WebView。
+            settings.userAgentString = DESKTOP_USER_AGENT
             webViewClient = object : WebViewClient() {
                 /**
                  * Allows HTTPS plus the legacy HTTP callbacks hosted by SF.
@@ -123,11 +137,22 @@ class SfacgLoginActivity : AppCompatActivity() {
      */
     private fun finishWhenSessionCookieExists(url: String) {
         if (!isSfacgHost(Uri.parse(url).host)) return
-        val cookie = CookieManager.getInstance().getCookie("https://book.sfacg.com/") ?: return
-        if (!cookie.split(";").any { it.trim().startsWith(".SFCommunity=") }) return
+        if (sessionCookieValue() == null) return
         CookieManager.getInstance().flush()
         setResult(Activity.RESULT_OK)
         finish()
+    }
+
+    /** 读取有效的 .SFCommunity 值；Cookie 删除留下的空值不算已登录。 */
+    private fun sessionCookieValue(): String? {
+        val cookie = CookieManager.getInstance().getCookie("https://book.sfacg.com/") ?: return null
+        for (part in cookie.split(";")) {
+            val pair = part.trim()
+            if (!pair.startsWith(".SFCommunity=")) continue
+            val value = pair.removePrefix(".SFCommunity=")
+            if (value.isNotEmpty()) return value
+        }
+        return null
     }
 
     /** Returns whether a host belongs to SF, including its legacy bare domain. */
@@ -153,5 +178,8 @@ class SfacgLoginActivity : AppCompatActivity() {
     private companion object {
         /** The SF-hosted entrypoint where users complete their own authentication. */
         const val OFFICIAL_LOGIN_URL = "https://passport.sfacg.com/"
+        /** 与 Rust 侧 `SF_WEB_USER_AGENT` 一致的桌面浏览器 UA，只作用于登录 WebView。 */
+        const val DESKTOP_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
     }
 }
