@@ -26,6 +26,7 @@ import type { RemoteDesk } from "./domains/remote";
 import type { UpdaterDesk } from "./domains/updater";
 import type { WorkspaceDesk } from "./domains/workspace";
 
+export type { BackgroundPending } from "./domains/settings";
 export type { UpdateInfo, UpdateStatus } from "./domains/updater";
 
 /**

@@ -16,14 +16,12 @@ type SigninDeskOptions = {
   notify: Notify;
 };
 
-/** 桌面端自动签到在应用运行时执行，已有应用内提示，不需要系统通知。 */
-const isAndroid = /Android/i.test(navigator.userAgent);
-
 /**
  * 签到与连签奖励。
  *
  * 自动签到开关的真相在设置域：这里只读取 `settings.settings` 并调用
  * `settings.setAutoSignin`，不另存一份布尔值，否则两个弹窗会各显示一个答案。
+ * 后台权限同样只在设置域维护，这里只读它的结论。
  */
 export function createSigninDesk({ settings, notify }: SigninDeskOptions) {
   const overview = ref<SigninOverview>();
@@ -40,6 +38,17 @@ export function createSigninDesk({ settings, notify }: SigninDeskOptions) {
   const autoSigninEnabled = computed(
     () => settings.settings.value.signin.autoSigninEnabled,
   );
+
+  /**
+   * 后台权限是否确有缺失。
+   *
+   * 只有读到明确结论时才提示：没读到（非 Android、或读取失败）不能断定缺权限，
+   * 让用户白跑一趟设置页更糟。厂商的自启动开关查不到，因此不参与判断。
+   */
+  const backgroundPermissionMissing = computed(() => {
+    const value = settings.backgroundPermissions.value;
+    return Boolean(value && (!value.notifications || !value.batteryOptimizations));
+  });
 
   /** 签到页展示的一行结论；不是当天的记录带上日期，避免误读。 */
   const noticeText = computed(() => {
@@ -98,22 +107,6 @@ export function createSigninDesk({ settings, notify }: SigninDeskOptions) {
     }
   }
 
-  /**
-   * 打开本应用的系统详情页。
-   *
-   * 自启动开关没有通用 Intent，位置也因厂商而异（vivo/小米/OPPO 在「权限」里，
-   * 华为叫「应用启动管理」），所以只跳到详情页并提示用户自己找这个开关。
-   * 是否已授权无法查询，因此这里只负责跳转，不做校验。
-   */
-  async function openAppSettings() {
-    try {
-      await invoke("open_app_settings");
-      notify("请找到「自启动」并开启", "info");
-    } catch (error) {
-      notify(nativeErrorMessage(error, "打开应用设置失败"), "error");
-    }
-  }
-
   async function submit() {
     if (signing.value || loading.value) return;
     const date = calendarDateKey(today.value);
@@ -160,29 +153,12 @@ export function createSigninDesk({ settings, notify }: SigninDeskOptions) {
     await refresh();
   }
 
-  /**
-   * 请求通知权限。
-   *
-   * 只在 Android 上需要：后台签到完成时用户看不到应用内提示。用户拒绝也不阻断
-   * 自动签到，只是收不到结果提醒，所以这里只提示一次、不抛错。
-   */
-  async function requestNotificationPermission() {
-    if (!isAndroid) return;
-    try {
-      const granted = await invoke<boolean>("request_notification_permission");
-      if (!granted) notify("未授予通知权限，签到结果不会提醒", "info");
-    } catch {
-      // 通知属于附加能力，失败不影响签到本身。
-    }
-  }
-
+  /** 切换自动签到。权限不在这里要：签到页只提示，入口统一在设置页。 */
   async function toggleAutoSignin() {
     if (autoSigninSaving.value) return;
     const next = !autoSigninEnabled.value;
     autoSigninSaving.value = true;
     try {
-      // 先要权限再开启：试签在 setAutoSignin 之后立刻执行，晚一步通知就赶不上。
-      if (next) await requestNotificationPermission();
       await settings.setAutoSignin(next);
       notify(
         next ? "已开启自动签到，正在试签今天" : "已关闭自动签到",
@@ -198,9 +174,12 @@ export function createSigninDesk({ settings, notify }: SigninDeskOptions) {
 
   /** 打开弹窗：先确保设置已加载（自动签到开关的真相），再读取签到状态。 */
   async function open() {
-    await settings.ensureSettings().catch((error) => {
-      notify(nativeErrorMessage(error, "读取自动签到设置失败"), "error");
-    });
+    await Promise.all([
+      settings.ensureSettings().catch((error) => {
+        notify(nativeErrorMessage(error, "读取自动签到设置失败"), "error");
+      }),
+      settings.loadBackgroundPermissions(),
+    ]);
     await Promise.all([refresh(), loadNotice()]);
   }
 
@@ -218,6 +197,7 @@ export function createSigninDesk({ settings, notify }: SigninDeskOptions) {
     claimingConfigId,
     autoSigninSaving,
     autoSigninEnabled,
+    backgroundPermissionMissing,
     noticeText,
     isToday,
     canClaim,
@@ -228,7 +208,6 @@ export function createSigninDesk({ settings, notify }: SigninDeskOptions) {
     submit,
     claim,
     toggleAutoSignin,
-    openAppSettings,
     dismiss,
   };
 }

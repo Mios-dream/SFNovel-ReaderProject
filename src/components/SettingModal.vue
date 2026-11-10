@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  BatteryCharging,
   BookOpenText,
   Download,
   HardDrive,
@@ -12,8 +13,8 @@ import {
   X,
 } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
-import type { UpdateStatus } from "../desk";
-import type { AppSettings } from "../types";
+import type { BackgroundPending, UpdateStatus } from "../desk";
+import type { AppSettings, BackgroundPermissions } from "../types";
 import ModalShell from "./ModalShell.vue";
 import SettingSelect from "./SettingSelect.vue";
 
@@ -27,6 +28,8 @@ const props = defineProps<{
   currentVersion: string;
   updateStatus: UpdateStatus;
   updateVersion?: string;
+  background?: BackgroundPermissions;
+  backgroundPending: BackgroundPending;
 }>();
 const emit = defineEmits<{
   close: [];
@@ -35,6 +38,9 @@ const emit = defineEmits<{
   checkUpdate: [];
   showUpdate: [];
   openReleases: [];
+  openAppSettings: [];
+  requestBatteryOptimization: [];
+  requestNotificationPermission: [];
 }>();
 
 // 保存进行中不关闭，避免设置已提交却仍留在页面上。
@@ -112,6 +118,17 @@ function handleUpdateAction() {
   emit("checkUpdate");
 }
 
+/**
+ * 权限行的按钮文案。
+ *
+ * 已授权的行不隐藏按钮，而是禁用并显示「已授权」，这样三行保持同样结构，
+ * 用户能直接看出哪一项还缺。自启动没有可查询的状态，按钮始终可点。
+ */
+function permissionLabel(kind: "battery" | "notification", granted?: boolean) {
+  if (granted) return "已授权";
+  return props.backgroundPending === kind ? "处理中" : "去开启";
+}
+
 function updateHint() {
   switch (props.updateStatus) {
     case "checking":
@@ -164,6 +181,68 @@ function updateActionLabel() {
         @submit.prevent="emit('save', cloneSettings(draft))"
       >
         <div class="settings-content">
+          <section v-if="isAndroid" class="settings-group">
+            <header class="settings-group-header">
+              <span class="settings-group-icon"
+                ><BatteryCharging :size="16"
+              /></span>
+              <strong>应用权限</strong>
+            </header>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>自启动</strong>
+                <small>避免系统清理自动化任务</small>
+              </div>
+              <button
+                class="permission-button"
+                type="button"
+                @click="emit('openAppSettings')"
+              >
+                打开设置
+              </button>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>电池优化</strong>
+                <small>避免系统清理自动化任务</small>
+              </div>
+              <button
+                class="permission-button"
+                :class="{ granted: background?.batteryOptimizations }"
+                type="button"
+                :disabled="
+                  backgroundPending === 'battery' ||
+                  background?.batteryOptimizations
+                "
+                @click="emit('requestBatteryOptimization')"
+              >
+                {{
+                  permissionLabel("battery", background?.batteryOptimizations)
+                }}
+              </button>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>通知权限</strong>
+                <small>完成任务后通知提醒</small>
+              </div>
+              <button
+                class="permission-button"
+                :class="{ granted: background?.notifications }"
+                type="button"
+                :disabled="
+                  backgroundPending === 'notification' ||
+                  background?.notifications
+                "
+                @click="emit('requestNotificationPermission')"
+              >
+                {{ permissionLabel("notification", background?.notifications) }}
+              </button>
+            </div>
+          </section>
           <section class="settings-group">
             <header class="settings-group-header">
               <span class="settings-group-icon"><Download :size="16" /></span>
@@ -321,6 +400,7 @@ function updateActionLabel() {
               </div>
             </div>
           </section>
+
           <section class="settings-group update-group">
             <header class="settings-group-header">
               <span class="settings-group-icon"><RefreshCw :size="16" /></span>
@@ -644,6 +724,41 @@ input[type="checkbox"] {
   color: var(--theme-color-dark);
   background: #fff0e7;
 }
+.permission-button {
+  flex: 0 0 auto;
+  min-width: 82px;
+  min-height: 34px;
+  border: 1px solid #e7bda9;
+  border-radius: 9px;
+  padding: 0 14px;
+  color: #a05f45;
+  background: #fffaf7;
+  font-size: 12px;
+  font-weight: 600;
+  transition:
+    border-color 0.2s,
+    color 0.2s,
+    background 0.2s;
+}
+.permission-button:hover:not(:disabled) {
+  border-color: var(--theme-color);
+  color: var(--theme-color-dark);
+  background: #fff0e7;
+}
+.permission-button:disabled {
+  cursor: default;
+}
+/* 请求进行中：不可点但仍是待授权状态，压暗表示正在处理。 */
+.permission-button:disabled:not(.granted) {
+  opacity: 0.6;
+}
+/* 已授权：保留按钮位置但压成状态标签，避免和可点的按钮看起来一样。 */
+.permission-button.granted {
+  border-color: transparent;
+  color: #a17367;
+  background: #f4ebe5;
+  font-weight: 500;
+}
 .settings-actions {
   flex: 0 0 auto;
   display: flex;
@@ -790,6 +905,11 @@ input[type="checkbox"] {
     min-height: 36px;
     padding: 0 10px;
     font-size: 12px;
+  }
+  .permission-button {
+    min-width: 72px;
+    min-height: 32px;
+    padding: 0 11px;
   }
   .settings-actions {
     gap: 10px;

@@ -60,6 +60,12 @@ export function registerDeskLifecycle({
       void library.refreshLibrary();
   }
 
+  /** 用户可能刚从系统设置里改完后台权限，回到应用时重读一次。 */
+  function refreshBackgroundPermissions() {
+    if (document.visibilityState === "visible")
+      void settings.loadBackgroundPermissions();
+  }
+
   let stopBackListener: { unregister: () => Promise<void> } | undefined;
   let disposed = false;
 
@@ -89,6 +95,7 @@ export function registerDeskLifecycle({
       "visibilitychange",
       refreshLibraryAfterReturningToApp,
     );
+    document.addEventListener("visibilitychange", refreshBackgroundPermissions);
   });
 
   onBeforeUnmount(() => {
@@ -99,6 +106,10 @@ export function registerDeskLifecycle({
     document.removeEventListener(
       "visibilitychange",
       refreshLibraryAfterReturningToApp,
+    );
+    document.removeEventListener(
+      "visibilitychange",
+      refreshBackgroundPermissions,
     );
   });
 }

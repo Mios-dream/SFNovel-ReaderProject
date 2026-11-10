@@ -274,6 +274,11 @@ export type SigninNotice = {
   message: string;
   pending: boolean;
 };
+/** Android 后台运行权限状态；厂商的自启动开关没有读取接口，不在其中。 */
+export type BackgroundPermissions = {
+  notifications: boolean;
+  batteryOptimizations: boolean;
+};
 /** 下载请求与过程文件设置。 */
 export type DownloadSettings = {
   requestIntervalMs: number;

@@ -25,6 +25,7 @@ const {
   claimingConfigId,
   autoSigninSaving,
   autoSigninEnabled,
+  backgroundPermissionMissing,
   noticeText,
   isToday,
   canClaim,
@@ -32,7 +33,6 @@ const {
   submit,
   claim,
   toggleAutoSignin,
-  openAppSettings,
   dismiss,
 } = useSignin();
 
@@ -41,12 +41,13 @@ const todaySigned = computed(() =>
   week.value.some((item) => isToday(item.date) && item.isSignIn),
 );
 /**
- * 仅在 Android 上、自动签到已开启时显示提示。
+ * 自动签到已开启、但 Android 上还缺权限时提示一次。
  *
- * 厂商的自启动开关无法查询，所以这里不判断是否已授权，只固定给出一条说明，
- * 让用户在签到没按时执行时知道去哪里处理。
+ * 这里只说结论和去处，具体开关都在设置页；两项权限都就绪后整条提示消失。
  */
-const showBackgroundHint = computed(() => isAndroid && autoSigninEnabled.value);
+const showBackgroundHint = computed(
+  () => isAndroid && autoSigninEnabled.value && backgroundPermissionMissing.value,
+);
 const weekSignedCount = computed(
   () => week.value.filter((item) => item.isSignIn).length,
 );
@@ -169,15 +170,8 @@ watch(
           </div>
           <div v-if="showBackgroundHint" class="background-hint">
             <span class="background-hint-text">
-              自动签到可能被系统清理，请允许自启动
+              自动签到需要后台权限，请在设置中开启
             </span>
-            <button
-              type="button"
-              class="background-hint-primary"
-              @click="openAppSettings"
-            >
-              打开设置
-            </button>
           </div>
           <div class="auto-signin">
             <div class="auto-signin-copy">
@@ -427,29 +421,14 @@ watch(
 .background-hint {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
   padding: 8px 18px;
   border-bottom: 1px solid #f4e6de;
   background: #fff8e8;
 }
 .background-hint-text {
-  flex: 1;
-  min-width: 0;
   color: #8a6a3a;
   font-size: 12px;
   line-height: 1.4;
-}
-.background-hint-primary {
-  flex: 0 0 auto;
-  padding: 4px 12px;
-  border: 0;
-  border-radius: 999px;
-  background: #e0902a;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
 }
 .auto-signin-switch {
   position: relative;

@@ -3,11 +3,13 @@ package com.sansan.sf_novel_flow
 import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.PowerManager
 import android.provider.DocumentsContract
 import android.provider.Settings
 import android.util.Log
@@ -118,13 +120,14 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * 请求通知权限，返回请求后的实际状态。
+     * 请求通知权限，返回用户操作后的实际状态。
      *
-     * Android 13 起没有该权限时通知会被静默丢弃；低版本请求会直接视为已授予。
-     * 用户拒绝也不影响自动签到本身，只是收不到结果提醒。
+     * Android 13 起走系统的授权框；更早的版本没有这个运行时权限，用户关通知只是把
+     * AppOps 置为 ignore（请求权限会立刻「成功」但通知仍被丢弃），所以只能带用户去
+     * 通知设置页手动打开。用户拒绝也不影响自动签到本身，只是收不到结果提醒。
      *
      * 别名解析不到时 Tauri 的 `requestPermissionForAliases` 直接返回、不回调，
-     * 前端会永远等下去，所以这里先自检一次，解析不到就当作未授予。
+     * 前端会永远等下去，所以这里先自检一次，解析不到就改走系统设置页。
      */
     @Command
     fun requestNotificationPermission(invoke: Invoke) {
@@ -132,9 +135,13 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(JSObject().put("granted", true))
             return
         }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            openNotificationSettings(invoke)
+            return
+        }
         if (!isPermissionDeclared("notifications")) {
-            Log.w("AutoSignin", "通知权限别名未声明，跳过请求")
-            invoke.resolve(JSObject().put("granted", false))
+            Log.w("AutoSignin", "通知权限别名未声明，改为打开系统通知设置页")
+            openNotificationSettings(invoke)
             return
         }
         requestPermissionForAlias("notifications", invoke, "onNotificationPermissionFinished")
@@ -142,6 +149,48 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
 
     @PermissionCallback
     fun onNotificationPermissionFinished(invoke: Invoke) {
+        if (AutoSigninNotifier.canNotify(activity)) {
+            invoke.resolve(JSObject().put("granted", true))
+            return
+        }
+        // 拒绝并勾了「不再询问」后系统不会再弹框，只能去设置页打开。
+        val canAsk =
+            activity.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+        if (!canAsk) {
+            openNotificationSettings(invoke)
+            return
+        }
+        invoke.resolve(JSObject().put("granted", false))
+    }
+
+    /**
+     * 打开本应用的通知设置页，用户返回后回复真实状态。
+     *
+     * 通知设置页是 API 26 才有的，更早的版本退回应用详情页（其中的「通知」入口
+     * 同样能开关通知）。
+     */
+    private fun openNotificationSettings(invoke: Invoke) {
+        val intent =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.parse("package:${activity.packageName}"))
+            }
+        try {
+            startActivityForResult(invoke, intent, "onNotificationSettingsFinished")
+        } catch (error: Exception) {
+            invoke.reject("无法打开通知设置：${error.message}")
+        }
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    @ActivityCallback
+    fun onNotificationSettingsFinished(
+        invoke: Invoke,
+        _result: androidx.activity.result.ActivityResult,
+    ) {
         invoke.resolve(JSObject().put("granted", AutoSigninNotifier.canNotify(activity)))
     }
 
@@ -166,6 +215,69 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
         } catch (error: Exception) {
             invoke.reject("无法打开应用设置：${error.message}")
         }
+    }
+
+    /**
+     * 读取后台运行相关权限的当前状态。
+     *
+     * 只包含能查询的两项：通知权限与电池优化白名单。厂商的自启动开关没有读取接口，
+     * 由前端固定视为「需要用户自行开启」，不参与这里的判断。
+     */
+    @Command
+    fun readBackgroundPermissions(invoke: Invoke) {
+        invoke.resolve(
+            JSObject()
+                .put("notifications", AutoSigninNotifier.canNotify(activity))
+                .put("batteryOptimizations", isIgnoringBatteryOptimizations()),
+        )
+    }
+
+    /**
+     * 申请加入电池优化白名单。
+     *
+     * 系统弹窗由用户确认，结果无法直接读取，因此回到应用后再查一次
+     * `isIgnoringBatteryOptimizations`。部分 ROM 不认这个 Intent，退回到电池优化列表页。
+     */
+    @Command
+    fun requestIgnoreBatteryOptimizations(invoke: Invoke) {
+        if (isIgnoringBatteryOptimizations()) {
+            invoke.resolve(JSObject().put("granted", true))
+            return
+        }
+        val packageUri = Uri.parse("package:${activity.packageName}")
+        try {
+            startActivityForResult(
+                invoke,
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, packageUri),
+                "onIgnoreBatteryOptimizationsFinished",
+            )
+        } catch (_: ActivityNotFoundException) {
+            try {
+                startActivityForResult(
+                    invoke,
+                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                    "onIgnoreBatteryOptimizationsFinished",
+                )
+            } catch (error: Exception) {
+                invoke.reject("无法打开电池优化设置：${error.message}")
+            }
+        }
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    @ActivityCallback
+    fun onIgnoreBatteryOptimizationsFinished(
+        invoke: Invoke,
+        _result: androidx.activity.result.ActivityResult,
+    ) {
+        invoke.resolve(JSObject().put("granted", isIgnoringBatteryOptimizations()))
+    }
+
+    /** Android 6 起才有电池优化；更早的版本不存在这个限制。 */
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        val manager = activity.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return manager.isIgnoringBatteryOptimizations(activity.packageName)
     }
 
     /** 同时清除 App 凭证与网页登录的全部 Cookie。 */

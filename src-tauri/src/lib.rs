@@ -220,7 +220,9 @@ pub fn run() {
             commands::signin::claim_signin_reward,
             commands::signin::signin_notice,
             commands::platform::open_app_settings,
+            commands::platform::read_background_permissions,
             commands::platform::request_notification_permission,
+            commands::platform::request_ignore_battery_optimizations,
             commands::updates::check_update
         ])
         .run(tauri::generate_context!())

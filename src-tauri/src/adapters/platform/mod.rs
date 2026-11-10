@@ -14,6 +14,18 @@ mod windows;
 #[cfg(target_os = "android")]
 pub(crate) use android::{android_auth_plugin, android_ocr_plugin};
 
+/// 后台运行相关权限的当前状态。
+///
+/// 只有 Android 有这类管控；桌面端各字段恒为 `true`，前端也只在 Android 上展示。
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackgroundPermissions {
+    /// 是否已授予通知权限。
+    pub(crate) notifications: bool,
+    /// 是否已加入电池优化白名单。
+    pub(crate) battery_optimizations: bool,
+}
+
 #[cfg(target_os = "windows")]
 pub(crate) use windows::{restore_app_session, restore_web_session, set_autostart};
 

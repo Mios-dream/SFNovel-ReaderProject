@@ -1,8 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { AppSettings } from "../../types";
+import type { AppSettings, BackgroundPermissions } from "../../types";
 import type { Notify } from "../../composables/useToast";
 import { nativeErrorMessage } from "../../utils/native";
+
+/** 后台运行权限里可以主动申请的两项。 */
+export type BackgroundPending = "battery" | "notification" | null;
+
+/** 后台运行权限只存在于 Android；其他平台不展示相关入口。 */
+const isAndroid = /Android/i.test(navigator.userAgent);
 
 /**
  * 后端返回设置之前的占位值。
@@ -40,6 +46,10 @@ export function createSettingsDesk(notify: Notify) {
   const contentDictionarySize = ref(0);
   const contentDictionaryUpdating = ref(false);
   const contentDictionaryChapterId = ref(8436696);
+  /** Android 后台运行权限的最新读取结果；未读取过时为空。 */
+  const backgroundPermissions = ref<BackgroundPermissions>();
+  /** 正在请求哪一项权限；只让被点的那一行进入处理中，另一行仍可点。 */
+  const backgroundPending = ref<BackgroundPending>(null);
 
   /** 是否已经向后端读取过；避免重复请求，也让其他域可以按需等待。 */
   let loaded = false;
@@ -70,11 +80,80 @@ export function createSettingsDesk(notify: Notify) {
   async function openSettings() {
     settingsOpen.value = true;
     try {
-      await loadSettings();
+      await Promise.all([loadSettings(), loadBackgroundPermissions()]);
       const dictionary = await invoke<{ size: number }>("get_content_dictionary");
       contentDictionarySize.value = dictionary.size;
     } catch (error) {
       notify(nativeErrorMessage(error, "读取设置失败"), "error");
+    }
+  }
+
+  /**
+   * 读取后台运行权限。
+   *
+   * 用户可能在系统页面里改完就返回，所以每次回到应用都要重读；读取失败按未知处理，
+   * 不打扰用户——这些状态只影响提示，不影响签到本身。
+   */
+  async function loadBackgroundPermissions() {
+    if (!isAndroid) return;
+    try {
+      backgroundPermissions.value = await invoke<BackgroundPermissions>(
+        "read_background_permissions",
+      );
+    } catch {
+      // 状态是附加信息，读不到就不展示结论。
+    }
+  }
+
+  /**
+   * 打开本应用的系统详情页。
+   *
+   * 厂商的自启动开关没有通用 Intent，位置也因厂商而异（vivo/小米/OPPO 在「权限」里，
+   * 华为叫「应用启动管理」），所以只跳详情页并提示用户自己找这个开关。
+   */
+  async function openAppSettings() {
+    try {
+      await invoke("open_app_settings");
+      notify("请在应用详情页找到「自启动」并开启", "info");
+    } catch (error) {
+      notify(nativeErrorMessage(error, "打开应用设置失败"), "error");
+    }
+  }
+
+  /** 申请加入电池优化白名单；结果由系统弹窗决定，返回后再读一次状态。 */
+  async function requestBatteryOptimization() {
+    if (backgroundPending.value) return;
+    backgroundPending.value = "battery";
+    try {
+      const granted = await invoke<boolean>("request_ignore_battery_optimizations");
+      if (!granted) notify("未加入电池优化白名单，后台签到可能被系统中断", "info");
+    } catch (error) {
+      notify(nativeErrorMessage(error, "无法申请电池优化白名单"), "error");
+    } finally {
+      backgroundPending.value = null;
+      await loadBackgroundPermissions();
+    }
+  }
+
+  /**
+   * 请求通知权限。
+   *
+   * Android 13 起弹系统授权框，更早的版本由原生侧打开系统通知页，两者都要等用户
+   * 操作完才返回。用户拒绝只影响提醒、不阻断自动签到，所以这里不抛错。
+   */
+  async function requestNotificationPermission() {
+    if (!isAndroid || backgroundPending.value) return false;
+    backgroundPending.value = "notification";
+    try {
+      const granted = await invoke<boolean>("request_notification_permission");
+      if (!granted) notify("未授予通知权限，签到结果不会提醒", "info");
+      return granted;
+    } catch (error) {
+      notify(nativeErrorMessage(error, "无法打开通知设置"), "error");
+      return false;
+    } finally {
+      backgroundPending.value = null;
+      await loadBackgroundPermissions();
     }
   }
 
@@ -140,9 +219,15 @@ export function createSettingsDesk(notify: Notify) {
     contentDictionarySize,
     contentDictionaryUpdating,
     contentDictionaryChapterId,
+    backgroundPermissions,
+    backgroundPending,
     loadSettings,
     ensureSettings,
+    loadBackgroundPermissions,
     openSettings,
+    openAppSettings,
+    requestBatteryOptimization,
+    requestNotificationPermission,
     updateContentDictionary,
     saveSettings,
     setAutoSignin,

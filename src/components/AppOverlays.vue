@@ -82,12 +82,17 @@ const updater = useUpdater();
     :current-version="updater.currentVersion.value"
     :update-status="updater.status.value"
     :update-version="updater.info.value?.version"
+    :background="settings.backgroundPermissions.value"
+    :background-pending="settings.backgroundPending.value"
     @close="settings.settingsOpen.value = false"
     @save="settings.saveSettings"
     @update-dictionary="settings.updateContentDictionary"
     @check-update="updater.checkFromSettings"
     @show-update="updater.showUpdate"
     @open-releases="updater.openReleases"
+    @open-app-settings="settings.openAppSettings"
+    @request-battery-optimization="settings.requestBatteryOptimization"
+    @request-notification-permission="settings.requestNotificationPermission"
   />
   <UpdateModal
     :open="updater.modalOpen.value"

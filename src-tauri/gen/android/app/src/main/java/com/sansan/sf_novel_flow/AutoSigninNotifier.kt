@@ -27,11 +27,30 @@ internal object AutoSigninNotifier {
     /** 失败提醒按业务日去重的偏好键。 */
     private const val ALERT_DAY_KEY = "auto-signin-alert-day"
 
-    /** 是否已获得通知权限；Android 13 以下恒为已授予。 */
-    fun canNotify(context: Context): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(context, PERMISSION) ==
+    /**
+     * 系统当前是否真的允许本应用发通知。
+     *
+     * 三层都要查，少一层就会把「已关闭」当成「已开启」：
+     * - Android 13 起的运行时授权；
+     * - 应用级通知开关。Android 13 以下没有运行时权限，用户关通知只改 AppOps
+     *   `OP_POST_NOTIFICATION`，`checkSelfPermission` 查不出来，必须单独问一次；
+     * - 「自动签到」渠道。这个分类可以被单独关闭，此时应用级开关仍是开的；渠道尚未
+     *   创建（首次发送前）按可用处理。
+     */
+    fun canNotify(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, PERMISSION) !=
             PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
+        val channel =
+            context.getSystemService(NotificationManager::class.java)
+                ?.getNotificationChannel(CHANNEL_ID)
+        return channel == null || channel.importance != NotificationManager.IMPORTANCE_NONE
+    }
 
     /** 发一条签到成功通知。 */
     @SuppressLint("MissingPermission")
