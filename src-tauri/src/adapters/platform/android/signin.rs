@@ -3,6 +3,8 @@
 //! 与桌面端共用同一套判断：只提交当前业务日，历史日期需要补签卡因此不自动补签。
 //! 上游 0 点到 1 点维护，窗口内直接跳过，避免把维护记成签到失败。
 //! 结果按会话 Cookie 落盘，返回结构化结论，由 Java 侧决定是否需要退避重试。
+//! 登录失效与风控这类需要用户介入的失败附带提醒原因，由 Java 侧按业务日提醒一次；
+//! 其余失败靠自动重试或下个周期自愈，不打扰用户。
 
 use crate::adapters::sfacg::device::{
     install_device_profile, install_device_state_path, is_valid_uuid, DeviceProfile,
@@ -36,16 +38,24 @@ struct AutoSigninOutcome {
     /// 本次是否真的提交并签到成功。已签过、维护时段或未登录时为 `false`，
     /// Java 侧据此决定要不要发通知——只有当天第一次成功才值得提醒。
     signed: bool,
+    /// 需要用户介入时的提醒原因：`login` 表示登录失效，`risk` 表示账号风控。
+    /// 其余失败要么自动重试、要么下个周期自愈，缺省不打扰用户。
+    #[serde(rename = "notifyReason", skip_serializing_if = "Option::is_none")]
+    notify_reason: Option<&'static str>,
+    /// 结论所属的业务日，Java 侧用于失败提醒的按日去重。
+    day: String,
     /// 写入系统日志的结论文本。
     message: String,
 }
 
 impl AutoSigninOutcome {
-    /// 本次检查已结束，无需重试。
+    /// 本次检查已结束，无需重试也无需提醒。
     fn done(message: String) -> Self {
         Self {
             needs_retry: false,
             signed: false,
+            notify_reason: None,
+            day: String::new(),
             message,
         }
     }
@@ -108,6 +118,7 @@ fn run_auto_signin(
     });
     let needs_retry = result.as_ref().err().is_some_and(should_retry);
     let signed = matches!(result.as_ref(), Ok(true));
+    let notify_reason = result.as_ref().err().and_then(attention_reason);
     let notice = SigninNotice::new(&day, result, previous.as_ref());
     if let Err(error) = log.save(&cookie, &notice) {
         log_warn!("自动签到记录写入失败：{error}");
@@ -115,6 +126,8 @@ fn run_auto_signin(
     Ok(AutoSigninOutcome {
         needs_retry,
         signed,
+        notify_reason,
+        day,
         message: format!("{} {}", notice.day, notice.message),
     })
 }
@@ -152,6 +165,20 @@ fn should_retry(error: &AppError) -> bool {
     !error.is_unauthenticated() && !error.is_risk_control() && !error.is_cancelled()
 }
 
+/// 需要用户介入的失败对应的提醒原因。
+///
+/// 登录失效要重新登录刷新 Cookie，风控要在官方 App 完成人工验证，都只能由用户
+/// 解决；其余失败（网络、上游临时错误）靠重试或下个周期自愈，返回 `None` 不打扰。
+fn attention_reason(error: &AppError) -> Option<&'static str> {
+    if error.is_unauthenticated() {
+        Some("login")
+    } else if error.is_risk_control() {
+        Some("risk")
+    } else {
+        None
+    }
+}
+
 /// Java 侧 `AutoSigninBridge.run` 的原生实现。
 ///
 /// 符号名必须按 JNI 规则转义包名里的下划线：`sf_novel_flow` 中的 `_` 写作 `_1`，
@@ -176,6 +203,8 @@ pub extern "system" fn Java_com_sansan_sf_1novel_1flow_AutoSigninBridge_run<'loc
         Err(error) => AutoSigninOutcome {
             needs_retry: should_retry(&error),
             signed: false,
+            notify_reason: attention_reason(&error),
+            day: business_day(SystemTime::now()),
             message: format!("自动签到失败：{error}"),
         },
     };

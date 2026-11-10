@@ -181,9 +181,17 @@ class AutoSigninWorker(context: Context, params: WorkerParameters) : Worker(cont
                 ),
             )
             Log.i(LOG_TAG, outcome.optString("message"))
-            // 只有当天第一次真的签到成功才提醒；已签到、维护时段与跳过都不打扰用户。
+            // 成功只在当天首次提交成功时提醒；登录失效与风控需要用户介入，按业务日
+            // 提醒一次，其余失败靠重试或下个周期自愈，不打扰用户。
             if (outcome.optBoolean("signed")) {
                 AutoSigninNotifier.notifySigned(context, outcome.optString("message"))
+            } else {
+                AutoSigninNotifier.notifyFailureOnce(
+                    context,
+                    outcome.optString("day"),
+                    outcome.optString("notifyReason"),
+                    outcome.optString("message"),
+                )
             }
             if (outcome.optBoolean("retry") && !isOneShot()) Result.retry() else Result.success()
         } catch (error: Throwable) {
