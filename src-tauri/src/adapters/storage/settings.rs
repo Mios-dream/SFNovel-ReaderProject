@@ -153,20 +153,28 @@ pub(crate) async fn ensure_external_storage_access(app: &tauri::AppHandle) -> Ap
 
 /// 创建唯一导出临时文件路径。
 ///
+/// 临时文件必须落在应用缓存目录：Android 13 以下的 `std::env::temp_dir` 返回
+/// `/data/local/tmp`，应用进程无写权限，会直接以 `Permission denied (os error 13)` 失败。
+///
 /// # 参数
 /// - `app`：Tauri 应用句柄。
 /// - `extension`：临时文件扩展名。
 ///
 /// # 错误
-/// 系统临时目录无法解析时返回错误消息。
+/// 应用缓存目录无法解析或创建时返回错误消息。
 pub(crate) fn export_temp_path(app: &tauri::AppHandle, extension: &str) -> AppResult<PathBuf> {
     use tauri::Manager;
-    app.path()
-        .temp_dir()
-        .map(|directory| {
-            directory.join(format!(".sf-export-{}.{}", uuid::Uuid::new_v4(), extension))
-        })
-        .map_err(|error| AppError::storage(format!("无法解析导出临时目录：{error}")))
+    let directory = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| AppError::storage(format!("无法解析导出临时目录：{error}")))?;
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| AppError::storage(format!("无法创建导出临时目录：{error}")))?;
+    Ok(directory.join(format!(
+        ".sf-export-{}.{}",
+        uuid::Uuid::new_v4(),
+        extension
+    )))
 }
 
 /// 把临时导出文件写入 Android `content://` 目标。

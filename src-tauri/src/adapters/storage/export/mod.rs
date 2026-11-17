@@ -118,12 +118,18 @@ pub(crate) async fn export(
     let requested_path = output_path.trim();
     let is_document_uri = requested_path.starts_with("content://");
     let target = resolve_target(app, requested_path, format, is_document_uri)?;
-    format.write(&target, &data)?;
+    let written = format.write(&target, &data);
+    // content:// 目标先写应用缓存再复制；两条失败路径都要删掉临时文件。
+    let result = match written {
+        Ok(()) if is_document_uri => {
+            settings::android_write_export(app, &target, requested_path).await
+        }
+        other => other,
+    };
     if is_document_uri {
-        let result = settings::android_write_export(app, &target, requested_path).await;
         let _ = fs::remove_file(&target);
-        result?;
     }
+    result?;
     Ok(ExportFile {
         href: requested_path.to_string(),
         file_name: format.file_name(name),
