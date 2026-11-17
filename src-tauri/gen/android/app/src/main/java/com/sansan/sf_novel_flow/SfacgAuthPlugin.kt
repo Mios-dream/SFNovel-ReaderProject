@@ -36,6 +36,9 @@ class WriteExportToUriArgs { lateinit var sourcePath: String; lateinit var uri: 
 @InvokeArg
 class SetAutoSigninArgs { var enabled: Boolean = false }
 
+@InvokeArg
+class SetPeakRefreshRateArgs { var enabled: Boolean = true }
+
 /** Bridges Android authentication state and the official login WebView to Rust. */
 @TauriPlugin(
     permissions = [
@@ -116,6 +119,15 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
     fun setAutoSignin(invoke: Invoke) {
         val enabled = invoke.parseArgs(SetAutoSigninArgs::class.java).enabled
         AutoSigninScheduler.sync(activity.applicationContext, enabled)
+        invoke.resolve()
+    }
+
+    /** Stores the refresh-rate preference and applies it to the running window. */
+    @Command
+    fun setPeakRefreshRate(invoke: Invoke) {
+        val enabled = invoke.parseArgs(SetPeakRefreshRateArgs::class.java).enabled
+        DisplayRefresh.setPeakEnabled(activity.applicationContext, enabled)
+        activity.runOnUiThread { DisplayRefresh.apply(activity) }
         invoke.resolve()
     }
 

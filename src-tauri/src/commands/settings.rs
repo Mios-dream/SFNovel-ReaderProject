@@ -32,10 +32,14 @@ pub(crate) async fn save_settings(
     settings: AppSettings,
 ) -> AppResult<AppSettings> {
     let storage = NativeStorage::new(app.clone());
-    let previous_auto_signin = storage
-        .settings()
-        .ok()
+    let previous = storage.settings().ok();
+    let previous_auto_signin = previous
+        .as_ref()
         .map(|settings| settings.signin.auto_signin_enabled);
+    #[cfg(target_os = "android")]
+    let previous_peak_refresh_rate = previous
+        .as_ref()
+        .map(|settings| settings.display.peak_refresh_rate);
     let saved = SettingsService::new(&storage).save_settings(settings)?;
     crate::adapters::downloads::configure_concurrency(saved.download.max_concurrent_downloads);
     #[cfg(target_os = "windows")]
@@ -45,6 +49,15 @@ pub(crate) async fn save_settings(
         crate::adapters::platform::android::configure_auto_signin(
             &app,
             saved.signin.auto_signin_enabled,
+        )
+        .await?;
+    }
+    // 刷新率由窗口决定，改完立刻生效，不需要重启。
+    #[cfg(target_os = "android")]
+    if previous_peak_refresh_rate != Some(saved.display.peak_refresh_rate) {
+        crate::adapters::platform::android::configure_peak_refresh_rate(
+            &app,
+            saved.display.peak_refresh_rate,
         )
         .await?;
     }

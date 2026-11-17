@@ -36,6 +36,9 @@ function defaultSettings(): AppSettings {
     updates: {
       autoCheck: true,
     },
+    display: {
+      peakRefreshRate: true,
+    },
   };
 }
 

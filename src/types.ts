@@ -298,6 +298,10 @@ export type SigninSettings = {
 export type UpdateSettings = {
   autoCheck: boolean;
 };
+/** 显示与动画设置。 */
+export type DisplaySettings = {
+  peakRefreshRate: boolean;
+};
 /** 应用设置按功能分类，持久化到单个 settings.json。 */
 export type AppSettings = {
   download: DownloadSettings;
@@ -305,6 +309,7 @@ export type AppSettings = {
   desktop: DesktopSettings;
   signin: SigninSettings;
   updates: UpdateSettings;
+  display: DisplaySettings;
 };
 
 /**

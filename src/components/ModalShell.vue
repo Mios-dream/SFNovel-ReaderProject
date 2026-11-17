@@ -264,33 +264,103 @@ onBeforeUnmount(detach);
   }
 }
 
-/* 遮罩淡入淡出，时长与面板一致，避免退场时被提前截断。 */
+/*
+ * 进出场节奏：
+ * - 进场慢、出场快，出场曲线加速（ease-in），符合「打开是展开内容、关闭是让路」的心理模型
+ * - 只动合成层属性（transform / opacity），不碰 layout
+ * - 动画开始前声明 will-change，让层在首帧之前完成提升，否则提升动作本身要吃一帧
+ * - 遮罩比面板先到位（200ms 对 260ms），面板落在一层已经变暗、变模糊的背景上
+ *
+ * 位移量由落点通过 `--modal-in-transform` / `--modal-out-transform` 给出，
+ * 玻璃面板再把它覆盖成 `none`：背投模糊的采样区域随位移每帧变化，实测带位移会掉
+ * 5%~13% 的帧，只留透明度则零丢帧（dpr 3、336×520 面板、120Hz）。
+ */
 .modal-shell-enter-active {
-  animation: modal-scrim-in 200ms ease-out;
+  animation: modal-scrim-in 200ms cubic-bezier(0.22, 0.68, 0.24, 1);
+  will-change: opacity;
 }
 .modal-shell-leave-active {
-  animation: modal-scrim-out 160ms ease-in;
+  animation: modal-scrim-out 180ms cubic-bezier(0.4, 0, 1, 1);
+  will-change: opacity;
 }
 .modal-shell-enter-active :deep(> *) {
-  animation: modal-panel-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: modal-panel-in 260ms cubic-bezier(0.22, 0.72, 0.18, 1);
+  will-change: transform, opacity;
 }
 .modal-shell-leave-active :deep(> *) {
-  animation: modal-panel-out 160ms ease-in;
+  animation: modal-panel-out 180ms cubic-bezier(0.4, 0, 1, 1);
+  will-change: transform, opacity;
 }
-/* 入场方向由落点决定，其余表现一致。 */
+/* 入场方向由落点决定，其余表现一致。
+   抽屉与贴底面板整幅滑入：起始位置在视口外，光栅化发生在不可见的那几帧里，
+   动画本身只剩合成，实测零丢帧；改成 28px 小位移反而会在可见区域首帧光栅，掉 3~5 帧。
+   这类纯位移不叠加淡入，避免「边滑边亮」。 */
 .modal-shell--start.modal-shell-enter-active :deep(> *) {
-  animation-name: modal-panel-in-start;
+  --modal-in-opacity: 1;
+  --modal-in-transform: translateX(-100%);
+}
+.modal-shell--start.modal-shell-leave-active :deep(> *) {
+  --modal-out-opacity: 1;
+  --modal-out-transform: translateX(-100%);
 }
 .modal-shell--end.modal-shell-enter-active :deep(> *) {
-  animation-name: modal-panel-in-end;
+  --modal-in-opacity: 1;
+  --modal-in-transform: translateX(100%);
 }
-.modal-shell--bottom.modal-shell-enter-active :deep(> *),
-.modal-shell--sheet.modal-shell-enter-active :deep(> *) {
-  animation-name: modal-panel-in-bottom;
+.modal-shell--end.modal-shell-leave-active :deep(> *) {
+  --modal-out-opacity: 1;
+  --modal-out-transform: translateX(100%);
 }
+.modal-shell--bottom.modal-shell-enter-active :deep(> *) {
+  --modal-in-opacity: 1;
+  --modal-in-transform: translateY(100%);
+}
+.modal-shell--bottom.modal-shell-leave-active :deep(> *) {
+  --modal-out-opacity: 1;
+  --modal-out-transform: translateY(100%);
+}
+/* 玻璃面板退化成纯淡入淡出，必须排在方向规则之后：权重相同，靠顺序取胜。 */
+.modal-shell.modal-shell-enter-active :deep(> .glass) {
+  --modal-in-opacity: 0;
+  --modal-in-transform: none;
+}
+.modal-shell.modal-shell-leave-active :deep(> .glass) {
+  --modal-out-opacity: 0;
+  --modal-out-transform: none;
+}
+/* 窄屏下右侧抽屉改成贴底、长弹窗（sheet）改成贴底：都走整幅上滑。 */
 @media (max-width: 900px) {
   .modal-shell--end.modal-shell-enter-active :deep(> *) {
-    animation-name: modal-panel-in-bottom;
+    --modal-in-transform: translateY(100%);
+  }
+  .modal-shell--end.modal-shell-leave-active :deep(> *) {
+    --modal-out-transform: translateY(100%);
+  }
+  .modal-shell.modal-shell--end.modal-shell-enter-active :deep(> .glass) {
+    --modal-in-opacity: 0;
+    --modal-in-transform: none;
+  }
+  .modal-shell.modal-shell--end.modal-shell-leave-active :deep(> .glass) {
+    --modal-out-opacity: 0;
+    --modal-out-transform: none;
+  }
+}
+@media (max-width: 600px) {
+  .modal-shell--sheet.modal-shell-enter-active :deep(> *) {
+    --modal-in-opacity: 1;
+    --modal-in-transform: translateY(100%);
+  }
+  .modal-shell--sheet.modal-shell-leave-active :deep(> *) {
+    --modal-out-opacity: 1;
+    --modal-out-transform: translateY(100%);
+  }
+  .modal-shell.modal-shell--sheet.modal-shell-enter-active :deep(> .glass) {
+    --modal-in-opacity: 0;
+    --modal-in-transform: none;
+  }
+  .modal-shell.modal-shell--sheet.modal-shell-leave-active :deep(> .glass) {
+    --modal-out-opacity: 0;
+    --modal-out-transform: none;
   }
 }
 
@@ -306,31 +376,14 @@ onBeforeUnmount(detach);
 }
 @keyframes modal-panel-in {
   from {
-    opacity: 0;
-    transform: scale(0.96);
+    opacity: var(--modal-in-opacity, 0);
+    transform: var(--modal-in-transform, scale(0.96) translateY(6px));
   }
 }
 @keyframes modal-panel-out {
   to {
-    opacity: 0;
-    transform: scale(0.99);
-  }
-}
-@keyframes modal-panel-in-start {
-  from {
-    transform: translateX(-100%);
-  }
-}
-@keyframes modal-panel-in-end {
-  from {
-    opacity: 0;
-    transform: translateX(24px);
-  }
-}
-@keyframes modal-panel-in-bottom {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
+    opacity: var(--modal-out-opacity, 0);
+    transform: var(--modal-out-transform, scale(0.98));
   }
 }
 
@@ -340,6 +393,7 @@ onBeforeUnmount(detach);
   .modal-shell-enter-active :deep(> *),
   .modal-shell-leave-active :deep(> *) {
     animation: none;
+    will-change: auto;
   }
 }
 </style>

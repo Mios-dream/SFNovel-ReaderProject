@@ -86,32 +86,24 @@ button {
 }
 
 /*
- * 玻璃材质。不是「一层半透明白」，而是五层叠加，每层解决一个具体问题：
+ * 玻璃材质。三层，每层解决一个具体问题：
  *
  * 1. backdrop：blur 把背景压成连续色块（半透明才有可读性），saturate 保住一点
  *    色相不至于发灰，brightness 把背后明度往亮处归一，深色封面不再把面板压暗。
- * 2. tint：自上而下由亮到暗的极浅渐变，模拟光穿过板材后的衰减；单色填充是纸片，
- *    渐变才有厚度。
- * 3. rim：顶部 1px 高光 + 底部 1px 收暗，是「这是一块实体」最关键的线索，成本最低。
- * 4. elevation：贴身接触影 + 大范围环境影，环境影用负 spread 避免把边缘糊掉；
+ * 2. tint：一层半透明暖白。**只有纯色**，不做渐变也不叠纹理——background-image
+ *    同样要参与光栅化，实测每次弹出玻璃面板多花 65~80ms（dpr 3，336×520），
+ *    而渐变和噪点在实机上肉眼看不出差别。深度感由 rim 与 elevation 承担。
+ * 3. rim + elevation：顶部高光 + 底部收暗是「这是一块实体」最关键的线索；
+ *    贴身接触影 + 大范围环境影，环境影用负 spread 避免把边缘糊掉。
  *    两者由 `--glass-lift` 承载，悬停时只换这个变量，rim 不会被覆盖掉。
- * 5. grain：低频噪点，消掉渐变在低端屏上的色带，并给表面一点磨砂颗粒感。
  */
 .glass {
   /* 暖白基色与暖棕投影色，和 --paper / --ink 同一套色相。 */
   --glass-tint: 255, 250, 246;
   --glass-ink: 137, 76, 55;
-  --glass-sheen: linear-gradient(
-    172deg,
-    rgba(var(--glass-tint), 0.94) 0%,
-    rgba(var(--glass-tint), 0.86) 46%,
-    rgba(252, 242, 235, 0.8) 100%
-  );
   --glass-lift:
     0 14px 32px -14px rgba(137, 76, 55, 0.26), 0 1px 2px rgba(137, 76, 55, 0.05);
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.15'/%3E%3C/svg%3E"),
-    var(--glass-sheen);
+  background: rgba(var(--glass-tint), 0.88);
   border: 1px solid rgba(255, 255, 255, 0.52);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.92),

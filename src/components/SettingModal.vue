@@ -67,6 +67,9 @@ const defaultSettings: AppSettings = {
   updates: {
     autoCheck: true,
   },
+  display: {
+    peakRefreshRate: true,
+  },
 };
 
 function cloneSettings(settings: AppSettings): AppSettings {
@@ -76,6 +79,7 @@ function cloneSettings(settings: AppSettings): AppSettings {
     desktop: { ...settings.desktop },
     signin: { ...settings.signin },
     updates: { ...settings.updates },
+    display: { ...settings.display },
   };
 }
 
@@ -398,6 +402,30 @@ function updateActionLabel() {
                   label="本地存储位置"
                 />
               </div>
+            </div>
+          </section>
+
+          <section v-if="isAndroid" class="settings-group">
+            <header class="settings-group-header">
+              <span class="settings-group-icon"><Monitor :size="16" /></span>
+              <strong>显示</strong>
+            </header>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <strong>高刷新率</strong>
+                <small>是否启用高刷新率（如果可用）</small>
+              </div>
+              <label class="setting-control toggle-control">
+                <input
+                  v-model="draft.display.peakRefreshRate"
+                  type="checkbox"
+                />
+                <span class="toggle" aria-hidden="true"></span>
+                <span>{{
+                  draft.display.peakRefreshRate ? "已启用" : "已关闭"
+                }}</span>
+              </label>
             </div>
           </section>
 

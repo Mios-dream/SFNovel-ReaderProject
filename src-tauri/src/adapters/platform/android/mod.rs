@@ -2,10 +2,11 @@
 //!
 //! 按职责拆分：`session` 负责会话读写与自动签到开关，`device` 负责设备身份采集，
 //! `login` 负责官方登录窗口，`storage` 负责外部存储与导出落盘，`power` 负责后台运行
-//! 权限（应用设置入口、通知权限、电池优化白名单），`ocr` 负责正文识别，`signin`
-//! 承载 Java 侧自动签到的 JNI 入口。
+//! 权限（应用设置入口、通知权限、电池优化白名单），`display` 负责窗口刷新率，
+//! `ocr` 负责正文识别，`signin` 承载 Java 侧自动签到的 JNI 入口。
 
 mod device;
+mod display;
 mod login;
 mod ocr;
 mod power;
@@ -20,6 +21,7 @@ use tauri::plugin::{PluginHandle, TauriPlugin};
 use tauri::Manager;
 
 pub(super) use device::initialize_device_identity;
+pub(crate) use display::configure_peak_refresh_rate;
 pub(crate) use login::start_official_login;
 pub(crate) use ocr::recognize_image;
 pub(crate) use power::{

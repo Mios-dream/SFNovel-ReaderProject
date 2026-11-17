@@ -31,6 +31,9 @@ pub(crate) struct AppSettings {
     /// 应用更新选项。
     #[serde(default)]
     pub(crate) updates: UpdateSettings,
+    /// 显示与动画选项。
+    #[serde(default)]
+    pub(crate) display: DisplaySettings,
 }
 
 /// 下载请求限流与过程文件选项。
@@ -116,6 +119,30 @@ impl Default for UpdateSettings {
 }
 
 fn default_auto_check() -> bool {
+    true
+}
+
+/// 显示与动画选项。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DisplaySettings {
+    /// 是否让窗口跟随屏幕的最高刷新率。
+    ///
+    /// 默认开启：Android 给普通窗口的默认节奏是 60Hz，在高刷屏上每个画面要显示
+    /// 两次，滚动与转场因此在视觉上被拖慢；关闭后固定 60Hz，换回一点续航。
+    #[serde(default = "default_peak_refresh_rate")]
+    pub(crate) peak_refresh_rate: bool,
+}
+
+impl Default for DisplaySettings {
+    fn default() -> Self {
+        Self {
+            peak_refresh_rate: default_peak_refresh_rate(),
+        }
+    }
+}
+
+fn default_peak_refresh_rate() -> bool {
     true
 }
 

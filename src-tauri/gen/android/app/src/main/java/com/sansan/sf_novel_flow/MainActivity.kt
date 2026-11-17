@@ -26,6 +26,7 @@ class MainActivity : TauriActivity() {
     }
     AutoSigninScheduler.restore(this)
     AutoSigninScheduler.checkNow(this)
+    DisplayRefresh.apply(this)
   }
 
   /**
