@@ -223,7 +223,6 @@ onBeforeUnmount(detach);
   padding: 18px;
   background: rgba(34, 25, 20, 0.34);
   backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
   outline: none;
 }
 @media (max-width: 680px) {

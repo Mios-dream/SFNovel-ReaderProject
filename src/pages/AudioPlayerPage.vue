@@ -1502,7 +1502,6 @@ async function retryOnlineAudio(shouldPlay = true) {
   box-shadow: 0 18px 46px rgba(75, 44, 37, 0.2);
   transform: translate(-50%, -50%);
   backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
 }
 .timer-popover-enter-active,
 .timer-popover-leave-active,
@@ -1680,7 +1679,6 @@ async function retryOnlineAudio(shouldPlay = true) {
   background: rgba(255, 251, 248, 0.97);
   box-shadow: 0 18px 46px rgba(75, 44, 37, 0.2);
   backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
 }
 .desktop-player-settings header {
   display: flex;
@@ -1839,7 +1837,6 @@ async function retryOnlineAudio(shouldPlay = true) {
     background: rgba(57, 39, 40, 0.24);
     box-shadow: 0 8px 20px rgba(32, 22, 29, 0.12);
     backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
   }
   .player-main {
     width: min(680px, calc(100% - 40px));
@@ -1850,7 +1847,6 @@ async function retryOnlineAudio(shouldPlay = true) {
     background: rgba(255, 249, 246, 0.7);
     box-shadow: 0 20px 50px rgba(34, 24, 31, 0.24);
     backdrop-filter: blur(24px) saturate(1.08);
-    -webkit-backdrop-filter: blur(24px) saturate(1.08);
   }
   .mobile-player-settings,
   .mobile-settings-action,
@@ -1892,7 +1888,6 @@ async function retryOnlineAudio(shouldPlay = true) {
     color: #fff;
     background: rgba(69, 40, 34, 0.22);
     backdrop-filter: blur(13px);
-    -webkit-backdrop-filter: blur(13px);
   }
   .music-player {
     display: flex;
@@ -1965,7 +1960,6 @@ async function retryOnlineAudio(shouldPlay = true) {
     background: rgba(255, 255, 255, 0.34);
     box-shadow: inset 0 1px rgba(255, 255, 255, 0.45);
     backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
   }
   .now-playing p {
     color: #a65a49;

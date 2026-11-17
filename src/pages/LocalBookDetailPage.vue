@@ -1822,7 +1822,6 @@ watch(
     );
     box-shadow: none;
     backdrop-filter: blur(19px);
-    -webkit-backdrop-filter: blur(19px);
   }
 
   .summary-row {

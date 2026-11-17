@@ -120,7 +120,11 @@ button {
     0 0 0 1px rgba(var(--glass-ink), 0.05),
     var(--glass-lift);
   backdrop-filter: blur(16px) saturate(132%) brightness(1.04);
-  -webkit-backdrop-filter: blur(16px) saturate(132%) brightness(1.04);
+}
+
+/* 内容卡片用的玻璃变体：材质与 .glass 相同，但不做背景模糊。减少性能消耗 */
+.glass.glass-flat {
+  backdrop-filter: none;
 }
 
 .spin {

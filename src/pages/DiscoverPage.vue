@@ -546,7 +546,7 @@ onBeforeUnmount(() => {
                 <button
                   v-for="novel in recent"
                   :key="novel.novelId"
-                  class="recent-card glass"
+                  class="recent-card glass glass-flat"
                   @click="openNovel(novel)"
                 >
                   <span class="recent-cover">

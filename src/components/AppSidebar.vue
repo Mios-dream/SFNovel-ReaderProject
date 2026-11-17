@@ -250,7 +250,6 @@ nav button.active {
     background: transparent;
     box-shadow: none;
     backdrop-filter: none;
-    -webkit-backdrop-filter: none;
   }
   .brand {
     gap: 8px;

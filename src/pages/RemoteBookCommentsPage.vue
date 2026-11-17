@@ -326,7 +326,6 @@ watch(
   border-bottom: 1px solid rgba(230, 216, 205, 0.78);
   background: rgba(253, 246, 241, 0.88);
   backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
 }
 .topbar-inner {
   display: flex;
@@ -407,7 +406,6 @@ watch(
   background: rgba(255, 252, 248, 0.68);
   box-shadow: 0 14px 38px rgba(94, 62, 44, 0.1);
   backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
 }
 .context-cover-wrap {
   position: relative;
@@ -585,7 +583,6 @@ watch(
   background: var(--surface-soft);
   box-shadow: 0 16px 44px rgba(94, 62, 44, 0.1);
   backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
 }
 .feedback-main :deep(.discussion-danmaku) {
   margin: 16px 26px 0;
@@ -601,7 +598,6 @@ watch(
   padding: 16px 26px;
   background: rgba(255, 250, 246, 0.9);
   backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
 }
 .feedback-list {
   display: grid;
@@ -743,7 +739,6 @@ watch(
     min-height: 59px;
     background: #fff;
     backdrop-filter: none;
-    -webkit-backdrop-filter: none;
   }
   .topbar-inner {
     width: 100%;
@@ -793,7 +788,6 @@ watch(
     background: #fff;
     box-shadow: none;
     backdrop-filter: none;
-    -webkit-backdrop-filter: none;
   }
   .feedback-main :deep(.discussion-danmaku) {
     display: none;
@@ -803,7 +797,6 @@ watch(
     padding: 13px 0 11px;
     background: #fff;
     backdrop-filter: none;
-    -webkit-backdrop-filter: none;
   }
   .feedback-list,
   .feedback-skeletons {

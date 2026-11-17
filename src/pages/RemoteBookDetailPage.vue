@@ -1369,7 +1369,6 @@ svg.remote-comic-cover {
     background: rgba(255, 255, 255, 0.55);
     box-shadow: 0 15px 38px rgba(137, 76, 55, 0.12);
     backdrop-filter: blur(19px);
-    -webkit-backdrop-filter: blur(19px);
   }
   .book-hero {
     min-height: 76px;

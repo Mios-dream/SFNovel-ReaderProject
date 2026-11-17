@@ -14,6 +14,8 @@ class MainActivity : TauriActivity() {
    * @param savedInstanceState Android state restored after process recreation.
    */
   override fun onCreate(savedInstanceState: Bundle?) {
+    // 调试构建开放 WebView 远程调试，供 chrome://inspect 检查页面渲染与样式。
+    if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     window.statusBarColor = Color.TRANSPARENT

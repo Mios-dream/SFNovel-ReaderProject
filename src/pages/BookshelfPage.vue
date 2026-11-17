@@ -319,7 +319,6 @@ function jumpToPage(event: Event) {
   background: rgba(255, 252, 249, 0.97);
   box-shadow: 0 16px 34px rgba(115, 72, 56, 0.18);
   backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
   transform: translateX(-50%);
   transform-origin: top center;
 }
@@ -491,7 +490,6 @@ function jumpToPage(event: Event) {
     background: transparent;
     box-shadow: none;
     backdrop-filter: none;
-    -webkit-backdrop-filter: none;
   }
   .shelf-grid :deep(.novel-card:hover) {
     box-shadow: none;

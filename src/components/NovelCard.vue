@@ -27,7 +27,7 @@ const emit = defineEmits<{
 
 <template>
   <article
-    class="novel-card glass clickable-card"
+    class="novel-card glass glass-flat clickable-card"
     role="button"
     tabindex="0"
     @click="emit('detail', novel)"

@@ -209,7 +209,6 @@ onBeforeUnmount(() =>
   background: rgba(255, 250, 247, 0.98);
   box-shadow: 0 12px 28px rgba(91, 49, 39, 0.16);
   backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 .choice-option {
   display: flex;

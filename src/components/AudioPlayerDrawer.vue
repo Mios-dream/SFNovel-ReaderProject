@@ -79,7 +79,6 @@ const emit = defineEmits<{ close: [] }>();
     background: rgba(255, 250, 247, 0.88);
     box-shadow: 0 -12px 32px rgba(91, 54, 44, 0.16);
     backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
     transform: translateY(0);
     will-change: transform, opacity;
   }

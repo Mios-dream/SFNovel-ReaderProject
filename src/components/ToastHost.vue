@@ -77,7 +77,6 @@ const icons = {
   background: rgba(255, 251, 247, 0.94);
   box-shadow: 0 14px 34px rgba(101, 65, 57, 0.19);
   backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
   pointer-events: auto;
 }
 
@@ -193,7 +192,6 @@ const icons = {
     background: rgba(255, 252, 249, 0.9);
     box-shadow: 0 8px 20px rgba(101, 65, 57, 0.11);
     backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
   }
 
   .toast::before {

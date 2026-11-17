@@ -120,7 +120,7 @@ async function openDiscover() {
         <article
           v-for="book in library.books.value"
           :key="book.name"
-          class="library-card glass"
+          class="library-card glass glass-flat"
           :class="{ 'clickable-card': true }"
           role="button"
           tabindex="0"
@@ -479,7 +479,6 @@ async function openDiscover() {
     background: transparent;
     box-shadow: none;
     backdrop-filter: none;
-    -webkit-backdrop-filter: none;
   }
   .library-cover {
     width: 100%;

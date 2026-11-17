@@ -102,7 +102,6 @@ const emit = defineEmits<{ back: []; action: [key: string] }>();
     0 2px 8px rgba(89, 57, 48, 0.06);
   transform: translateX(-50%);
   backdrop-filter: blur(22px) saturate(1.15);
-  -webkit-backdrop-filter: blur(22px) saturate(1.15);
 }
 .reader-heading {
   display: flex;
@@ -164,7 +163,6 @@ const emit = defineEmits<{ back: []; action: [key: string] }>();
     0 18px 42px rgba(89, 57, 48, 0.18),
     0 2px 8px rgba(89, 57, 48, 0.06);
   backdrop-filter: blur(22px) saturate(1.15);
-  -webkit-backdrop-filter: blur(22px) saturate(1.15);
 }
 .reader-control-action {
   display: flex;
@@ -204,7 +202,6 @@ const emit = defineEmits<{ back: []; action: [key: string] }>();
   background: rgba(255, 252, 249, 0.92);
   box-shadow: 0 12px 30px rgba(89, 57, 48, 0.13);
   backdrop-filter: blur(20px) saturate(1.1);
-  -webkit-backdrop-filter: blur(20px) saturate(1.1);
 }
 .reader-dock :deep(.reader-setting-row) {
   display: flex;
@@ -341,7 +338,6 @@ const emit = defineEmits<{ back: []; action: [key: string] }>();
   background: rgba(255, 252, 249, 0.9);
   box-shadow: 0 10px 26px rgba(89, 57, 48, 0.12);
   backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
 }
 .reader-dock :deep(.reader-turn-button) {
   display: inline-flex;
