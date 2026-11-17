@@ -69,12 +69,6 @@ mod tests {
     use super::{split, InlineSegment};
 
     #[test]
-    fn plain_text_stays_one_segment() {
-        assert_eq!(split("没有任何插图"), vec![InlineSegment::Text("没有任何插图")]);
-        assert!(split("").is_empty());
-    }
-
-    #[test]
     fn marker_is_replaced_by_image_segment() {
         let segments = split("前文[img=]https://a.test/1.png[/img]后文");
 

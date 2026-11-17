@@ -26,6 +26,17 @@ pub(super) fn extract_numeric_attribute(value: &str, attribute: &str) -> Option<
     digits.parse::<i64>().ok()
 }
 
+/// 解码正文中出现的常见 HTML 实体。
+///
+/// 先解 `&nbsp;` 再解 `&amp;`，否则 `&amp;nbsp;` 会被还原成空格而不是字面文本。
+pub(super) fn decode_entities(value: &str) -> String {
+    value
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+}
+
 /// 移除简单 HTML 标签和常见实体，将连续空白折叠为单个空格。
 pub(super) fn strip_html_text(value: &str) -> String {
     let mut text = String::new();
@@ -38,8 +49,7 @@ pub(super) fn strip_html_text(value: &str) -> String {
             _ => {}
         }
     }
-    text.replace("&nbsp;", " ")
-        .replace("&amp;", "&")
+    decode_entities(&text)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")

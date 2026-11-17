@@ -39,6 +39,17 @@ impl TextOrigin {
     }
 }
 
+/// 归一化章节正文：统一换行符，把不换行空格还原成普通空格。
+///
+/// 上游 App 正文用 U+00A0 做段首缩进并带 CRLF，网页正文用 `&nbsp;`；两种来源最终都落进
+/// 同一份持久化文本，不归一会在导出纯文本时露出不可见字符。
+pub(crate) fn normalize_chapter_text(value: &str) -> String {
+    value
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\u{a0}', " ")
+}
+
 /// 一次文字正文读取的结果。
 pub(crate) struct TextChapter {
     /// 去除包装后的正文。

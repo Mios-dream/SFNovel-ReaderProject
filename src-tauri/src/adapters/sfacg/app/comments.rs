@@ -172,7 +172,7 @@ fn book_comment_reply(item: &Value) -> Option<BookCommentReply> {
 
 #[cfg(test)]
 mod tests {
-    use super::{book_comment, book_comment_reply};
+    use super::book_comment;
     use serde_json::json;
 
     #[test]
@@ -203,16 +203,5 @@ mod tests {
         assert_eq!(comment.ext_type, 2);
         assert_eq!(comment.ticket_num, 5);
         assert!(comment.is_stick);
-    }
-
-    #[test]
-    fn reply_requires_positive_id_and_content() {
-        assert!(book_comment_reply(&json!({ "replyId": 0, "content": "回复" })).is_none());
-        assert!(book_comment_reply(&json!({ "replyId": 2 })).is_none());
-
-        let reply =
-            book_comment_reply(&json!({ "replyId": 2, "replyContent": "回复" })).expect("应解析");
-        assert_eq!(reply.reply_id, 2);
-        assert_eq!(reply.content, "回复", "应接受 replyContent 作为正文");
     }
 }

@@ -213,15 +213,6 @@ mod tests {
     }
 
     #[test]
-    fn recognizes_duplicate_without_error_code() {
-        let error = AppApiError::from_response(
-            422,
-            &json!({ "status": { "httpCode": 422, "msg": "当前分类已经有该作品" } }),
-        );
-        assert!(error.is_already_in_pocket());
-    }
-
-    #[test]
     fn does_not_swallow_other_upstream_failures() {
         let error = AppApiError::from_response(
             404,

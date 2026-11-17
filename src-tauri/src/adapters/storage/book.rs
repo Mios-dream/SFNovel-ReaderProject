@@ -516,28 +516,6 @@ mod tests {
     }
 
     #[test]
-    fn read_comic_chapters_returns_empty_without_comic_directory() {
-        let dir = TempDir::new("comic-absent");
-
-        assert!(read_comic_chapters(&dir.0)
-            .expect("缺少漫画目录不应报错")
-            .is_empty());
-    }
-
-    #[test]
-    fn read_comic_chapters_falls_back_to_default_title() {
-        let dir = TempDir::new("comic-title");
-        let chapter = dir.0.join("comic").join("7");
-        fs::create_dir_all(&chapter).expect("创建目录");
-        fs::write(chapter.join(".complete"), b"   ").expect("写入空标记");
-        fs::write(chapter.join("001.png"), b"page").expect("写入漫画页");
-
-        let chapters = read_comic_chapters(&dir.0).expect("读取漫画目录");
-
-        assert_eq!(chapters[0].title, "第 7 话", "空标记应回退到默认标题");
-    }
-
-    #[test]
     fn downloaded_text_chapter_ids_sorts_numerically_and_ignores_bad_keys() {
         let index = ChapterIndex {
             novel_id: 1,

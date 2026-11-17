@@ -1,7 +1,8 @@
-use super::html::html_tag_attribute;
-use crate::domain::error::{AppError, AppResult};
+use super::html::{decode_entities, html_tag_attribute};
 use super::placeholder::is_vip_subscription_placeholder;
 use super::WebClient;
+use crate::domain::content::normalize_chapter_text;
+use crate::domain::error::{AppError, AppResult};
 use crate::domain::ids::validate_novel_id;
 
 /// VIP 章节返回的已校验图片。
@@ -60,17 +61,7 @@ impl WebClient {
             .find("</div>")
             .map(|offset| body_start + offset)
             .ok_or_else(|| AppError::upstream("SF 章节正文结构无效"))?;
-        let body = html[body_start..body_end]
-            .replace("<br>", "\n")
-            .replace("<br/>", "\n")
-            .replace("<br />", "\n")
-            .replace("</p>", "\n")
-            .replace("&nbsp;", " ")
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">");
-        let plain = chapter_html_to_markdown(&body);
-        let plain = plain.replace("\r\n", "\n").replace('\r', "\n");
+        let plain = normalize_chapter_text(&chapter_html_to_markdown(&html[body_start..body_end]));
         if plain.trim().is_empty() {
             return Err(AppError::upstream("SF 网页章节正文为空"));
         }
@@ -149,26 +140,33 @@ impl WebClient {
             return Err(AppError::upstream("VIP 章节图片数据无效或为空"));
         }
         if is_vip_subscription_placeholder(&bytes) {
-            return Err(AppError::upstream("VIP 章节未授权访问：网页返回了订阅提示图，请确认本章已订阅"));
+            return Err(AppError::upstream(
+                "VIP 章节未授权访问：网页返回了订阅提示图，请确认本章已订阅",
+            ));
         }
         Ok(VipChapterImage { bytes, extension })
     }
 }
 
-/// 将章节 HTML 中的图片保留为下载器可识别的 SF 图片标记。
+/// 将章节 HTML 还原为可持久化的正文：换行标签转成换行符，图片保留为下载器标记。
+///
+/// 实体解码只作用于标签之外的文本，因此 `&lt;br&gt;` 这类写法会保留为字面文本，
+/// 不会被当成标签吃掉。
 fn chapter_html_to_markdown(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     let mut remaining = value;
     while let Some(tag_start) = remaining.find('<') {
-        output.push_str(&remaining[..tag_start]);
+        output.push_str(&decode_entities(&remaining[..tag_start]));
         let after_start = &remaining[tag_start..];
         let Some(tag_end) = after_start.find('>') else {
-            output.push_str(after_start);
+            output.push_str(&decode_entities(after_start));
             return output;
         };
         let tag = &after_start[..=tag_end];
         let normalized = tag.to_ascii_lowercase();
-        if normalized.starts_with("<img") {
+        if normalized.starts_with("<br") || normalized.starts_with("</p") {
+            output.push('\n');
+        } else if normalized.starts_with("<img") {
             if let Some(source) = html_tag_attribute(tag, "src") {
                 let source = source
                     .strip_prefix("//")
@@ -180,6 +178,21 @@ fn chapter_html_to_markdown(value: &str) -> String {
         }
         remaining = &after_start[tag_end + 1..];
     }
-    output.push_str(remaining);
+    output.push_str(&decode_entities(remaining));
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chapter_html_keeps_images_and_turns_breaks_into_newlines() {
+        let html = "第一段&nbsp;&nbsp;缩进。<BR class=\"x\">第二段</p>字面 &lt;br&gt; 保留。<img src=\"//img/a.jpg\">";
+
+        assert_eq!(
+            chapter_html_to_markdown(html),
+            "第一段  缩进。\n第二段\n字面 <br> 保留。\n[img=]https://img/a.jpg[/img]\n"
+        );
+    }
 }

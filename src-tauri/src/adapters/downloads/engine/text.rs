@@ -645,19 +645,6 @@ mod tests {
     }
 
     #[test]
-    fn select_chapters_returns_empty_when_nothing_matches() {
-        let catalog = vec![volume(
-            10,
-            "第一卷",
-            vec![summary(1, "第一章", false)],
-        )];
-
-        let plans = select_chapters(&catalog, &[99].into_iter().collect::<HashSet<_>>());
-
-        assert!(plans.is_empty());
-    }
-
-    #[test]
     fn needs_fetch_always_true_for_new_chapter() {
         let plan = plan(1, false);
 

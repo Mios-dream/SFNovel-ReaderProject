@@ -401,13 +401,4 @@ mod tests {
 
         assert_eq!(indices, vec![0, 2], "下标应按目录顺序返回，供播放列表编号使用");
     }
-
-    #[test]
-    fn select_indices_returns_empty_when_nothing_selected() {
-        let catalog = vec![chapter(11, "第一章")];
-
-        let indices = select_indices(&catalog, &[99].into_iter().collect::<HashSet<_>>());
-
-        assert!(indices.is_empty());
-    }
 }

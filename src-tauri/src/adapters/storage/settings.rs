@@ -3,6 +3,7 @@
 use crate::domain::error::{AppError, AppResult};
 use super::atomic::{read_or_default, write_atomically};
 use super::paths::{content_dictionary_path, settings_path};
+use crate::domain::content::normalize_chapter_text;
 use crate::domain::settings::{AppSettings, ContentDictionaryResult};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -100,7 +101,7 @@ pub(crate) fn dictionary_size(app: &tauri::AppHandle) -> AppResult<ContentDictio
     })
 }
 
-/// 使用恢复字典替换 App 正文中的单字混淆。
+/// 使用恢复字典替换 App 正文中的单字混淆，并统一正文格式。
 ///
 /// # 参数
 /// - `app`：Tauri 应用句柄。
@@ -115,10 +116,10 @@ pub(crate) fn decode_api_content(
     is_content_encrypted: bool,
 ) -> AppResult<String> {
     if !is_content_encrypted {
-        return Ok(content.to_string());
+        return Ok(normalize_chapter_text(content));
     }
     let dictionary = load_content_dictionary(app)?;
-    Ok(content
+    let decoded = content
         .chars()
         .map(|character| {
             dictionary
@@ -126,7 +127,8 @@ pub(crate) fn decode_api_content(
                 .and_then(|value| value.chars().next())
                 .unwrap_or(character)
         })
-        .collect())
+        .collect::<String>();
+    Ok(normalize_chapter_text(&decoded))
 }
 
 /// 在策略启用外部存储时请求平台权限。

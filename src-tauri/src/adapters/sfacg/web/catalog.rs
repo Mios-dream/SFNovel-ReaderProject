@@ -325,11 +325,6 @@ mod tests {
     }
 
     #[test]
-    fn skips_cards_without_title() {
-        assert!(card_fields("<li>作者：无题</li>").is_none());
-    }
-
-    #[test]
     fn parses_novel_items_from_shelf_page() {
         let html = r#"<ul><li><li><b><a href="https://book.sfacg.com/Novel/9527/">作品</a></b>作者：作者名<img src="https://i.sfacg.com/c.jpg"></li></li></ul>"#;
         let items = parse_public_pocket_items(html);

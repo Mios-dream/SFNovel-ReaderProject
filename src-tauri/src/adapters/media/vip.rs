@@ -7,6 +7,7 @@
 use crate::adapters::ocr::recognize_image;
 use crate::adapters::sfacg::source::SfSource;
 use crate::adapters::storage::replace_file;
+use crate::domain::content::normalize_chapter_text;
 use crate::domain::error::{AppError, AppResult};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -51,7 +52,7 @@ pub(crate) async fn recognize_vip_chapter(
             .join("segments")
             .join(format!("chapter-{chapter_id}"))
     });
-    let content = recognize_image(app, image_path.clone(), segments).await?;
+    let content = normalize_chapter_text(&recognize_image(app, image_path.clone(), segments).await?);
     Ok(RecognizedVipText {
         content,
         image_path,

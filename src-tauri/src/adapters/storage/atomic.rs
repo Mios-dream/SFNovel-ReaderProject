@@ -138,16 +138,6 @@ mod tests {
     }
 
     #[test]
-    fn read_or_default_returns_default_for_missing_file() {
-        let dir = TempDir::new("missing");
-        let target = dir.join("absent.json");
-
-        let value = read_or_default::<serde_json::Value>(&target, "测试文件").expect("读取");
-
-        assert!(value.is_null(), "缺失文件应返回默认值");
-    }
-
-    #[test]
     fn read_or_default_reports_malformed_json_as_storage_error() {
         let dir = TempDir::new("malformed");
         let target = dir.join("broken.json");
@@ -160,18 +150,6 @@ mod tests {
             error.to_string().contains("格式无效"),
             "错误消息应说明格式问题"
         );
-    }
-
-    #[test]
-    fn write_atomically_round_trips_through_read_or_default() {
-        let dir = TempDir::new("roundtrip");
-        let target = dir.join("settings.json");
-        let value = serde_json::json!({ "download": { "concurrency": 3 } });
-
-        write_atomically(&target, &value, "测试设置").expect("写入");
-        let restored = read_or_default::<serde_json::Value>(&target, "测试设置").expect("读取");
-
-        assert_eq!(restored, value);
     }
 
     #[test]

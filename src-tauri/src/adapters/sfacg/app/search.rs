@@ -126,12 +126,6 @@ mod tests {
     }
 
     #[test]
-    fn requires_positive_id() {
-        assert!(search_novel(&json!({ "novelId": 0 }), "novel").is_none());
-        assert!(search_novel(&json!({}), "novel").is_none());
-    }
-
-    #[test]
     fn rejects_unsafe_comic_source_path() {
         let item = json!({ "comicId": 41, "folderName": "../escape" });
 

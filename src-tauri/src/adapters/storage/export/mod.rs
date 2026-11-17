@@ -13,6 +13,7 @@ mod txt;
 use super::book::{read_book_manifest, read_chapter_store, read_comic_chapters};
 use super::paths::local_book_directory;
 use super::settings;
+use crate::domain::content::normalize_chapter_text;
 use crate::domain::error::{AppError, AppResult};
 use crate::domain::library::{ExportFile, LibraryComicChapter, StoredChapter};
 use std::fs::{self, File};
@@ -147,6 +148,7 @@ fn load_export_data(
     let store = read_chapter_store(&directory)?;
     let mut chapters: Vec<_> = store.chapters.into_values().collect();
     chapters.sort_by_key(|chapter| (chapter.volume_index, chapter.chapter_index, chapter.id));
+    normalize_chapters(&mut chapters);
     let comic_chapters = match format {
         ExportFormat::Comic => read_comic_chapters(&directory)?,
         _ => Vec::new(),
@@ -203,6 +205,15 @@ fn has_expected_extension(path: &Path, expected: &str) -> bool {
             .extension()
             .and_then(|value| value.to_str())
             .is_some_and(|value| value.eq_ignore_ascii_case(expected))
+}
+
+/// 按阅读顺序导出前统一章节正文格式。
+///
+/// 存量书可能仍是带 CRLF 与 U+00A0 的旧格式，不统一会在纯文本里露出不可见字符。
+fn normalize_chapters(chapters: &mut [StoredChapter]) {
+    for chapter in chapters {
+        chapter.content = normalize_chapter_text(&chapter.content);
+    }
 }
 
 /// 把文件系统与打包错误统一归类为存储类错误。

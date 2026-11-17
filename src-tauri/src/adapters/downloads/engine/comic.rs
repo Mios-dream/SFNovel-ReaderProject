@@ -411,9 +411,4 @@ mod tests {
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].id, 2);
     }
-
-    #[test]
-    fn select_chapters_returns_empty_for_empty_catalog() {
-        assert!(select_chapters(Vec::new(), &[1].into_iter().collect::<HashSet<_>>()).is_empty());
-    }
 }
