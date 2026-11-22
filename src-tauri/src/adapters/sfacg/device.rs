@@ -176,15 +176,32 @@ fn save_device_state(profile: &DeviceProfile) {
 pub(crate) fn install_device_profile(profile: DeviceProfile) {
     let state = load_device_state();
     let mut profile = profile;
-    if state.device_id == profile.device_id {
-        if profile.oa_id.is_empty() {
-            profile.oa_id = state.oa_id;
-        }
-        if profile.init_channel.is_empty() {
-            profile.init_channel = state.init_channel;
-        }
+    // 落盘身份优先：导入的多端会话必须重启后仍沿用同一个设备编号。
+    if is_valid_uuid(&state.device_id) {
+        profile.device_id = state.device_id.to_lowercase();
+        profile.oa_id = state.oa_id;
+        profile.init_channel = state.init_channel;
     }
     set_device_profile(profile);
+}
+
+/// 采用其他设备导出的设备编号，并清空随旧设备登记的字段。
+///
+/// # 参数
+/// - `value`：用户粘贴或从官方 App 日志取得的设备编号。
+///
+/// # 错误
+/// 编号不是 UUID 或设备身份尚未初始化时返回错误。
+pub(crate) fn adopt_device_id(value: &str) -> AppResult<()> {
+    let device_id = value.trim().to_lowercase();
+    if !is_valid_uuid(&device_id) {
+        return Err(AppError::invalid_input("设备 ID 需为 UUID 格式"));
+    }
+    update_device_profile(|device| {
+        device.device_id = device_id;
+        device.oa_id.clear();
+        device.init_channel.clear();
+    })
 }
 
 /// 就地修改全局设备身份，并立即保存登记结果。

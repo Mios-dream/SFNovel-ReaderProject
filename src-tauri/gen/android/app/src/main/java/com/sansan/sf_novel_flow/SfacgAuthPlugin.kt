@@ -39,6 +39,9 @@ class SetAutoSigninArgs { var enabled: Boolean = false }
 @InvokeArg
 class SetPeakRefreshRateArgs { var enabled: Boolean = true }
 
+@InvokeArg
+class CopyTextArgs { lateinit var text: String }
+
 /** Bridges Android authentication state and the official login WebView to Rust. */
 @TauriPlugin(
     permissions = [
@@ -113,6 +116,36 @@ class SfacgAuthPlugin(private val activity: Activity) : Plugin(activity) {
                 .put("originUa", profile.originUa)
                 .put("webViewUA", profile.webViewUa)
         )
+    }
+
+    /**
+     * 创建并返回应用专属外部目录（`Android/data/<包名>/files`）。
+     *
+     * 这个包目录只能由系统创建：应用进程自己 mkdir 会被 FUSE 拒绝，
+     * 而 shell 建的目录属主是 shell、应用删不掉自己那份凭据。
+     */
+    @Command
+    fun ensureAppFilesDir(invoke: Invoke) {
+        val dir = activity.getExternalFilesDir(null)
+        if (dir == null) {
+            invoke.reject("无法创建应用专属外部目录")
+            return
+        }
+        invoke.resolve(JSObject().put("dir", dir.absolutePath))
+    }
+
+    /** 把纯文本写入系统剪贴板。 */
+    @Command
+    fun copyToClipboard(invoke: Invoke) {
+        try {
+            val text = invoke.parseArgs(CopyTextArgs::class.java).text
+            val manager =
+                activity.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            manager.setPrimaryClip(android.content.ClipData.newPlainText("SF Novel Flow", text))
+            invoke.resolve()
+        } catch (error: Exception) {
+            invoke.reject(error.message ?: "无法复制到剪贴板")
+        }
     }
 
     @Command

@@ -78,7 +78,10 @@ export function registerDeskLifecycle({
       .catch(() => {
         // Android 应用插件在浏览器与桌面端不可用。
       });
-    void auth.refreshAuthStatus().then(() => auth.loadAccountProfile());
+    void auth
+      .consumeDeliveredLogin()
+      .then(() => auth.refreshAuthStatus())
+      .then(() => auth.loadAccountProfile());
     void signin.announceAutoSignin();
     void updater.loadCurrentVersion();
     void settings

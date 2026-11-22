@@ -28,6 +28,26 @@ pub(crate) fn status_from_session(session: Option<&AuthSession>) -> AuthStatus {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum CredentialKind {
+    /// App 签名接口使用的会话。
+    App,
+    /// 网页、AJAX 与静态资源使用的会话。
+    Web,
+}
+
+/// 可复制到其他设备复用的登录凭据。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LoginCredentials {
+    /// 仅含对应会话键的 Cookie。
+    pub(crate) cookie: String,
+    /// 与 Cookie 配套的设备编号；网页会话不需要，为空串。
+    #[serde(default)]
+    pub(crate) device_id: String,
+}
+
 /// 已登录 SF 账户资料的安全快照。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

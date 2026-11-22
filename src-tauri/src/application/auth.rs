@@ -65,23 +65,55 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
         }
         let cookie = self.remote.login_app(username, password).await?;
         self.gateway.persist_app_session(&cookie, username).await?;
-        {
-            let mut current = self
-                .state
-                .session
-                .lock()
-                .map_err(|_| AppError::internal("登录会话状态不可用"))?;
-            let web_cookie = current.as_ref().and_then(|value| value.web_cookie.clone());
-            *current = Some(AuthSession {
-                app_cookie: Some(cookie.clone()),
-                web_cookie,
-                user_name: username.to_string(),
-            });
-        }
+        self.replace_app_cookie(&cookie, username)?;
         self.state.clear_profile_cache();
         if let Err(error) = self.remote.register_device(&cookie).await {
             log_warn!("[sfacg] device registration after login failed: {error}");
         }
+        self.status_snapshot()
+    }
+
+    /// 使用其他设备导出的 App Cookie 建立会话。
+    ///
+    /// 设备编号由调用方在建立会话前替换，因此这里只处理 Cookie 与进程内状态。
+    ///
+    /// # 参数
+    /// - `cookie`：已过滤到 App 会话键的 Cookie。
+    ///
+    /// # 错误
+    /// Cookie 为空或会话持久化失败时返回错误。
+    pub(crate) async fn login_with_cookie(&self, cookie: &str) -> AppResult<AuthStatus> {
+        if cookie.trim().is_empty() {
+            return Err(AppError::invalid_input("请粘贴 App 登录 Cookie"));
+        }
+        self.gateway
+            .persist_app_session(cookie, "已登录 SF 账号")
+            .await?;
+        self.replace_app_cookie(cookie, "已登录 SF 账号")?;
+        self.state.clear_profile_cache();
+        self.status_snapshot()
+    }
+
+    /// 使用其他设备导出的 Web Cookie 建立会话。
+    ///
+    /// 与 App 会话互不影响：已有 App 会话时只替换 Web 一侧。
+    ///
+    /// # 参数
+    /// - `cookie`：已过滤到网页会话键的 Cookie。
+    ///
+    /// # 错误
+    /// Cookie 为空或会话持久化失败时返回错误。
+    pub(crate) async fn login_with_web_cookie(&self, cookie: &str) -> AppResult<AuthStatus> {
+        if cookie.trim().is_empty() {
+            return Err(AppError::invalid_input("请粘贴网页登录 Cookie"));
+        }
+        self.gateway.persist_web_session(cookie).await?;
+        self.merge_web_session(AuthSession {
+            app_cookie: None,
+            web_cookie: Some(cookie.to_string()),
+            user_name: "已登录 SF 账号".to_string(),
+        })?;
+        self.state.clear_profile_cache();
         self.status_snapshot()
     }
 
@@ -230,6 +262,29 @@ impl<'a, R: RemoteGateway, G: AuthGateway> AuthService<'a, R, G> {
     /// 会话互斥锁不可用时返回内部错误。
     fn status_snapshot(&self) -> AppResult<AuthStatus> {
         self.state.status()
+    }
+
+    /// 用新的 App Cookie 建立进程内会话，并保留仍然存在的 Web 会话。
+    ///
+    /// # 参数
+    /// - `cookie`：App 会话 Cookie。
+    /// - `user_name`：登录后展示的名称，取得账户资料后会被昵称替换。
+    ///
+    /// # 错误
+    /// 会话互斥锁不可用时返回内部错误。
+    fn replace_app_cookie(&self, cookie: &str, user_name: &str) -> AppResult<()> {
+        let mut current = self
+            .state
+            .session
+            .lock()
+            .map_err(|_| AppError::internal("登录会话状态不可用"))?;
+        let web_cookie = current.as_ref().and_then(|value| value.web_cookie.clone());
+        *current = Some(AuthSession {
+            app_cookie: Some(cookie.to_string()),
+            web_cookie,
+            user_name: user_name.to_string(),
+        });
+        Ok(())
     }
 
     /// 整体替换进程内会话。

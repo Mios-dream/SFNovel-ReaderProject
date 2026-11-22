@@ -44,6 +44,8 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            // 真机调试需要与已安装的 release 包同签名才能覆盖安装、保留会话。
+            signingConfig = signingConfigs.getByName("release")
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true

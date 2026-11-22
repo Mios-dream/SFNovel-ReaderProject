@@ -549,7 +549,7 @@ watch(
       <button
         v-if="onlineNeedsAuth"
         type="button"
-        @click="auth.openCredentials('official')"
+        @click="auth.openCredentials()"
       >
         连接网站登录
       </button>
@@ -787,7 +787,7 @@ watch(
       <button
         v-if="onlineNeedsAuth"
         type="button"
-        @click="auth.openCredentials('official')"
+        @click="auth.openCredentials()"
       >
         连接网站登录
       </button>

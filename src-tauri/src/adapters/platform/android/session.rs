@@ -61,6 +61,25 @@ pub(crate) async fn persist_app_session(app: &tauri::AppHandle, cookie: &str) ->
     .map(|_| ())
 }
 
+/// 将 Web Cookie 写入平台的 Cookie 罐。
+///
+/// 网页会话存放在 WebView 的 CookieManager 里，写回后网页请求与网页登录
+/// 读到的是同一份会话。
+///
+/// # 参数
+/// - `app`：Tauri 应用句柄。
+/// - `cookie`：待保存的 Web Cookie。
+pub(crate) async fn persist_web_session(app: &tauri::AppHandle, cookie: &str) -> AppResult<()> {
+    call_auth::<Value, _>(
+        app,
+        "writeSessionCookie",
+        serde_json::json!({ "cookie": cookie }),
+        "无法保存 Android 网站会话",
+    )
+    .await
+    .map(|_| ())
+}
+
 /// 清除全部平台会话。
 ///
 /// # 参数

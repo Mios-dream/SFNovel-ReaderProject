@@ -1,10 +1,12 @@
 //! Android 认证与 OCR 原生插件。
 //!
-//! 按职责拆分：`session` 负责会话读写与自动签到开关，`device` 负责设备身份采集，
-//! `login` 负责官方登录窗口，`storage` 负责外部存储与导出落盘，`power` 负责后台运行
-//! 权限（应用设置入口、通知权限、电池优化白名单），`display` 负责窗口刷新率，
-//! `ocr` 负责正文识别，`signin` 承载 Java 侧自动签到的 JNI 入口。
+//! 按职责拆分：`session` 负责会话读写与自动签到开关，`clipboard` 负责剪贴板写入，
+//! `device` 负责设备身份采集，`login` 负责官方登录窗口，
+//! `storage` 负责外部存储与导出落盘，`power` 负责后台运行权限（应用设置入口、通知权限、
+//! 电池优化白名单），`display` 负责窗口刷新率，`ocr` 负责正文识别，`signin` 承载 Java
+//! 侧自动签到的 JNI 入口。
 
+mod clipboard;
 mod device;
 mod display;
 mod login;
@@ -20,6 +22,7 @@ use serde::Serialize;
 use tauri::plugin::{PluginHandle, TauriPlugin};
 use tauri::Manager;
 
+pub(crate) use clipboard::copy_to_clipboard;
 pub(super) use device::initialize_device_identity;
 pub(crate) use display::configure_peak_refresh_rate;
 pub(crate) use login::start_official_login;
@@ -30,10 +33,11 @@ pub(crate) use power::{
 };
 pub(crate) use session::{
     clear_app_session, clear_session, clear_web_session, configure_auto_signin,
-    persist_app_session, synchronize_session,
+    persist_app_session, persist_web_session, synchronize_session,
 };
 pub(crate) use storage::{
-    ensure_external_storage_access, open_download_directory, write_export_to_uri,
+    ensure_app_files_dir, ensure_external_storage_access, open_download_directory,
+    write_export_to_uri,
 };
 
 /// 认证插件在进程内的注册状态。

@@ -34,6 +34,23 @@ pub(crate) async fn ensure_external_storage_access(app: &tauri::AppHandle) -> Ap
     Ok(granted)
 }
 
+/// 让系统创建应用专属外部目录（`Android/data/<包名>/files`）。
+///
+/// 只能由 `getExternalFilesDir` 创建：应用进程自己 `mkdir` 这个包目录会被 FUSE
+/// 拒绝（EACCES），而 shell 建的目录属主是 shell，应用反而删不掉自己那份凭据。
+/// 电脑端脚本投递登录凭据到这里，所以启动时确保目录存在。
+///
+/// # 参数
+/// - `app`：Tauri 应用句柄。
+///
+/// # 错误
+/// 系统拒绝创建目录时返回存储类错误。
+pub(crate) async fn ensure_app_files_dir(app: &tauri::AppHandle) -> AppResult<()> {
+    call_auth::<Value, _>(app, "ensureAppFilesDir", (), "无法创建应用专属目录")
+        .await
+        .map(|_| ())
+}
+
 /// 在系统文件管理器中打开下载目录。
 ///
 /// # 参数

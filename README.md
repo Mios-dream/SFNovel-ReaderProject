@@ -41,6 +41,10 @@
 
 ## ✨ 核心特性
 
+### 🔑 多端登录
+
+同一账号实现多端登录（可与官方登录共存），见 **[docs/MULTI-DEVICE-LOGIN.md](docs/MULTI-DEVICE-LOGIN.md)**。
+
 ### 🔎 作品发现
 
 - **作品搜索** - 按书名、作者或关键词搜索菠萝包轻小说作品
@@ -68,13 +72,6 @@
 - **有声播放器** - 浏览本地音轨，切换章节并连续播放
 - **作品详情** - 统一查看作者、简介、封面、文字章节和音频资源
 - **多格式导出** - 文字可导出 EPUB、TXT、Markdown ZIP；有声内容可导出 ZIP
-
-### 👤 账号与请求管理
-
-- **双入口登录** - 支持账号密码连接 App，也支持在官方网页窗口完成登录
-- **书架同步** - 查看、刷新已登录 SF 账号的个人书架，并按分类浏览
-- **会话保护** - 密码不会传入前端或写入应用数据；Windows 会话以当前用户 DPAPI 保护后持久化
-- **请求策略** - 自定义请求间隔和最大并发下载数
 
 ## 🎨 项目截图
 
@@ -150,8 +147,6 @@ Android 开发还需要 Android Studio、Android SDK、JDK 和对应的 Tauri An
 
 ## ⚙️ 应用数据与配置
 
-书库、下载任务、应用设置、正文恢复字典和登录会话均由原生端保存在操作系统的应用数据目录中，而非项目根目录的 `config.json`。应用会自行创建和维护这些文件；请通过界面的应用设置与下载功能调整用户配置。
-
 登录会话不会暴露给 Vue 渲染层。Windows 使用当前用户的 DPAPI 加密保存会话；退出登录会清除持久化会话。请勿手动分享应用数据目录中的文件。
 
 ## 📂 项目结构
@@ -160,7 +155,8 @@ Android 开发还需要 Android Studio、Android SDK、JDK 和对应的 Tauri An
 SF Novel Flow/
 ├── docs/
 │   ├── image/                  # README 头图和界面截图
-│   └── ANDROID-DEVICE-DEBUGGING.md # Android 真机调试记录
+│   ├── ANDROID-DEVICE-DEBUGGING.md # Android 真机调试记录
+│   └── MULTI-DEVICE-LOGIN.md   # 多端登录使用说明
 ├── src/                        # Vue 3 渲染层
 │   ├── components/             # 登录、章节选择、队列、导出和设置组件
 │   ├── composables/            # 前端状态与 Tauri 命令调用
@@ -175,6 +171,7 @@ SF Novel Flow/
 │   ├── capabilities/           # Tauri 权限配置
 │   ├── icons/                  # 桌面与移动端图标
 │   └── tauri.conf.json         # Tauri 构建与打包配置
+├── scripts/                    # 辅助脚本
 ├── vite.config.ts              # Tauri 开发模式使用的 Vite 配置
 └── package.json                # 前端依赖与 Tauri 脚本
 ```

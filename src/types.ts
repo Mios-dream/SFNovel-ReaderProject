@@ -219,6 +219,14 @@ export type AuthStatus = {
   userName?: string;
 };
 export type BrowserLoginStatus = AuthStatus & { waiting?: boolean };
+/** 登录凭据归属的会话；两种 Cookie 不能互换。 */
+export type CredentialKind = "app" | "web";
+
+export type LoginCredentials = {
+  cookie: string;
+  /** 网页会话不需要设备编号，为空串。 */
+  deviceId: string;
+};
 export type UserProfile = {
   accountId: number;
   nickName: string;

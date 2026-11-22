@@ -100,7 +100,9 @@ impl AuthGateway for NativeAuthGateway {
     async fn persist_web_session(&self, cookie: &str) -> AppResult<()> {
         #[cfg(target_os = "windows")]
         windows::persist_web_session(&self.app, cookie)?;
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "android")]
+        android::persist_web_session(&self.app, cookie).await?;
+        #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
         let _ = cookie;
         Ok(())
     }

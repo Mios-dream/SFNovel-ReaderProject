@@ -52,6 +52,8 @@ const updater = useUpdater();
     :busy="auth.loginBusy.value"
     @close="auth.credentialsOpen.value = false"
     @login="auth.login"
+    @login-with-cookie="auth.loginWithCookie"
+    @copy-credentials="auth.copyCredentials"
     @browser-login="auth.browserLogin"
     @logout="auth.logout"
     @logout-app="auth.logoutApp"

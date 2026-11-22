@@ -22,6 +22,7 @@ src-tauri/gen/android/keystore.properties
 src-tauri/gen/android/*.jks
 src-tauri/gen/android/*.keystore
 src-tauri/ocr-worker/segments/*
+scripts/tools
 
 # Editor directories and files
 .vscode

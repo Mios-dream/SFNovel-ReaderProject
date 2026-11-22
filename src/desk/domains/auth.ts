@@ -1,15 +1,42 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { AuthStatus, UserProfile } from "../../types";
+import type {
+  AuthStatus,
+  CredentialKind,
+  LoginCredentials,
+  UserProfile,
+} from "../../types";
 import { nativeErrorMessage } from "../../utils/native";
+import {
+  credentialKind,
+  formatLoginCredentials,
+  parseLoginCredentials,
+} from "../../utils/credentials";
 import type { Notify } from "../../composables/useToast";
 
 const ACCOUNT_PROFILE_CACHE_MS = 5 * 60 * 1000;
 
+/**
+ * 写入系统剪贴板。
+ *
+ * WebView 的异步剪贴板在部分 Android 版本不可用，失败时交给原生实现。
+ */
+async function writeClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    await invoke("copy_to_clipboard", { text });
+  }
+}
+
 export function createAuthDesk(notify: Notify) {
-  const auth = ref<AuthStatus>({ authenticated: false, appAuthenticated: false, webAuthenticated: false });
+  const auth = ref<AuthStatus>({
+    authenticated: false,
+    appAuthenticated: false,
+    webAuthenticated: false,
+  });
   const credentialsOpen = ref(false);
-  const credentialsTab = ref<"official" | "password">("official");
+  const credentialsTab = ref<CredentialKind>("app");
   const accountOpen = ref(false);
   const signinOpen = ref(false);
   const accountProfile = ref<UserProfile>();
@@ -57,7 +84,10 @@ export function createAuthDesk(notify: Notify) {
         return true;
       } catch (error) {
         clearAccountProfileCache();
-        accountProfileError.value = nativeErrorMessage(error, "读取账户资料失败");
+        accountProfileError.value = nativeErrorMessage(
+          error,
+          "读取账户资料失败",
+        );
         await refreshAuthStatus();
         return false;
       } finally {
@@ -88,6 +118,85 @@ export function createAuthDesk(notify: Notify) {
     }
   }
 
+  /**
+   * 用其他设备复制的凭据建立会话。
+   *
+   * @param payload 复制来的凭据 JSON；类型由 Cookie 里的会话键决定，粘贴在哪个
+   * 页签都一样。
+   *
+   * 登录成功后把页签挪到凭据真正落到的那一侧：用户可能在「网站登录」里粘了一份
+   * App 凭据，停在原页签只会看到「未连接」。
+   */
+  async function loginWithCookie(payload: string) {
+    const { cookie, deviceId } = parseLoginCredentials(payload);
+    if (!cookie) {
+      notify("请粘贴导出的登录凭据 JSON");
+      return;
+    }
+    const kind = credentialKind(cookie);
+    if (!kind) {
+      notify("Cookie错误，无法判断登录类型", "warning");
+      return;
+    }
+    loginBusy.value = true;
+    try {
+      auth.value = await invoke<AuthStatus>("login_with_cookie", {
+        cookie,
+        deviceId,
+      });
+      if (!(await loadAccountProfile(true))) {
+        notify(
+          accountProfileError.value || "登录凭据已失效，请重新获取",
+          "error",
+        );
+        return;
+      }
+      credentialsTab.value = kind;
+      notify(kind === "web" ? "网站登录已连接" : "App 登录已连接");
+    } catch (error) {
+      notify(nativeErrorMessage(error, "凭据登录失败"), "error");
+    } finally {
+      loginBusy.value = false;
+    }
+  }
+
+  /**
+   * 消费电脑端脚本投递的登录凭据。
+   *
+   * 脚本把凭据写进应用专属目录后冷启动应用，这里解析一次并建立登录；
+   * 文件无论成败都会被原生侧删除，因此只在启动时调用。
+   */
+  async function consumeDeliveredLogin() {
+    try {
+      if (await invoke<boolean>("consume_delivered_login")) {
+        notify("已从官方 App 同步登录");
+      }
+    } catch (error) {
+      notify(nativeErrorMessage(error, "同步登录失败"), "error");
+    }
+  }
+
+  /**
+   * 复制当前会话的登录凭据。
+   *
+   * @param kind 要导出的会话：网站凭据只含网页 Cookie，App 凭据带配套设备编号。
+   *
+   * Cookie 与设备编号必须配套，所以合并成一段 JSON 一次复制：另一台设备粘贴一次
+   * 即可，字段边界明确，也不会被 Cookie 里的空格或分号切错。
+   */
+  async function copyCredentials(kind: CredentialKind) {
+    try {
+      const credentials = await invoke<LoginCredentials>(
+        "get_login_credentials",
+        { kind },
+      );
+      await writeClipboard(formatLoginCredentials(credentials));
+      notify(kind === "web" ? "网站登录凭据已复制" : "App 登录凭据已复制");
+    } catch (error) {
+      notify(nativeErrorMessage(error, "复制失败"), "error");
+    }
+  }
+
   async function browserLogin() {
     loginBusy.value = true;
     try {
@@ -113,7 +222,11 @@ export function createAuthDesk(notify: Notify) {
   async function logout() {
     try {
       await invoke<void>("logout");
-      auth.value = { authenticated: false, appAuthenticated: false, webAuthenticated: false };
+      auth.value = {
+        authenticated: false,
+        appAuthenticated: false,
+        webAuthenticated: false,
+      };
       accountOpen.value = false;
       signinOpen.value = false;
       credentialsOpen.value = false;
@@ -176,14 +289,14 @@ export function createAuthDesk(notify: Notify) {
     signinOpen.value = true;
   }
 
-  function openCredentials(tab: "official" | "password" = "official") {
+  function openCredentials(tab: CredentialKind = "app") {
     signinOpen.value = false;
     credentialsTab.value = tab;
     credentialsOpen.value = true;
   }
 
   function openAppCredentials() {
-    openCredentials("password");
+    openCredentials("app");
   }
 
   /**
@@ -209,6 +322,9 @@ export function createAuthDesk(notify: Notify) {
     refreshAuthStatus,
     loadAccountProfile,
     login,
+    loginWithCookie,
+    consumeDeliveredLogin,
+    copyCredentials,
     browserLogin,
     logout,
     logoutApp,
